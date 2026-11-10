@@ -1,0 +1,27 @@
+[package]
+name = "rak"
+version = "0.1.0-alpha.1"
+edition = "2021"
+license = "MIT"
+description = "Rust Agent Kit: a small coding agent for the terminal, for Linux, macOS and Windows."
+rust-version = "1.87"
+
+[lib]
+name = "rak"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rak"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
