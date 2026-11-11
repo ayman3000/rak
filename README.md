@@ -42,7 +42,7 @@ Builds: Linux on x86-64 and ARM (static, so they run on any distribution), and m
 
 The macOS builds are not notarized by Apple. Installed with the script they run as they are; a build downloaded in a web browser is held back by macOS until you run `xattr -d com.apple.quarantine rak`.
 
-With Rust 1.87 or newer, from source:
+With Rust 1.88 or newer, from source:
 
 ```bash
 cargo install --git https://github.com/ayman3000/rak

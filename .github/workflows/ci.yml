@@ -29,11 +29,11 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
-  # Cargo.toml promises Rust 1.87 or newer.
+  # Cargo.toml promises Rust 1.88 or newer.
   oldest-rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rust 1.87
-        run: rustup toolchain install 1.87 --profile minimal && rustup default 1.87
+      - name: Rust 1.88
+        run: rustup toolchain install 1.88 --profile minimal && rustup default 1.88
       - run: cargo check --all-targets --locked
