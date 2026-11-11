@@ -67,11 +67,13 @@ pub struct Ctx {
     pub any_path: bool,
     /// Files read or written in this run, with their modification time then.
     seen: Mutex<HashMap<PathBuf, Option<SystemTime>>>,
+    /// Set by Ctrl-C: a running command is killed and the request ends.
+    pub stop: crate::interrupt::Stop,
 }
 
 impl Ctx {
     pub fn new(cwd: &Path, any_path: bool) -> Arc<Self> {
-        Arc::new(Ctx { cwd: real_path(cwd), any_path, seen: Mutex::new(HashMap::new()) })
+        Arc::new(Ctx { cwd: real_path(cwd), any_path, seen: Mutex::new(HashMap::new()), stop: Default::default() })
     }
 
     /// `~` expanded, relative paths joined to the project folder, `.` and `..`

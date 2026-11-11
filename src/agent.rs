@@ -1,6 +1,7 @@
 //! The agent loop: ask the model, run the tools it calls, give it the results,
 //! repeat until it answers without calling a tool.
 
+use crate::interrupt::Stop;
 use crate::provider::{Model, ModelError, Reply, Usage};
 use crate::tools::{definition, Tool};
 use serde_json::{json, Value};
@@ -31,6 +32,8 @@ pub enum Outcome {
     Refused { tool: String },
     /// The model kept making the same call with the same result.
     Loop,
+    /// The person stopped the request (Ctrl-C).
+    Stopped,
     Failed(String),
 }
 
@@ -44,12 +47,16 @@ pub struct RunResult {
 pub enum Event<'a> {
     ModelCalled { turn: usize, usage: Usage, millis: u128 },
     Retrying { attempt: usize, error: &'a str },
-    /// Text the model wrote alongside tool calls.
+    /// A piece of the model's text as it arrives (only when `stream` is on).
+    Delta(&'a str),
+    /// Text the model wrote alongside tool calls, whole.
     Text(&'a str),
     ToolStarted { name: &'a str, args: &'a Value },
     ToolFinished { name: &'a str, ok: bool, denied: bool, text: &'a str, millis: u128 },
     Note(&'a str),
 }
+
+const STOP_NOTE: &str = "Not run: the user stopped the request.";
 
 pub const REFUSAL_NOTE: &str = "Not run: the user said no to this. Do not retry it and do not do the same \
     thing another way. Wait for the user's next message.";
@@ -73,6 +80,12 @@ pub struct Agent {
     pub usage: Usage,
     pub tool_calls: usize,
     pub retry_base: Duration,
+    /// Ask the model for its text piece by piece and pass each on as `Event::Delta`.
+    pub stream: bool,
+    /// Set from outside (Ctrl-C) to end the request at the next step.
+    pub stop: Stop,
+    /// Input tokens of the latest model call: how full the context is.
+    pub last_prompt_tokens: u64,
     approve: Box<dyn FnMut(&str, &Value) -> Approval>,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -88,6 +101,9 @@ impl Agent {
             usage: Usage::default(),
             tool_calls: 0,
             retry_base: Duration::from_secs(1),
+            stream: false,
+            stop: Stop::new(),
+            last_prompt_tokens: 0,
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -106,6 +122,34 @@ impl Agent {
         self.tools.iter().map(|t| t.name()).collect()
     }
 
+    pub fn tools(&self) -> &[Box<dyn Tool>] {
+        &self.tools
+    }
+
+    /// Another model from here on; the conversation so far comes along.
+    pub fn set_model(&mut self, model: Box<dyn Model>) {
+        self.model = model;
+    }
+
+    /// The model's context window in tokens, once it is known.
+    pub fn set_context_window(&mut self, tokens: usize) {
+        self.config.context_window = tokens;
+    }
+
+    /// Forget the conversation; the standing instructions stay.
+    pub fn clear(&mut self) {
+        self.messages.truncate(1);
+        self.last_prompt_tokens = 0;
+    }
+
+    fn stopped(&mut self, turn: usize) -> RunResult {
+        // Keep the conversation well formed for the next request.
+        if self.messages.last().is_some_and(|m| m["role"] == "user") {
+            self.messages.push(json!({ "role": "assistant", "content": "(stopped by the user)" }));
+        }
+        RunResult { outcome: Outcome::Stopped, answer: String::new(), turns: turn }
+    }
+
     pub fn run(&mut self, task: &str) -> RunResult {
         self.messages.push(json!({ "role": "user", "content": task }));
         let definitions: Vec<Value> = self.tools.iter().map(|t| definition(t.as_ref())).collect();
@@ -118,8 +162,12 @@ impl Agent {
             if dropped > 0 {
                 (self.on_event)(&Event::Note(&format!("context is filling up: dropped {dropped} old tool outputs")));
             }
+            if self.stop.requested() {
+                return self.stopped(turn);
+            }
             let reply = match self.call_model(turn, &definitions) {
                 Ok(r) => r,
+                Err(_) if self.stop.requested() => return self.stopped(turn),
                 Err(e) => return RunResult { outcome: Outcome::Failed(e), answer: String::new(), turns: turn },
             };
 
@@ -145,6 +193,8 @@ impl Agent {
             for call in &reply.tool_calls {
                 let mut result = if refused.is_some() {
                     (false, REFUSAL_NOTE.to_string())
+                } else if self.stop.requested() {
+                    (false, STOP_NOTE.to_string())
                 } else {
                     self.run_tool(&call.name, &call.arguments, &mut refused)
                 };
@@ -163,6 +213,9 @@ impl Agent {
             }
             if let Some(tool) = refused {
                 return RunResult { outcome: Outcome::Refused { tool }, answer: String::new(), turns: turn };
+            }
+            if self.stop.requested() {
+                return self.stopped(turn);
             }
             if repeated.1 >= LOOP_STOP {
                 return RunResult { outcome: Outcome::Loop, answer: String::new(), turns: turn };
@@ -192,14 +245,21 @@ impl Agent {
         let mut attempt = 0;
         loop {
             let started = Instant::now();
-            match self.model.chat(&self.messages, definitions) {
+            let result = if self.stream {
+                let on_event = &mut self.on_event;
+                self.model.chat_stream(&self.messages, definitions, &mut |piece| on_event(&Event::Delta(piece)))
+            } else {
+                self.model.chat(&self.messages, definitions)
+            };
+            match result {
                 Ok(reply) => {
+                    self.last_prompt_tokens = reply.usage.input;
                     self.usage.input += reply.usage.input;
                     self.usage.output += reply.usage.output;
                     (self.on_event)(&Event::ModelCalled { turn, usage: reply.usage, millis: started.elapsed().as_millis() });
                     return Ok(reply);
                 }
-                Err(ModelError::Retryable(message)) if attempt < MAX_RETRIES => {
+                Err(ModelError::Retryable(message)) if attempt < MAX_RETRIES && !self.stop.requested() => {
                     attempt += 1;
                     (self.on_event)(&Event::Retrying { attempt, error: &message });
                     std::thread::sleep((self.retry_base * 2u32.pow(attempt as u32 - 1)).min(MAX_RETRY_BACKOFF));
@@ -498,5 +558,48 @@ mod tests {
         assert!(p.contains("READ-ONLY mode"));
         assert!(p.ends_with("Run `make check` before finishing."));
         assert!(!system_prompt(Path::new("/w"), false, None).contains("READ-ONLY"));
+    }
+
+    #[test]
+    fn a_stop_request_ends_the_run_and_answers_every_call() {
+        let mut s = setup(
+            "stop",
+            vec![Ok(calls(vec![("list_dir", json!({ "path": "." })), ("list_dir", json!({ "path": "." }))])), Ok(text("never"))],
+            10,
+        );
+        // Ctrl-C arrives while the first tool is running.
+        let stop = s.agent.stop.clone();
+        s.agent.on_event(move |event| {
+            if matches!(event, Event::ToolFinished { .. }) {
+                stop.request();
+            }
+        });
+        let result = s.agent.run("look");
+        assert_eq!(result.outcome, Outcome::Stopped);
+        assert_eq!(s.seen.borrow().len(), 1, "no model call after the stop");
+        let tool_results: Vec<&Value> = s.agent.messages.iter().filter(|m| m["role"] == "tool").collect();
+        assert_eq!(tool_results.len(), 2, "each call needs its result or the next request is malformed");
+        assert!(tool_results[1]["content"].as_str().unwrap().contains("stopped"));
+        let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn streamed_text_arrives_as_deltas_and_clear_forgets_the_conversation() {
+        let mut s = setup("stream", vec![Ok(text("All done."))], 5);
+        s.agent.stream = true;
+        let heard = Rc::new(RefCell::new(String::new()));
+        let sink = heard.clone();
+        s.agent.on_event(move |event| {
+            if let Event::Delta(piece) = event {
+                sink.borrow_mut().push_str(piece);
+            }
+        });
+        let result = s.agent.run("go");
+        assert_eq!(result.answer, "All done.");
+        assert_eq!(*heard.borrow(), "All done.");
+        assert_eq!(s.agent.last_prompt_tokens, 10);
+        s.agent.clear();
+        assert_eq!(s.agent.messages.len(), 1);
+        let _ = std::fs::remove_dir_all(&s.dir);
     }
 }

@@ -49,18 +49,68 @@ export RAK_BASE_URL=https://openrouter.ai/api/v1
 export RAK_API_KEY=...
 rak -m some/model "add a --verbose flag to the CLI"
 
-# No task: a plain chat, one request per line
+# No task: a chat
 rak -m kimi-k2.6:cloud
 ```
 
+## Chat
+
+Started without a task, rak opens a chat with the same interface as sak:
+
+```
+╭─ rak 0.1.0-alpha.1 ───────────────────────────────────────────────────────────────────────╮
+│ ██████   █████  ██   ██            │ Tools                                                │
+│ ██   ██ ██   ██ ██  ██             │ files  list_dir, search_files, read_file,            │
+│ ██████  ███████ █████              │        edit_file, write_file                         │
+│ ██   ██ ██   ██ ██  ██             │ shell  run_shell                                     │
+│ ██   ██ ██   ██ ██   ██            │                                                      │
+│ a coding agent for your terminal   │                                                      │
+│                                    │                                                      │
+│ model   kimi-k2.6:cloud            │                                                      │
+│ via     localhost:11434            │                                                      │
+│ folder  ~/projects/shop            │                                                      │
+│ branch  main                       │                                                      │
+│ mode    asks before changes        │                                                      │
+│ window  262K tokens                │                                                      │
+│                                                                                           │
+│ 6 tools · /help for commands · Ctrl-C stops a request · Ctrl-D quits                      │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯
+
+── kimi-k2.6:cloud · ctx 1.8K/262K ▰▱▱▱▱▱▱▱▱▱ 1% · shop (main) · asks before changes ────────
+❯ /mo
+❯ /model [name]  show or switch the model (no name: pick from a list)
+  /models        list the models the server offers
+```
+
+- **The rule above the prompt** shows the model, how full its context is, the folder and branch, and the mode.
+- **Type `/`** for the commands. The list narrows as you type; ↑ and ↓ choose, Tab completes, Enter runs, Esc closes it.
+- **Answers appear as they are written**, with Markdown shown as headings, bullets and code rather than as symbols.
+- **Ctrl-C stops a request** — the answer being written, or a command that is running — and keeps the chat. A second Ctrl-C quits.
+- **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
+- **No model named?** rak uses the one you last picked with `/model`, or lists the server's models to pick from.
+
+| Command | What it does |
+|---|---|
+| `/model [name]` | Show or switch the model. Without a name: pick from a list. |
+| `/models` | List the models the server offers. |
+| `/tools` | List the tools the agent can use. |
+| `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
+| `/yes` | Turn auto-approve on or off. |
+| `/usage` | Tokens and tool calls so far, and the context window. |
+| `/clear` | Start a fresh conversation. |
+| `/help`, `/exit` | The list of commands; quit. |
+
+The history and the last model picked are kept in `~/.config/rak/`.
+
 | Option | What it does |
 |---|---|
-| `-m`, `--model NAME` | Model to use. Or set `RAK_MODEL`. |
+| `-m`, `--model NAME` | Model to use. Or set `RAK_MODEL`. A chat can start without one. |
 | `--base-url URL` | Server address. Or set `RAK_BASE_URL`. Default `http://localhost:11434/v1`. |
 | `--api-key-env NAME` | Environment variable holding the key. Default `RAK_API_KEY`, then `OPENAI_API_KEY`. |
 | `--effort LEVEL` | Reasoning effort: `low`, `medium` or `high`. |
 | `--max-tokens N` | Longest reply to ask for. |
-| `--context N` | The model's context window in tokens. Default 128000. |
+| `--context N` | The model's context window in tokens. Default: what an Ollama server reports for the model, otherwise 128000. |
+| `--no-stream` | Wait for each whole reply instead of showing it as it arrives. |
 | `-y`, `--yes` | Run every tool without asking. |
 | `--read-only` | No edits and no commands: read and report. |
 | `--any-path` | Let file tools reach outside the project folder. |
@@ -70,7 +120,9 @@ rak -m kimi-k2.6:cloud
 | `--log FILE` | Append every step to FILE as JSON lines. |
 | `-q`, `--quiet` | Only the answer. |
 
-Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4` turn limit, `5` stuck repeating a call.
+On a terminal the answer is shown as it arrives. Progress lines go to stderr, so `rak "…" > answer.txt` holds only the answer.
+
+Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4` turn limit, `5` stuck repeating a call, `130` stopped with Ctrl-C.
 
 ## Safety
 
@@ -113,15 +165,20 @@ A runnable version is in [examples/minimal.rs](examples/minimal.rs). Add your ow
 
 Compared with sak, rak does not yet have:
 
-- streaming output, Markdown rendering, the welcome panel, the `/` command menu, line editing and history
-- saved sessions (`-c` to continue)
+- saved sessions (`-c` to continue, `/save`, `/resume`)
+- Ctrl-R to search the history, and the "still running" note during a long tool call
 - MCP servers, web fetch and web search
 - native Anthropic and Gemini APIs (use an OpenAI-compatible endpoint)
 - Naseem notes and skills
 - a syntax check on written files
-- Ctrl-C handling: stopping rak mid-command can leave that command running
 
-Not yet tested: Windows, and any public benchmark. Auto mode (`-y`) has only been run inside the benchmark's containers.
+Known limits of the chat:
+
+- Ctrl-C takes effect when the model next sends something. While a model is silent (still thinking), the first Ctrl-C waits; a second one quits rak.
+- On Windows the chat falls back to plain line input: no menu, no arrow keys, no history.
+- The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
+
+Not yet tested: Windows, and any public benchmark. The chat was driven by hand on macOS only; on Linux it builds and its unit tests pass. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 
@@ -147,6 +204,6 @@ docker build -f bench/Dockerfile -t rak-bench .
 python3 bench/run.py --model kimi-k2.6:cloud --attempts 2
 ```
 
-First run, 2026-11-10, rak 0.1.0-alpha.1 with kimi-k2.6:cloud through Ollama, two attempts per task: **12/12 passed**, 530 s in total, 182K tokens in (median 13.6K per run), 44K out.
+First run, 2026-11-10, rak 0.1.0-alpha.1 (before the chat interface was added) with kimi-k2.6:cloud through Ollama, two attempts per task: **12/12 passed**, 530 s in total, 182K tokens in (median 13.6K per run), 44K out.
 
 These tasks are easy: a perfect score says the pipeline works, not how rak ranks. They are not the tasks sak was measured on, so the numbers do not compare with sak's.

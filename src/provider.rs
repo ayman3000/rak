@@ -2,7 +2,9 @@
 //! server that speaks OpenAI's chat-completions API (OpenAI, OpenRouter,
 //! Ollama, Hugging Face's router, vLLM, llama.cpp, LM Studio…).
 
+use crate::interrupt::Stop;
 use serde_json::{json, Value};
+use std::io::BufRead;
 use std::time::Duration;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -45,7 +47,20 @@ impl std::fmt::Display for ModelError {
 /// OpenAI chat-completions shape.
 pub trait Model {
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError>;
+
+    /// Like `chat`, handing over the answer's text as it arrives. A model that
+    /// cannot stream hands it over in one piece.
+    fn chat_stream(&mut self, messages: &[Value], tools: &[Value], on_text: &mut dyn FnMut(&str)) -> Result<Reply, ModelError> {
+        let reply = self.chat(messages, tools)?;
+        if !reply.content.is_empty() {
+            on_text(&reply.content);
+        }
+        Ok(reply)
+    }
 }
+
+/// What the person sees when they stop a request mid-answer.
+pub const STOPPED: &str = "stopped";
 
 pub struct OpenAICompatible {
     pub base_url: String,
@@ -55,6 +70,8 @@ pub struct OpenAICompatible {
     pub effort: Option<String>,
     /// Sent as `max_tokens` when set; otherwise the server's default applies.
     pub max_tokens: Option<u64>,
+    /// Checked between pieces of a streamed answer.
+    pub stop: Stop,
     http: ureq::Agent,
 }
 
@@ -70,6 +87,7 @@ impl OpenAICompatible {
             model: model.to_string(),
             effort: None,
             max_tokens: None,
+            stop: Stop::new(),
             http,
         }
     }
@@ -90,20 +108,15 @@ impl OpenAICompatible {
     }
 }
 
-impl Model for OpenAICompatible {
-    fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {
+impl OpenAICompatible {
+    fn post(&self, body: Value) -> Result<ureq::Response, ModelError> {
         let url = format!("{}/chat/completions", self.base_url);
         let mut request = self.http.post(&url);
         if let Some(key) = &self.api_key {
             request = request.set("Authorization", &format!("Bearer {key}"));
         }
-        match request.send_json(self.request_body(messages, tools)) {
-            Ok(response) => {
-                let body: Value = response
-                    .into_json()
-                    .map_err(|e| ModelError::Retryable(format!("unreadable reply from the model server: {e}")))?;
-                parse_reply(&body)
-            }
+        match request.send_json(body) {
+            Ok(response) => Ok(response),
             Err(ureq::Error::Status(code, response)) => {
                 let text = response.into_string().unwrap_or_default();
                 let message = format!("the model server answered {code}: {}", one_line(&text, 300));
@@ -115,6 +128,170 @@ impl Model for OpenAICompatible {
             }
             Err(ureq::Error::Transport(t)) => Err(ModelError::Retryable(format!("could not reach {url}: {t}"))),
         }
+    }
+
+    /// The model's context window in tokens, when the server is an Ollama
+    /// one and says (`POST /api/show`). None for every other server.
+    pub fn context_window(&self) -> Option<usize> {
+        let root = self.base_url.strip_suffix("/v1")?;
+        let body: Value = self
+            .http
+            .post(&format!("{root}/api/show"))
+            .timeout(Duration::from_secs(4))
+            .send_json(json!({ "model": self.model }))
+            .ok()?
+            .into_json()
+            .ok()?;
+        context_length(&body)
+    }
+
+    /// The ids of the models the server offers (`GET /models`), sorted.
+    pub fn list_models(&self) -> Result<Vec<String>, String> {
+        let url = format!("{}/models", self.base_url);
+        let mut request = self.http.get(&url).timeout(Duration::from_secs(20));
+        if let Some(key) = &self.api_key {
+            request = request.set("Authorization", &format!("Bearer {key}"));
+        }
+        let body: Value = match request.call() {
+            Ok(response) => response.into_json().map_err(|e| format!("unreadable reply from {url}: {e}"))?,
+            Err(ureq::Error::Status(code, _)) => return Err(format!("{url} answered {code}")),
+            Err(ureq::Error::Transport(t)) => return Err(format!("could not reach {url}: {t}")),
+        };
+        let mut ids: Vec<String> = body["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m["id"].as_str().map(str::to_string))
+            .collect();
+        ids.sort();
+        Ok(ids)
+    }
+}
+
+impl Model for OpenAICompatible {
+    fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {
+        let body: Value = self
+            .post(self.request_body(messages, tools))?
+            .into_json()
+            .map_err(|e| ModelError::Retryable(format!("unreadable reply from the model server: {e}")))?;
+        parse_reply(&body)
+    }
+
+    fn chat_stream(&mut self, messages: &[Value], tools: &[Value], on_text: &mut dyn FnMut(&str)) -> Result<Reply, ModelError> {
+        let mut body = self.request_body(messages, tools);
+        body["stream"] = json!(true);
+        body["stream_options"] = json!({ "include_usage": true });
+        let mut lines = std::io::BufReader::new(self.post(body)?.into_reader());
+        let mut streamed = StreamedReply::default();
+        let mut line = String::new();
+        loop {
+            if self.stop.requested() {
+                return Err(ModelError::Fatal(STOPPED.to_string()));
+            }
+            line.clear();
+            match lines.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if let Some(text) = streamed.push_line(&line)? {
+                        on_text(&text);
+                    }
+                }
+                // Text already on screen cannot be taken back, so a second try
+                // would show the answer twice.
+                Err(e) if streamed.content.is_empty() => return Err(ModelError::Retryable(format!("the answer stopped arriving: {e}"))),
+                Err(e) => return Err(ModelError::Fatal(format!("the answer stopped arriving part way: {e}"))),
+            }
+        }
+        Ok(streamed.finish())
+    }
+}
+
+/// Pure — unit-tested. The window in Ollama's description of a model: the
+/// `<family>.context_length` entry of `model_info`.
+pub fn context_length(show: &Value) -> Option<usize> {
+    show["model_info"]
+        .as_object()?
+        .iter()
+        .find(|(key, _)| key.ends_with(".context_length"))
+        .and_then(|(_, value)| value.as_u64())
+        .filter(|n| *n > 0)
+        .map(|n| n as usize)
+}
+
+/// A streamed reply being put together from its events.
+#[derive(Default)]
+pub struct StreamedReply {
+    pub content: String,
+    /// (id, name, arguments so far)
+    calls: Vec<(String, String, String)>,
+    usage: Usage,
+}
+
+impl StreamedReply {
+    /// Pure — unit-tested. Takes one line of the event stream and returns the
+    /// answer text it carried, if any.
+    pub fn push_line(&mut self, line: &str) -> Result<Option<String>, ModelError> {
+        let Some(payload) = line.trim().strip_prefix("data:").map(str::trim) else { return Ok(None) };
+        let Ok(event) = serde_json::from_str::<Value>(payload) else { return Ok(None) }; // "[DONE]", keep-alives
+        if let Some(err) = event.get("error").filter(|e| !e.is_null()) {
+            let message = err.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| err.to_string());
+            return Err(ModelError::Fatal(format!("the model server reported an error: {message}")));
+        }
+        if let Some(usage) = event.get("usage").filter(|u| u.is_object()) {
+            self.usage = Usage {
+                input: usage["prompt_tokens"].as_u64().unwrap_or(self.usage.input),
+                output: usage["completion_tokens"].as_u64().unwrap_or(self.usage.output),
+            };
+        }
+        let Some(delta) = event.pointer("/choices/0/delta") else { return Ok(None) };
+        for (position, call) in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            let id = call["id"].as_str().unwrap_or("");
+            let name = call["function"]["name"].as_str().unwrap_or("");
+            let arguments = match &call["function"]["arguments"] {
+                Value::String(s) => s.clone(),
+                Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            let mut index = call["index"].as_u64().map(|i| i as usize).unwrap_or(position);
+            // Some servers give every call index 0. A new id on a call that
+            // already has a name is a new call.
+            if let Some(existing) = self.calls.get(index) {
+                if !id.is_empty() && !existing.0.is_empty() && existing.0 != id && !existing.1.is_empty() {
+                    index = self.calls.len();
+                }
+            }
+            while self.calls.len() <= index {
+                self.calls.push(Default::default());
+            }
+            let slot = &mut self.calls[index];
+            if !id.is_empty() {
+                slot.0 = id.to_string();
+            }
+            slot.1.push_str(name);
+            slot.2.push_str(&arguments);
+        }
+        match delta.get("content").and_then(Value::as_str) {
+            Some(text) if !text.is_empty() => {
+                self.content.push_str(text);
+                Ok(Some(text.to_string()))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn finish(self) -> Reply {
+        let tool_calls = self
+            .calls
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (_, name, _))| !name.is_empty())
+            .map(|(i, (id, name, arguments))| ToolCall {
+                id: if id.is_empty() { format!("call_{i}") } else { id },
+                name,
+                arguments: if arguments.trim().is_empty() { "{}".to_string() } else { arguments },
+            })
+            .collect();
+        Reply { content: self.content, tool_calls, usage: self.usage }
     }
 }
 
@@ -208,5 +385,47 @@ mod tests {
         let body = p.request_body(&[], &[json!({"type": "function"})]);
         assert_eq!(body["reasoning_effort"], "low");
         assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_streamed_reply_is_put_together_from_its_pieces() {
+        let mut r = StreamedReply::default();
+        assert_eq!(r.push_line(": keep-alive").unwrap(), None);
+        assert_eq!(r.push_line(r#"data: {"choices":[{"delta":{"role":"assistant","content":"Look"}}]}"#).unwrap().as_deref(), Some("Look"));
+        assert_eq!(r.push_line(r#"data: {"choices":[{"delta":{"content":"ing."}}]}"#).unwrap().as_deref(), Some("ing."));
+        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}"#).unwrap();
+        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"x\"}"}}]}}]}"#).unwrap();
+        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"a2","function":{"name":"list_dir","arguments":""}}]}}]}"#).unwrap();
+        r.push_line(r#"data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":9}}"#).unwrap();
+        assert_eq!(r.push_line("data: [DONE]").unwrap(), None);
+        let reply = r.finish();
+        assert_eq!(reply.content, "Looking.");
+        assert_eq!(reply.tool_calls[0], ToolCall { id: "a1".into(), name: "read_file".into(), arguments: "{\"path\":\"x\"}".into() });
+        assert_eq!(reply.tool_calls[1], ToolCall { id: "a2".into(), name: "list_dir".into(), arguments: "{}".into() });
+        assert_eq!(reply.usage, Usage { input: 120, output: 9 });
+    }
+
+    #[test]
+    fn streamed_calls_that_all_claim_index_zero_stay_apart() {
+        let mut r = StreamedReply::default();
+        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"read_file","arguments":"{\"path\":\"x\"}"}}]}}]}"#).unwrap();
+        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"b","function":{"name":"read_file","arguments":"{\"path\":\"y\"}"}}]}}]}"#).unwrap();
+        let reply = r.finish();
+        assert_eq!(reply.tool_calls.len(), 2);
+        assert_eq!(reply.tool_calls[1].arguments, "{\"path\":\"y\"}");
+    }
+
+    #[test]
+    fn the_window_is_read_from_ollamas_model_description() {
+        let show = json!({ "model_info": { "general.architecture": "kimi", "kimi.context_length": 262144, "kimi.block_count": 40 } });
+        assert_eq!(context_length(&show), Some(262_144));
+        assert_eq!(context_length(&json!({ "model_info": {} })), None);
+        assert_eq!(context_length(&json!({ "error": "not found" })), None);
+    }
+
+    #[test]
+    fn an_error_in_the_stream_is_reported() {
+        let err = StreamedReply::default().push_line(r#"data: {"error":{"message":"overloaded"}}"#).unwrap_err();
+        assert!(matches!(err, ModelError::Fatal(m) if m.contains("overloaded")));
     }
 }

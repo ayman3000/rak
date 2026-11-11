@@ -196,6 +196,11 @@ impl RunShell {
                         Err(e) => return ToolResult::err(format!("Lost track of the command: {e}")),
                     }
                 }
+                Ok(None) if self.ctx.stop.requested() => {
+                    kill_tree(&mut child);
+                    let _ = child.wait();
+                    return ToolResult::err("Stopped by the user before it finished.");
+                }
                 Ok(None) => std::thread::sleep(Duration::from_millis(if started.elapsed() < Duration::from_millis(200) { 2 } else { 15 })),
                 Err(e) => return ToolResult::err(format!("Lost track of the command: {e}")),
             }
