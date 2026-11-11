@@ -262,7 +262,7 @@ Known limits of the chat:
 - The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
 - With Anthropic's API, trimming old tool output near a full context window changes earlier messages, which ends the cache from that point; the next call writes it again.
 
-Not yet tested: Windows, any public benchmark, and Anthropic's real API: the Anthropic provider was tested against a local stand-in that checks what rak sends (cache markers, headers, thinking blocks sent back), not with a real key. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
+Not yet tested: Windows, and any public benchmark. Anthropic's real API was tried on Claude Haiku 5.5 (2026-11-11): the first call wrote 1,514 tokens to the cache and the second read all 1,514 back, writing only the 87 new ones. Its other paths (thinking blocks sent back, refusal fallbacks) are tested against a local stand-in. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 
