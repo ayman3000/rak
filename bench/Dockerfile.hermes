@@ -1,0 +1,35 @@
+# rak's benchmark image plus Hermes Agent, so both agents run in the same
+# container image for bench/head_to_head.py --against hermes.
+#
+# The build context is a Hermes checkout (its own .dockerignore applies):
+#   docker build -f bench/Dockerfile.hermes -t rak-hermes-bench ~/.hermes/hermes-agent
+#
+# Hermes is installed the way its own Dockerfile does it, cut down: its Python
+# packages at the versions in its uv.lock, core only (no messaging, browser or
+# cloud extras), into a virtual environment of its own. Its lock needs Python
+# 3.14, which uv provides for that environment only: the image's python3, which
+# the tasks run with, stays the same for both agents.
+FROM rak-bench
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ make python3-dev python3-venv libffi-dev git curl ca-certificates procps \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/hermes
+COPY . .
+# Hermes's .dockerignore leaves out *.md; the package metadata names README.md.
+RUN touch README.md
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+RUN python3 -m venv /opt/uv && /opt/uv/bin/pip install --no-cache-dir uv \
+    && UV_PROJECT_ENVIRONMENT=/opt/hermes/.venv /opt/uv/bin/uv sync --frozen --no-dev --python 3.14
+# Only the hermes command goes on the PATH: python3 must stay the image's own.
+RUN ln -s /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes
+# Hermes refuses to run its gateway as root, so both agents run as this user.
+RUN useradd --create-home --uid 1000 agent && mkdir -p /work /logs && chown agent:agent /work /logs
+USER agent
+# Hermes's model provider: Ollama on the host machine, as a Hermes user with
+# Ollama would set it. The model is chosen per run with -m.
+RUN hermes config set model.provider ollama \
+    && hermes config set model.base_url http://host.docker.internal:11434/v1 \
+    && hermes config set model.default kimi-k2.6:cloud
+WORKDIR /work
