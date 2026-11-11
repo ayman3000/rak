@@ -57,6 +57,24 @@ rak -m some/model "add a --verbose flag to the CLI"
 rak -m kimi-k2.6:cloud
 ```
 
+### Keys
+
+rak reads its keys from the environment first, then from `./.env` in the project, then from `~/.config/rak/.env`, the first one found winning. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them.
+
+```bash
+# ~/.config/rak/.env
+ANTHROPIC_API_KEY=...
+TAVILY_API_KEY=...
+```
+
+| Key | For |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude through Anthropic's API |
+| `RAK_API_KEY`, `OPENAI_API_KEY` | a chat-completions server that needs a key |
+| `TAVILY_API_KEY` | `web_search` |
+
+The chat's welcome panel lists the `.env` files it read.
+
 ### Claude and prompt caching
 
 An agent sends the whole conversation again with every model call, so most of what it pays for is input it sent before. Prompt caching lets the server read that part back for a fraction of the price: on Anthropic's API a cache read costs a tenth of normal input, or less on the newest models.
@@ -163,6 +181,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. Checked before writing (below). |
 | `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. Checked before writing (below). |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
+| `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file` or `edit_file` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
 
@@ -231,7 +250,7 @@ Compared with sak, rak does not yet have:
 
 - saved sessions (`-c` to continue, `/save`, `/resume`)
 - Ctrl-R to search the history, and the "still running" note during a long tool call
-- web fetch and web search (an MCP server can supply them)
+- fetching a whole web page (an MCP server can supply it)
 - Gemini's own API (use an OpenAI-compatible endpoint)
 - Naseem notes and skills
 
@@ -304,7 +323,7 @@ The miss was task 1: the model fixed the three bugs the visible tests catch and 
 
 ### Head to head with sak
 
-`bench/head_to_head.py` runs rak and sak on the same six tasks with the same model on the same Mac, taking turns on every attempt. sak runs only on macOS, so neither runs in a container here. Instead each runs inside macOS's sandbox (`bench/sandbox.sb.in`): writes only to its copy of the task and its own temporary folders, network only to Ollama. Both run in auto mode with MCP off, and are graded by the same hidden tests as above.
+`bench/head_to_head.py` runs rak and sak on the same six tasks with the same model on the same Mac, taking turns on every attempt. sak runs only on macOS, so neither runs in a container here. Instead each runs inside macOS's sandbox (`bench/sandbox.sb.in`): writes only to its copy of the task and its own temporary folders, network only to Ollama. Both run in auto mode with MCP off, and are graded by the same hidden tests as above. (These runs had no Tavily key for rak, so no `web_search`; with one, rak's fixed cost per call grows by that tool's description.)
 
 ```bash
 python3 bench/head_to_head.py --model kimi-k2.6:cloud --attempts 3

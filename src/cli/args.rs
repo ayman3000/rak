@@ -36,6 +36,12 @@ MODEL
   In a chat, the model can be left out: rak uses the one picked last with
   /model, or lists the server's models to pick from.
 
+KEYS
+  Read from the environment, then ./.env in the project, then
+  ~/.config/rak/.env. Values from the files are not passed on to commands.
+  ANTHROPIC_API_KEY, RAK_API_KEY, OPENAI_API_KEY   the model server
+  TAVILY_API_KEY                                   web_search (https://tavily.com)
+
 BEHAVIOUR
   -y, --yes               run every tool without asking
       --read-only         no edits and no commands: read and report

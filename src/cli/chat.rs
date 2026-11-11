@@ -2,7 +2,7 @@
 
 use super::editor::Editor;
 use super::session::{backend, make_provider, run_one, window_for, Session};
-use super::settings::{home, save_model};
+use super::settings::{home, key_files, save_model};
 use super::style::{cut, pad, paint, Style};
 use super::welcome::grouped;
 use super::{commands, menu, term, welcome, VERSION};
@@ -29,7 +29,12 @@ pub fn banner(s: &Session) {
         branch: welcome::git_branch(&s.cwd),
         mode: mode_label(s).to_string(),
         window: s.window,
-        notes: s.notes.iter().map(|_| ("notes".to_string(), "AGENTS.md".to_string())).collect(),
+        notes: s
+            .notes
+            .iter()
+            .map(|_| ("notes".to_string(), "AGENTS.md".to_string()))
+            .chain(key_files().iter().map(|f| ("config".to_string(), welcome::short_path(&f.to_string_lossy(), &home(), 26))))
+            .collect(),
         tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
         tool_count: s.agent.tool_names().len(),
         warnings: s.mcp_problems.clone(),

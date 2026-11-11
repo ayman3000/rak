@@ -5,7 +5,7 @@ use super::args::{usage_error, Options, VERSION};
 use super::editor::Editor;
 use super::log::Log;
 use super::output::{self, Ui};
-use super::settings::{config_dir, save_model, saved_model};
+use super::settings::{config_dir, key, load_keys, save_model, saved_model};
 use super::style::{paint, Style};
 use super::{approval, chat, commands, markdown, menu, signals, welcome};
 use rak::agent::{system_prompt, Agent, Config, Outcome, RunResult};
@@ -13,6 +13,7 @@ use rak::interrupt::Stop;
 use rak::mcp;
 use rak::anthropic::Anthropic;
 use rak::provider::{Model, OpenAICompatible};
+use rak::tools::web::WebSearch;
 use rak::tools::{core_tools, Ctx};
 use serde_json::json;
 use std::cell::{Cell, RefCell};
@@ -66,7 +67,7 @@ pub fn uses_anthropic(provider: Option<&str>, base_url: Option<&str>, model: Opt
 
 /// The backend for the options and model, or why there can't be one.
 pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
-    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let env = |name: &str| key(name);
     let anthropic = uses_anthropic(o.provider.as_deref(), o.base_url.as_deref(), model, env("ANTHROPIC_API_KEY").is_some());
     let api_key = match &o.api_key_env {
         Some(name) => Some(env(name).ok_or(format!("{name} is not set"))?),
@@ -111,6 +112,7 @@ pub fn run(o: Options) -> i32 {
     if !cwd.is_dir() {
         usage_error(&format!("{} is not a folder", cwd.display()));
     }
+    load_keys(&cwd);
 
     let stdin_tty = std::io::stdin().is_terminal();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -149,6 +151,10 @@ pub fn run(o: Options) -> i32 {
     let config =
         Config { system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()), max_turns: o.max_turns, context_window: window };
     let mut tools = core_tools(&ctx, o.read_only);
+    // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
+    if let Some(tavily) = key("TAVILY_API_KEY") {
+        tools.push(Box::new(WebSearch::new(tavily)));
+    }
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
 
     // Tools from MCP servers join the built-in ones.
