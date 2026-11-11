@@ -10,6 +10,7 @@ USAGE
   rak [options] \"what to do\"      one request, then exit
   rak [options]                   chat (type / for the commands, /exit to leave)
   echo \"what to do\" | rak         the request from a pipe
+  rak keys                        set up ~/.config/rak/.env and see which keys are set
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 
 MODEL
@@ -36,9 +37,10 @@ MODEL
   In a chat, the model can be left out: rak uses the one picked last with
   /model, or lists the server's models to pick from.
 
-KEYS
+KEYS (run `rak keys` to create the key file from a template)
   Read from the environment, then ./.env in the project, then
   ~/.config/rak/.env. Values from the files are not passed on to commands.
+  RAK_MODEL, RAK_PROVIDER and RAK_BASE_URL may be set there too.
   ANTHROPIC_API_KEY, RAK_API_KEY, OPENAI_API_KEY   the model server
   TAVILY_API_KEY                                   web_search (https://tavily.com)
 

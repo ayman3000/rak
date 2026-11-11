@@ -107,12 +107,19 @@ pub fn window_for(o: &Options, provider: &dyn Model) -> (usize, &'static str) {
 
 /// Sets up a run from the options and does it: a chat, or one request.
 /// Returns the exit code.
-pub fn run(o: Options) -> i32 {
+pub fn run(mut o: Options) -> i32 {
     let cwd = o.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     if !cwd.is_dir() {
         usage_error(&format!("{} is not a folder", cwd.display()));
     }
     load_keys(&cwd);
+    // Defaults may also come from the .env files.
+    o.model = o.model.or_else(|| key("RAK_MODEL"));
+    o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
+    o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
+    if o.provider.as_deref().is_some_and(|p| p != "openai" && p != "anthropic") {
+        usage_error("RAK_PROVIDER is openai or anthropic");
+    }
 
     let stdin_tty = std::io::stdin().is_terminal();
     let stdout_tty = std::io::stdout().is_terminal();

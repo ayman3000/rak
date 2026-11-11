@@ -59,19 +59,20 @@ rak -m kimi-k2.6:cloud
 
 ### Keys
 
-rak reads its keys from the environment first, then from `./.env` in the project, then from `~/.config/rak/.env`, the first one found winning. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them.
-
 ```bash
-# ~/.config/rak/.env
-ANTHROPIC_API_KEY=...
-TAVILY_API_KEY=...
+rak keys
 ```
+
+The first time, this creates `~/.config/rak/.env` from a template ([`.env.example`](.env.example)) that lists every key rak uses, with what each is for. Open it in any editor and fill in the ones you need; leave the rest empty. After that, `rak keys` shows which keys are set and where each comes from, never the values.
+
+rak reads the environment first, then `./.env` in the project, then `~/.config/rak/.env`, the first one found winning. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them. The file is created readable by you only.
 
 | Key | For |
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude through Anthropic's API |
 | `RAK_API_KEY`, `OPENAI_API_KEY` | a chat-completions server that needs a key |
 | `TAVILY_API_KEY` | `web_search` |
+| `RAK_MODEL`, `RAK_PROVIDER`, `RAK_BASE_URL` | defaults for `-m`, `--provider` and `--base-url` (optional) |
 
 The chat's welcome panel lists the `.env` files it read.
 

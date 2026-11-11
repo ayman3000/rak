@@ -39,26 +39,53 @@ pub fn save_model(model: &str) {
 /// agent runs with run_shell never see them.
 #[derive(Default)]
 pub struct Keys {
-    values: HashMap<String, String>,
+    /// Name → (value, the file it came from).
+    values: HashMap<String, (String, PathBuf)>,
     /// The .env files read, project first.
     pub files: Vec<PathBuf>,
+}
+
+/// The template for ~/.config/rak/.env: the keys rak uses, explained.
+pub const TEMPLATE: &str = include_str!("../../.env.example");
+
+/// The keys `rak keys` reports on, and what each is for.
+pub const KNOWN: &[(&str, &str)] = &[
+    ("ANTHROPIC_API_KEY", "Claude through Anthropic's API"),
+    ("RAK_API_KEY", "a chat-completions server that needs a key"),
+    ("OPENAI_API_KEY", "a chat-completions server that needs a key"),
+    ("TAVILY_API_KEY", "web_search"),
+    ("RAK_MODEL", "the default model"),
+    ("RAK_PROVIDER", "the default provider"),
+    ("RAK_BASE_URL", "the default server address"),
+];
+
+/// rak's own key file: ~/.config/rak/.env.
+pub fn global_key_file() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join(".env"))
 }
 
 impl Keys {
     pub fn load(project: &Path) -> Keys {
         let mut keys = Keys::default();
         // Lowest priority first, so later files overwrite earlier ones.
-        let global = config_dir().map(|dir| dir.join(".env"));
-        for file in global.into_iter().chain([project.join(".env")]) {
+        for file in global_key_file().into_iter().chain([project.join(".env")]) {
             let Ok(text) = std::fs::read_to_string(&file) else { continue };
-            keys.values.extend(parse_env(&text));
+            keys.values.extend(parse_env(&text).into_iter().map(|(k, v)| (k, (v, file.clone()))));
             keys.files.insert(0, file);
         }
         keys
     }
 
     pub fn get(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok().or_else(|| self.values.get(name).cloned()).filter(|v| !v.is_empty())
+        std::env::var(name).ok().filter(|v| !v.is_empty()).or_else(|| self.values.get(name).map(|(v, _)| v.clone())).filter(|v| !v.is_empty())
+    }
+
+    /// Where a key that is set comes from: "the environment" or a file.
+    pub fn source(&self, name: &str) -> Option<String> {
+        if std::env::var(name).is_ok_and(|v| !v.is_empty()) {
+            return Some("the environment".to_string());
+        }
+        self.values.get(name).filter(|(v, _)| !v.is_empty()).map(|(_, file)| file.display().to_string())
     }
 }
 
@@ -134,11 +161,23 @@ mod tests {
     #[test]
     fn the_project_file_wins_over_the_global_one_and_empty_values_count_as_unset() {
         let mut keys = Keys::default();
-        keys.values.extend(parse_env("A=global\nB=global\n"));
-        keys.values.extend(parse_env("A=project\nC=\n"));
+        let from = |text: &str, file: &str| parse_env(text).into_iter().map(|(k, v)| (k, (v, PathBuf::from(file)))).collect::<Vec<_>>();
+        keys.values.extend(from("A=global\nB=global\n", "g"));
+        keys.values.extend(from("A=project\nC=\n", "p"));
         assert_eq!(keys.get("A").as_deref(), Some("project"));
         assert_eq!(keys.get("B").as_deref(), Some("global"));
         assert_eq!(keys.get("C"), None);
         assert_eq!(keys.get("RAK_TEST_SURELY_UNSET_KEY"), None);
+        assert_eq!(keys.source("A").as_deref(), Some("p"));
+        assert_eq!(keys.source("C"), None, "empty is not set");
+    }
+
+    #[test]
+    fn the_template_lists_every_known_key_and_sets_none() {
+        let parsed = parse_env(TEMPLATE);
+        for (name, _) in KNOWN {
+            assert!(TEMPLATE.contains(name), "{name} is missing from .env.example");
+        }
+        assert!(parsed.values().all(String::is_empty), "the template must not set anything: {parsed:?}");
     }
 }
