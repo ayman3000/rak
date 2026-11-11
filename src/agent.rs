@@ -381,6 +381,8 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
          Answer concisely; Markdown is fine (headings, bullets, code).\n\
          Make the code pass the tests, never the tests pass the code: don't edit or delete a test you were \
          asked to make pass; adding a test is fine. If a test looks wrong, say so and stop.\n\
+         Report only what happened: say you ran, tested or verified something only if a command you ran in this \
+         conversation did it, and say whether it passed. Say plainly what you could not check, and why.\n\
          Finish with a short summary of what you did.",
         cwd.display()
     );

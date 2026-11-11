@@ -260,10 +260,11 @@ pub fn wrap(names: &[String], width: usize, max_lines: usize) -> Vec<String> {
 /// Groups tool names the way the panel shows them. MCP tools go under their
 /// server, as a count: one server alone can bring dozens.
 pub fn group(tools: &[&str], mcp_servers: &[(String, usize)]) -> Vec<(String, Vec<String>)> {
-    let known: [(&str, &[&str]); 3] = [
+    let known: [(&str, &[&str]); 4] = [
         ("files", &["list_dir", "search_files", "read_file", "edit_file", "write_file"]),
         ("shell", &["run_shell"]),
         ("web", &["web_search", "fetch_url"]),
+        ("skills", &["use_skill"]),
     ];
     let mut rest: Vec<&str> = tools.to_vec();
     let mut groups = Vec::new();

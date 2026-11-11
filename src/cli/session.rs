@@ -37,6 +37,7 @@ pub struct Session {
     /// Where the window's number came from, for /usage.
     pub window_source: &'static str,
     pub notes: Option<String>,
+    pub skills: Vec<rak::skills::Skill>,
     pub requests: usize,
     /// The built-in tools' names, and what the MCP servers brought.
     pub core_tools: Vec<String>,
@@ -157,10 +158,19 @@ pub fn run(mut o: Options) -> i32 {
     let notes = std::fs::read_to_string(ctx.cwd.join("AGENTS.md")).ok().map(|n| n.chars().take(8_000).collect::<String>());
     let config =
         Config { system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()), max_turns: o.max_turns, context_window: window };
+    // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
+    let skill_folders: Vec<PathBuf> =
+        std::iter::once(ctx.cwd.join(".rak").join("skills")).chain(config_dir().map(|d| d.join("skills"))).collect();
+    let skills = rak::skills::load(&skill_folders);
+    let mut config = config;
+    config.system_prompt.push_str(&rak::skills::index(&skills));
     let mut tools = core_tools(&ctx, o.read_only);
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
         tools.push(Box::new(WebSearch::new(tavily)));
+    }
+    if !skills.is_empty() {
+        tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));
     }
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
 
@@ -221,6 +231,7 @@ pub fn run(mut o: Options) -> i32 {
         window,
         window_source,
         notes,
+        skills,
         requests: 0,
         core_tools: core_tool_names,
         mcp_servers: connected.servers,

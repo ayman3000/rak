@@ -34,6 +34,7 @@ pub fn banner(s: &Session) {
             .iter()
             .map(|_| ("notes".to_string(), "AGENTS.md".to_string()))
             .chain(key_files().iter().map(|f| ("config".to_string(), welcome::short_path(&f.to_string_lossy(), &home(), 26))))
+            .chain((!s.skills.is_empty()).then(|| ("skills".to_string(), format!("{} (/skills)", s.skills.len()))))
             .collect(),
         tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
         tool_count: s.agent.tool_names().len(),
@@ -213,6 +214,17 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             }
             for problem in &s.mcp_problems {
                 println!("  {}", paint(color, Style::Yellow, problem));
+            }
+        }
+        "skills" => {
+            if s.skills.is_empty() {
+                println!("{}", dim("No skills. A skill is a Markdown file of know-how the agent loads when a task needs it:"));
+                println!("{}", dim("  .rak/skills/NAME.md in a project, or ~/.config/rak/skills/NAME.md for every project."));
+                println!("{}", dim("  It starts with \"# Name\" and a \"Description:\" line; folders with a SKILL.md work too."));
+            }
+            for skill in &s.skills {
+                println!("  {}  {}", paint(color, Style::Cyan, &skill.name), dim(&cut(&skill.description, 90)));
+                println!("    {}", dim(&welcome::short_path(&skill.file.to_string_lossy(), &home(), 70)));
             }
         }
         "notes" => match &s.notes {

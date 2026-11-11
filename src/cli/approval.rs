@@ -37,9 +37,20 @@ pub fn answer(typed: &str, has_server: bool) -> Answer {
 }
 
 /// Pure — unit-tested. The question, for `name` called with `args`.
+/// A shell command is shown whole, line breaks kept: nobody should approve a
+/// command they could only read the start of. Other tools get their short
+/// description.
 pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
     let scope = server.map(|s| format!("  [s] all {s} tools")).unwrap_or_default();
-    format!("? allow {}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ", describe(name, args))
+    let what = match (name, args.get("command").and_then(Value::as_str)) {
+        ("run_shell", Some(command)) => {
+            let background = if args.get("background") == Some(&Value::Bool(true)) { " (in the background)" } else { "" };
+            let lines: Vec<String> = command.trim_end().lines().map(|l| format!("    {l}")).collect();
+            format!("run_shell{background}:\n{}", lines.join("\n"))
+        }
+        _ => describe(name, args),
+    };
+    format!("? allow {what}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ")
 }
 
 /// What the prompt needs to know.
@@ -114,6 +125,18 @@ mod tests {
         let args = json!({ "command": "ls" });
         assert!(!question("run_shell", &args, None).contains("[s]"));
         assert!(question("files__write", &args, Some("files")).contains("[s] all files tools"));
-        assert!(question("run_shell", &args, None).starts_with("? allow run_shell ls\n"));
+        assert!(question("run_shell", &args, None).starts_with("? allow run_shell:\n    ls\n"));
+    }
+
+    #[test]
+    fn a_long_or_multi_line_command_is_shown_whole() {
+        let long = format!("echo {}", "x".repeat(300));
+        assert!(question("run_shell", &json!({ "command": long }), None).contains(&"x".repeat(300)));
+        let script = json!({ "command": "mkdir -p Build\nswiftc App.swift -o Build/App\n", "background": true });
+        let asked = question("run_shell", &script, None);
+        assert!(
+            asked.starts_with("? allow run_shell (in the background):\n    mkdir -p Build\n    swiftc App.swift -o Build/App\n  [y]es"),
+            "{asked}"
+        );
     }
 }

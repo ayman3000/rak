@@ -145,6 +145,7 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/models` | List the models the server offers. |
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
+| `/skills` | List the skills the agent can load. |
 | `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
@@ -183,7 +184,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 - **A no stops the request.** The model does not get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **File tools stay in the project folder** unless you pass `--any-path`. Symlinks are resolved before the check.
-- **`run_shell` is not confined.** A command you approve can do anything your user can. Read it before you say yes.
+- **`run_shell` is not confined.** A command you approve can do anything your user can. The approval prompt shows the whole command, every line of it: read it before you say yes.
 - **An MCP server is a program you chose to run.** rak starts it with your user's rights, and trusts what it says about which of its tools are read-only.
 
 ## Tools
@@ -204,6 +205,23 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 - **Syntax:** JSON is parsed by rak itself; files that by convention allow comments (`tsconfig.json`, `.vscode/*.json`, `.jsonc`) may have them. Python, JavaScript, shell scripts, Swift and Dart go to their own parser (`python3`, `node --check`, `bash -n`, `swiftc -parse`, `dart format`). The model is told resending the same content will fail the same way, and which interpreter judged it.
 - **When a machine has several copies of an interpreter, the newest judges,** so an old system Python does not reject code written for the one in use.
 - **A check that cannot run passes.** No parser installed, a file over 2 MB, a parser that hangs past 10 seconds or crashes: the write goes ahead. A false rejection would block the agent, which is worse than a miss.
+
+## Skills
+
+A skill is know-how written in Markdown: how to build an iOS app from the terminal, how this team deploys, how a library is meant to be used. The system prompt lists each skill as one line, its name and a description, and the agent loads a skill's full instructions with `use_skill` when a task matches. A skill costs a line in the prompt until it is used.
+
+rak reads skills from `.rak/skills/` in the project, then from `~/.config/rak/skills/`; a project's skill wins over one with the same name. Two formats work:
+
+- **`NAME.md`**, as in SwiftAgentKit and sak: a `# Name` line, a `Description:` line, then the instructions. Files the skill ships (templates, references, scripts) go in a folder `NAME/` beside it.
+- **A folder with a `SKILL.md`**, as in Claude's Agent Skills: a `---` block with `name:` and `description:`, then the instructions. The folder holds the skill's files.
+
+The model reads a skill's files only when the instructions point it at one. In a chat, `/skills` lists the skills and where each came from; without any skills there is no `use_skill` tool and no cost.
+
+[`examples/skills/ios-app.md`](examples/skills/ios-app.md) builds an iOS app from the terminal and runs it in the Simulator, without an Xcode project: `swiftc` for the Simulator, `simctl` to install, launch and screenshot it, and a Swift package for logic tests. Without it, gemma4:31b-cloud asked to "create an Xcode weather project with one nice screen and test it" invented a command that does not exist (`xcodebuild -create-project`), then gave up on the Simulator and told the user to finish in Xcode. With it, the same model built the app, fixed its own compile error, launched it in the Simulator, ran its test, and reported which checks it made. Copy it to use it:
+
+```bash
+mkdir -p ~/.config/rak/skills && cp examples/skills/ios-app.md ~/.config/rak/skills/
+```
 
 ## MCP servers
 
@@ -267,7 +285,7 @@ Compared with sak, rak does not yet have:
 - Ctrl-R to search the history, and the "still running" note during a long tool call
 - fetching a whole web page (an MCP server can supply it)
 - Gemini's own API (use an OpenAI-compatible endpoint)
-- Naseem notes and skills
+- Naseem's notes and skills (rak reads its own skills, in the same format)
 
 Known limits of the chat:
 
