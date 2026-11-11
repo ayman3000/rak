@@ -28,8 +28,10 @@ pub struct Skill {
     pub instructions: String,
     /// The folder of files the skill ships, if it has one.
     pub resources: Option<PathBuf>,
-    /// The file it was read from.
+    /// The file it was read from; for a skill built into rak, its place in rak's repository.
     pub file: PathBuf,
+    /// Shipped inside rak rather than read from a folder.
+    pub builtin: bool,
 }
 
 impl Skill {
@@ -109,7 +111,7 @@ pub fn parse(markdown: &str) -> Option<(String, String, String)> {
 fn read(file: &Path, resources: Option<PathBuf>) -> Option<Skill> {
     let text = std::fs::read_to_string(file).ok()?;
     let (name, description, instructions) = parse(&text)?;
-    Some(Skill { name, description, instructions, resources, file: file.to_path_buf() })
+    Some(Skill { name, description, instructions, resources, file: file.to_path_buf(), builtin: false })
 }
 
 /// The skills in one folder, by name.
@@ -148,6 +150,35 @@ pub fn load(folders: &[PathBuf]) -> Vec<Skill> {
     }
     out.sort_by_key(|s| s.name.to_lowercase());
     out
+}
+
+/// Skills shipped inside rak: (file in the repository's skills/ folder, its
+/// text, the systems it applies to; empty means every system).
+const BUILT_IN: &[(&str, &str, &[&str])] = &[("skills/ios-app.md", include_str!("../skills/ios-app.md"), &["macos"])];
+
+/// The skills built into rak that apply on this system (`std::env::consts::OS`).
+pub fn built_in(os: &str) -> Vec<Skill> {
+    BUILT_IN
+        .iter()
+        .filter(|(_, _, systems)| systems.is_empty() || systems.contains(&os))
+        .filter_map(|(file, text, _)| {
+            let (name, description, instructions) = parse(text)?;
+            Some(Skill { name, description, instructions, resources: None, file: PathBuf::from(file), builtin: true })
+        })
+        .collect()
+}
+
+/// The skills from the folders plus the built-in ones for this system. A skill
+/// in a folder replaces a built-in one with the same name.
+pub fn load_with_built_in(folders: &[PathBuf], os: &str) -> Vec<Skill> {
+    let mut skills = load(folders);
+    for skill in built_in(os) {
+        if !skills.iter().any(|s| s.name.eq_ignore_ascii_case(&skill.name)) {
+            skills.push(skill);
+        }
+    }
+    skills.sort_by_key(|s| s.name.to_lowercase());
+    skills
 }
 
 /// Pure — unit-tested. The part of the system prompt that lists the skills.
@@ -236,6 +267,28 @@ mod tests {
         assert!(parse("No title here").is_none());
         assert!(parse("# Title only\n").is_none());
         assert!(parse("---\ndescription: no name\n---\nbody").is_none());
+    }
+
+    #[test]
+    fn built_in_skills_parse_and_apply_only_where_they_should() {
+        for (file, text, _) in BUILT_IN {
+            assert!(parse(text).is_some(), "{file} does not parse");
+        }
+        let mac = built_in("macos");
+        assert!(mac.iter().any(|s| s.name == "iOS app" && s.builtin && s.resources.is_none()));
+        assert!(built_in("linux").iter().all(|s| s.name != "iOS app"), "no iOS skill off a Mac");
+    }
+
+    #[test]
+    fn a_skill_of_your_own_replaces_the_built_in_one() {
+        let dir = temp_dir("skills-override");
+        std::fs::write(dir.join("ios.md"), "# iOS app\nDescription: my own way\nSteps.").unwrap();
+        let skills = load_with_built_in(std::slice::from_ref(&dir), "macos");
+        let ios: Vec<&Skill> = skills.iter().filter(|s| s.name == "iOS app").collect();
+        assert_eq!(ios.len(), 1);
+        assert!(!ios[0].builtin && ios[0].description == "my own way");
+        assert!(load_with_built_in(&[], "macos").iter().any(|s| s.builtin));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -49,6 +49,7 @@ BEHAVIOUR
       --read-only         no edits and no commands: read and report
       --any-path          let file tools reach outside the project folder
       --no-mcp            don't connect the MCP servers for this run
+      --no-skills         no skills for this run, built-in ones included
   -C, --cwd DIR           the project folder (default: where rak was started)
       --max-turns N       model calls allowed per request (default 30)
 
@@ -80,6 +81,7 @@ pub struct Options {
     pub read_only: bool,
     pub any_path: bool,
     pub no_mcp: bool,
+    pub no_skills: bool,
     pub cwd: Option<PathBuf>,
     pub max_turns: usize,
     pub json: bool,
@@ -108,6 +110,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         read_only: false,
         any_path: false,
         no_mcp: false,
+        no_skills: false,
         cwd: None,
         max_turns: 30,
         json: false,
@@ -148,6 +151,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--read-only" => o.read_only = true,
             "--any-path" => o.any_path = true,
             "--no-mcp" => o.no_mcp = true,
+            "--no-skills" => o.no_skills = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
             "--json" => o.json = true,

@@ -2,6 +2,7 @@
 //! which paths are allowed, and which files this run has already seen.
 
 pub mod fs;
+pub mod image;
 pub mod shell;
 pub mod verify;
 pub mod web;
@@ -15,14 +16,30 @@ use std::time::SystemTime;
 pub struct ToolResult {
     pub ok: bool,
     pub text: String,
+    /// An image for the model to look at (view_image).
+    pub image: Option<Image>,
+}
+
+/// An image, base64-encoded, with its media type ("image/png").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub media_type: String,
+    pub data: String,
+}
+
+impl Image {
+    /// The image as a data URL, the form chat-completions servers take.
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.data)
+    }
 }
 
 impl ToolResult {
     pub fn ok(text: impl Into<String>) -> Self {
-        ToolResult { ok: true, text: text.into() }
+        ToolResult { ok: true, text: text.into(), image: None }
     }
     pub fn err(text: impl Into<String>) -> Self {
-        ToolResult { ok: false, text: text.into() }
+        ToolResult { ok: false, text: text.into(), image: None }
     }
 }
 

@@ -224,7 +224,12 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             }
             for skill in &s.skills {
                 println!("  {}  {}", paint(color, Style::Cyan, &skill.name), dim(&cut(&skill.description, 90)));
-                println!("    {}", dim(&welcome::short_path(&skill.file.to_string_lossy(), &home(), 70)));
+                let place = if skill.builtin {
+                    "built into rak".to_string()
+                } else {
+                    welcome::short_path(&skill.file.to_string_lossy(), &home(), 70)
+                };
+                println!("    {}", dim(&place));
             }
         }
         "notes" => match &s.notes {

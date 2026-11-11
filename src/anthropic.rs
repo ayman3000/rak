@@ -163,6 +163,11 @@ impl Model for Anthropic {
         let body = self.get(&format!("/v1/models/{}", self.model)).ok()?;
         body["max_input_tokens"].as_u64().map(|n| n as usize)
     }
+
+    /// Every current Claude model reads images.
+    fn sees_images(&self) -> Option<bool> {
+        Some(true)
+    }
 }
 
 /// The message in an error body, or the body itself.
@@ -205,7 +210,7 @@ pub fn to_messages(messages: &[Value]) -> (Option<String>, Vec<Value>) {
                 system = Some(text.to_string());
                 continue;
             }
-            "system" | "user" => ("user", text_block(text)),
+            "system" | "user" => ("user", user_blocks(&message["content"])),
             "tool" => {
                 let content = if text.is_empty() { "(no output)" } else { text };
                 ("user", vec![json!({ "type": "tool_result", "tool_use_id": message["tool_call_id"], "content": content })])
@@ -234,6 +239,26 @@ pub fn to_messages(messages: &[Value]) -> (Option<String>, Vec<Value>) {
     }
     let messages = out.into_iter().map(|(role, content)| json!({ "role": role, "content": content })).collect();
     (system, messages)
+}
+
+/// A user message's content: text, or chat-completions content parts (the
+/// images view_image brings) turned into this API's blocks.
+fn user_blocks(content: &Value) -> Vec<Value> {
+    let Some(parts) = content.as_array() else { return text_block(content.as_str().unwrap_or("")) };
+    parts
+        .iter()
+        .filter_map(|part| match part["type"].as_str() {
+            Some("text") => part["text"].as_str().filter(|t| !t.trim().is_empty()).map(|t| json!({ "type": "text", "text": t })),
+            Some("image_url") => {
+                // data:<media type>;base64,<data>
+                let url = part["image_url"]["url"].as_str()?;
+                let (head, data) = url.strip_prefix("data:")?.split_once(',')?;
+                let media_type = head.strip_suffix(";base64")?;
+                Some(json!({ "type": "image", "source": { "type": "base64", "media_type": media_type, "data": data } }))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn text_block(text: &str) -> Vec<Value> {
@@ -439,6 +464,24 @@ mod tests {
         assert_eq!(results[1]["content"], "(no output)");
         assert_eq!(results[2]["type"], "text", "the note comes after the results, in the same message");
         assert_eq!(results[3]["text"], "Continue.");
+    }
+
+    #[test]
+    fn an_image_after_tool_results_becomes_an_image_block_in_the_same_message() {
+        let image = crate::tools::Image { media_type: "image/png".into(), data: "iVBORw0K".into() };
+        let messages = vec![
+            json!({ "role": "user", "content": "Check the screen." }),
+            json!({ "role": "assistant", "content": "", "tool_calls": [
+                { "id": "t1", "type": "function", "function": { "name": "view_image", "arguments": "{\"path\":\"s.png\"}" } } ] }),
+            json!({ "role": "tool", "tool_call_id": "t1", "content": "s.png is shown to you below." }),
+            crate::agent::image_message(&[image]),
+        ];
+        let (_, out) = to_messages(&messages);
+        assert_eq!(out.len(), 3, "the image joins the tool result's message");
+        let blocks = out[2]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[1], json!({ "type": "text", "text": "The image you asked to view:" }));
+        assert_eq!(blocks[2], json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0K" } }));
     }
 
     #[test]

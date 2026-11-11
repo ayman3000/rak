@@ -3,7 +3,7 @@
 
 use crate::interrupt::Stop;
 use crate::provider::{Model, ModelError, Reply, Usage};
-use crate::tools::{definition, Tool};
+use crate::tools::{definition, Image, Tool};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -217,13 +217,16 @@ impl Agent {
             }
 
             let mut refused: Option<String> = None;
+            let mut images: Vec<Image> = Vec::new();
             for call in &reply.tool_calls {
                 let mut result = if refused.is_some() {
                     (false, REFUSAL_NOTE.to_string())
                 } else if self.stop.requested() {
                     (false, STOP_NOTE.to_string())
                 } else {
-                    self.run_tool(&call.name, &call.arguments, &mut refused)
+                    let (ok, text, image) = self.run_tool(&call.name, &call.arguments, &mut refused);
+                    images.extend(image);
+                    (ok, text)
                 };
 
                 // The same call with the same result, again and again.
@@ -237,6 +240,11 @@ impl Agent {
                     ));
                 }
                 self.messages.push(json!({ "role": "tool", "tool_call_id": call.id, "content": result.1 }));
+            }
+            // A tool result holds text only, so images come right after the
+            // turn's results, in one message the model reads with them.
+            if !images.is_empty() {
+                self.messages.push(image_message(&images));
             }
             if let Some(tool) = refused {
                 return RunResult { outcome: Outcome::Refused { tool }, answer: String::new(), turns: turn };
@@ -295,16 +303,16 @@ impl Agent {
         }
     }
 
-    /// Runs one tool call and returns (ok, text for the model). Sets `refused`
-    /// when the person said no.
-    fn run_tool(&mut self, name: &str, arguments: &str, refused: &mut Option<String>) -> (bool, String) {
+    /// Runs one tool call and returns (ok, text for the model, an image if it
+    /// brought one). Sets `refused` when the person said no.
+    fn run_tool(&mut self, name: &str, arguments: &str, refused: &mut Option<String>) -> (bool, String, Option<Image>) {
         let Some(tool) = self.tools.iter().find(|t| t.name() == name) else {
-            return (false, format!("There is no tool named `{name}`. The tools are: {}.", self.tool_names().join(", ")));
+            return (false, format!("There is no tool named `{name}`. The tools are: {}.", self.tool_names().join(", ")), None);
         };
         let args: Value = match serde_json::from_str(if arguments.trim().is_empty() { "{}" } else { arguments }) {
             Ok(v @ Value::Object(_)) => v,
-            Ok(_) => return (false, format!("The arguments for {name} must be a JSON object.")),
-            Err(e) => return (false, format!("The arguments for {name} were not valid JSON ({e}). Send one JSON object.")),
+            Ok(_) => return (false, format!("The arguments for {name} must be a JSON object."), None),
+            Err(e) => return (false, format!("The arguments for {name} were not valid JSON ({e}). Send one JSON object."), None),
         };
         self.tool_calls += 1;
         (self.on_event)(&Event::ToolStarted { name, args: &args });
@@ -312,7 +320,7 @@ impl Agent {
         if tool.needs_approval() && (self.approve)(name, &args) == Approval::No {
             *refused = Some(name.to_string());
             (self.on_event)(&Event::ToolFinished { name, ok: false, denied: true, text: REFUSAL_NOTE, millis: 0 });
-            return (false, REFUSAL_NOTE.to_string());
+            return (false, REFUSAL_NOTE.to_string(), None);
         }
         let started = Instant::now();
         let result = tool.run(&args);
@@ -323,7 +331,36 @@ impl Agent {
             text: &result.text,
             millis: started.elapsed().as_millis(),
         });
-        (result.ok, result.text)
+        (result.ok, result.text, result.image)
+    }
+}
+
+/// The message that shows the model the images a turn's tools brought, in
+/// chat-completions content parts. Providers with their own form convert it.
+pub fn image_message(images: &[Image]) -> Value {
+    let mut parts = vec![json!({ "type": "text", "text": "The image you asked to view:" })];
+    if images.len() > 1 {
+        parts[0] = json!({ "type": "text", "text": "The images you asked to view, in order:" });
+    }
+    parts.extend(images.iter().map(|image| json!({ "type": "image_url", "image_url": { "url": image.data_url() } })));
+    json!({ "role": "user", "content": parts })
+}
+
+/// About what an image costs in context, counted in characters like text
+/// (roughly 1,600 tokens), not by the size of its base64.
+const IMAGE_CHARS: usize = 5_000;
+const IMAGE_DROPPED: &str = "[an earlier image was removed to save context; view it again if you need it]";
+
+/// A message's size for the context budget: images at a flat rate.
+fn message_size(message: &Value) -> usize {
+    match message["content"].as_array() {
+        Some(parts) => {
+            100 + parts
+                .iter()
+                .map(|p| if p["type"] == "image_url" { IMAGE_CHARS } else { p["text"].as_str().map_or(50, str::len) })
+                .sum::<usize>()
+        }
+        None => message.to_string().len(),
     }
 }
 
@@ -346,7 +383,7 @@ fn assistant_message(reply: &Reply) -> Value {
 /// it fits. The most recent messages are never touched. Returns how many
 /// outputs were dropped.
 pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
-    let size = |m: &Value| m.to_string().len();
+    let size = message_size;
     let mut total: usize = messages.iter().map(size).sum();
     let last_droppable = messages.len().saturating_sub(KEEP_RECENT);
     let mut dropped = 0;
@@ -355,9 +392,15 @@ pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
             break;
         }
         let is_big_tool_output = message["role"] == "tool" && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 2);
+        let has_image = message["content"].as_array().is_some_and(|parts| parts.iter().any(|p| p["type"] == "image_url"));
         if is_big_tool_output {
             let before = size(message);
             message["content"] = json!(DROPPED);
+            total -= before - size(message);
+            dropped += 1;
+        } else if has_image {
+            let before = size(message);
+            message["content"] = json!(IMAGE_DROPPED);
             total -= before - size(message);
             dropped += 1;
         }
@@ -382,7 +425,8 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
          Make the code pass the tests, never the tests pass the code: don't edit or delete a test you were \
          asked to make pass; adding a test is fine. If a test looks wrong, say so and stop.\n\
          Report only what happened: say you ran, tested or verified something only if a command you ran in this \
-         conversation did it, and say whether it passed. Say plainly what you could not check, and why.\n\
+         conversation did it, and say whether it passed. A screenshot or log you have not looked at checks nothing. \
+         Say plainly what you could not check, and why.\n\
          Finish with a short summary of what you did.",
         cwd.display()
     );
@@ -633,5 +677,19 @@ mod tests {
         s.agent.clear();
         assert_eq!(s.agent.messages.len(), 1);
         let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn images_are_counted_at_a_flat_rate_and_old_ones_are_dropped_first_when_full() {
+        let image = Image { media_type: "image/png".into(), data: "A".repeat(500_000) };
+        let shown = image_message(&[image]);
+        assert!(message_size(&shown) < 6_000, "an image counts as about 1,600 tokens, not its base64 length");
+        assert_eq!(shown["content"][1]["type"], "image_url");
+
+        let mut messages = vec![json!({ "role": "system", "content": "sys" }), shown];
+        messages.extend((0..10).map(|i| json!({ "role": "user", "content": format!("message {i}") })));
+        assert_eq!(trim_context(&mut messages, 100_000), 0, "under budget: kept");
+        assert_eq!(trim_context(&mut messages, 500), 1);
+        assert_eq!(messages[1]["content"], json!(IMAGE_DROPPED));
     }
 }

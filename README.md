@@ -168,6 +168,7 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | `--read-only` | No edits and no commands: read and report. |
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp` | Don't connect the MCP servers for this run. |
+| `--no-skills` | No skills for this run, built-in ones included. |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
 | `--json` | Print one JSON object: answer, outcome, turns, tokens (cached ones too), seconds. |
@@ -194,6 +195,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `list_dir` | Lists a folder. |
 | `search_files` | Finds files by name and by text inside them. Skips `.git`, `node_modules`, `target`, `.build`. |
 | `read_file` | Reads a file. Files up to 40,000 characters come back in one call; small `limit`s are widened, because many small reads cost more than one large one. |
+| `view_image` | Shows the model an image file (PNG, JPEG, GIF, WebP), such as a screenshot it took, so it can check what a screen really shows. Offered only when the model can see: Claude always; on Ollama, models that list "vision" (gemma4 and kimi-k2.6 do, glm-5.2 does not); on other servers, offered and left to the server. Images count as about 1,600 tokens each against the context window, and old ones are dropped first when it fills. |
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. Checked before writing (below). |
 | `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. Checked before writing (below). |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
@@ -217,11 +219,17 @@ rak reads skills from `.rak/skills/` in the project, then from `~/.config/rak/sk
 
 The model reads a skill's files only when the instructions point it at one. In a chat, `/skills` lists the skills and where each came from; without any skills there is no `use_skill` tool and no cost.
 
-[`examples/skills/ios-app.md`](examples/skills/ios-app.md) builds an iOS app from the terminal and runs it in the Simulator, without an Xcode project: `swiftc` for the Simulator, `simctl` to install, launch and screenshot it, and a Swift package for logic tests. Without it, gemma4:31b-cloud asked to "create an Xcode weather project with one nice screen and test it" invented a command that does not exist (`xcodebuild -create-project`), then gave up on the Simulator and told the user to finish in Xcode. With it, the same model built the app, fixed its own compile error, launched it in the Simulator, ran its test, and reported which checks it made. Copy it to use it:
+**Built-in skills.** rak ships with skills of its own, compiled into the binary from the repository's [`skills/`](skills) folder, and offers each only on the systems it applies to. A skill of yours with the same name replaces a built-in one, and `--no-skills` leaves all skills out of a run. `/skills` says which are built in.
 
-```bash
-mkdir -p ~/.config/rak/skills && cp examples/skills/ios-app.md ~/.config/rak/skills/
-```
+| Skill | Offered on | What it does |
+|---|---|---|
+| `iOS app` | macOS | Builds an iOS app from the terminal and runs it in the Simulator (below) |
+
+On a Mac, the iOS skill adds 127 input tokens to each model call (its line in the prompt and the `use_skill` tool); most of that is read back from the server's cache.
+
+[`skills/ios-app.md`](skills/ios-app.md) builds an iOS app from the terminal and runs it in the Simulator, without an Xcode project: `swiftc` for the Simulator, `simctl` to install, launch and screenshot it, and a Swift package for logic tests. Without it, gemma4:31b-cloud asked to "create an Xcode weather project with one nice screen and test it" invented a command that does not exist (`xcodebuild -create-project`), then gave up on the Simulator and told the user to finish in Xcode. With it, the same model built the app, fixed its own compile error, launched it in the Simulator, ran its test, and reported which checks it made.
+
+A second session, after the skill learned launch arguments and the app's log, and with `view_image`, asked the same model for a weather app for Egyptian cities with a Settings tab, using the free Open-Meteo API, tested on the Simulator. Before writing any code the model called the API with `curl` for three cities. It tested the decoding with `swift test`, opened the Settings screen through a launch argument (the app still starts on its main screen), and looked at both screenshots with `view_image`; its descriptions matched what was on screen. One claim went too far: it reported the fetches as verified from a log that printed "Verified" even when a fetch failed, from test code that ran on every launch. The skill now forbids both.
 
 ## MCP servers
 
@@ -355,8 +363,12 @@ python3 bench/run.py --model kimi-k2.6:cloud --attempts 2
 | 2026-11-10 | 0.1.0-alpha.1, before the chat and MCP | 12/12 | 530 s | 182K (13.6K) | 44K |
 | 2026-11-11 | after the chat, MCP and the module split | 11/12 | 552 s | 203K (14.1K) | 47K |
 | 2026-11-11 | with the write check | 12/12 | 434 s | 258K (19.3K), 222K of it cached | 41K |
+| 2026-11-11 | with the honesty rule (first run) | 9/12 | 394 s | 185K (13.8K), 157K of it cached | 34K |
+| 2026-11-11 | with the honesty rule (second run) | 12/12 | 521 s | 183K (15.5K), 158K of it cached | 53K |
 
-All with kimi-k2.6:cloud through Ollama, two attempts per task. The system prompt and tool descriptions were the same in every run.
+All with kimi-k2.6:cloud through Ollama, two attempts per task. The tool descriptions were the same in every run; the system prompt too, until the last two runs added the honesty rule.
+
+The honesty rule (report only checks that actually ran, and say what was not checked) was run twice because its first run scored 9/12. The three misses were the model's judgement, not missed checks: in each it had run its own tests. Task 3 reused a deleted to-do's number, task 4 refused the discount code `flat5`, and task 6 fell into the `"5 5"` trap. The second run scored 12/12. Together that is 21 of 24, in line with the runs before, with the same input per run.
 
 The third run is the first that records cached tokens: 86% of the input was read from Ollama's cache. Ollama's cloud did that caching on its own; the earlier runs most likely had it too, unrecorded. The write check rejected no write in this run, so it caused no false alarms, but these tasks gave it nothing to catch either. Input was higher than in the earlier runs because the model took more turns; with this few attempts per task, that is within the run-to-run spread.
 

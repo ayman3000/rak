@@ -86,6 +86,12 @@ pub trait Model {
     fn context_window(&self) -> Option<usize> {
         None
     }
+
+    /// Whether the model reads images: Some when the server says, None when it
+    /// can't tell (then view_image is offered and the server decides).
+    fn sees_images(&self) -> Option<bool> {
+        None
+    }
 }
 
 /// What the person sees when they stop a request mid-answer.
@@ -171,16 +177,19 @@ impl OpenAICompatible {
     /// The model's context window in tokens, when the server is an Ollama
     /// one and says (`POST /api/show`). None for every other server.
     fn ollama_window(&self) -> Option<usize> {
+        context_length(&self.ollama_show()?)
+    }
+
+    /// Ollama's description of the model (`POST /api/show`); None for other servers.
+    fn ollama_show(&self) -> Option<Value> {
         let root = self.base_url.strip_suffix("/v1")?;
-        let body: Value = self
-            .http
+        self.http
             .post(&format!("{root}/api/show"))
             .timeout(Duration::from_secs(4))
             .send_json(json!({ "model": self.model }))
             .ok()?
             .into_json()
-            .ok()?;
-        context_length(&body)
+            .ok()
     }
 
     /// The ids of the models the server offers (`GET /models`), sorted.
@@ -209,6 +218,13 @@ impl Model for OpenAICompatible {
 
     fn context_window(&self) -> Option<usize> {
         self.ollama_window()
+    }
+
+    /// Ollama lists a model's capabilities; "vision" means it reads images.
+    fn sees_images(&self) -> Option<bool> {
+        let show = self.ollama_show()?;
+        let capabilities = show["capabilities"].as_array()?;
+        Some(capabilities.iter().any(|c| c == "vision"))
     }
 
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {

@@ -161,7 +161,8 @@ pub fn run(mut o: Options) -> i32 {
     // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
     let skill_folders: Vec<PathBuf> =
         std::iter::once(ctx.cwd.join(".rak").join("skills")).chain(config_dir().map(|d| d.join("skills"))).collect();
-    let skills = rak::skills::load(&skill_folders);
+    // Plus the ones built into rak for this system; --no-skills leaves all of them out.
+    let skills = if o.no_skills { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
     let mut config = config;
     config.system_prompt.push_str(&rak::skills::index(&skills));
     let mut tools = core_tools(&ctx, o.read_only);
@@ -171,6 +172,10 @@ pub fn run(mut o: Options) -> i32 {
     }
     if !skills.is_empty() {
         tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));
+    }
+    // view_image, unless the server says the model can't see.
+    if provider.sees_images() != Some(false) {
+        tools.push(Box::new(rak::tools::image::ViewImage(ctx.clone())));
     }
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
 

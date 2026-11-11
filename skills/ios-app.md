@@ -12,9 +12,22 @@ import SwiftUI
 
 @main
 struct NAMEApp: App {
+    // Every print() reaches the log file of step 3 at once, not when a buffer fills.
+    init() { setvbuf(stdout, nil, _IOLBF, 0) }
     var body: some Scene { WindowGroup { ContentView() } }
 }
 ```
+
+Never change what the app does just to test it. To open a particular screen for a test, have the app read a launch argument and pass it in step 3; without the argument the app starts as it always did:
+
+```swift
+// `-screen settings` at launch opens Settings; no argument: the usual first screen.
+let screen = UserDefaults.standard.string(forKey: "screen")
+```
+
+Have the app `print` what a test needs to know: which screen opened, the values it fetched, the error when something fails. Print the values themselves, never your own verdict: a line such as "verified" or "ok" that is printed whatever happened checks nothing. Don't hide errors with `try?` in code a test relies on; catch them and print them.
+
+Code that exists only for a test (fetching several cities at launch, say) runs only behind its own launch argument, such as `-test-fetch`. A normal launch must not run it.
 
 Put logic that can be tested (models, conversions, formatting, parsing) in `Sources/NAMECore/` instead, as plain Swift with `public` types and functions, so step 4 can test it.
 
@@ -53,13 +66,18 @@ xcrun simctl list devices available | grep -i iphone     # pick a device name
 xcrun simctl boot "DEVICE NAME"     # "current state: Booted" means it already runs: fine
 open -a Simulator
 xcrun simctl install booted Build/NAME.app
-xcrun simctl launch booted BUNDLE_ID                      # prints BUNDLE_ID: <pid>
+xcrun simctl launch --terminate-running-process --stdout="$PWD/Build/run.log" booted BUNDLE_ID   # prints BUNDLE_ID: <pid>
 sleep 3
 xcrun simctl spawn booted launchctl list | grep BUNDLE_ID # still listed: it did not crash
-xcrun simctl io booted screenshot screenshot.png
+cat Build/run.log                                          # what the app printed
+xcrun simctl io booted screenshot Build/screen.png
 ```
 
-You cannot see images. Say the screenshot was taken and where, so the user can look; do not describe how the screen looks.
+To open another screen, add its launch argument at the end of the launch line: `... booted BUNDLE_ID -screen settings`. Keep the log under the project folder: the Simulator may not be able to write elsewhere.
+
+Then look at the screenshot with `view_image` if you have it, and say what it shows. If you don't have `view_image`, you cannot see the screen: say the screenshot was taken and where, and do not describe how the screen looks.
+
+Do all of step 3 again after every change to the app, not only the build.
 
 ## 4. Test the logic
 
@@ -81,9 +99,11 @@ swift test
 
 These run on the Mac, not in the Simulator: they test the logic, not the screens.
 
+When the app calls a web API, check it before trusting it. Call the API with `curl` for two or three of the inputs (for weather: two or three cities) and look at the answers. Save one answer as a file in `Tests/NAMECoreTests/` and test the decoding against it in step 4. Then launch the app and read `Build/run.log` to see what it actually fetched.
+
 ## 5. Report
 
-Say exactly what happened: whether it compiled, whether it launched (the pid), whether it was still running a few seconds later, where the screenshot is, and how many tests ran and passed. Say what was not checked: how the screen looks.
+Say exactly what happened: whether it compiled, whether it launched (the pid), whether it was still running a few seconds later, what the log showed, what the screenshot shows (if you looked at it with `view_image`), and how many tests ran and passed. Say what was not checked.
 
 ## If the user wants an Xcode project
 
