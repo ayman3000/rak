@@ -121,7 +121,7 @@ Compared with sak, rak does not yet have:
 - a syntax check on written files
 - Ctrl-C handling: stopping rak mid-command can leave that command running
 
-Not yet tested: Windows, auto mode (`-y`) end to end, and any public benchmark.
+Not yet tested: Windows, and any public benchmark. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 
@@ -134,3 +134,19 @@ cargo build --release
 ```
 
 MIT licence.
+
+## Benchmark
+
+`bench/` holds six small Python tasks (fix a bug, add a feature, write a CLI, change two files of a package, parse a log, fix code and write its tests). Each run happens in a fresh container that holds only rak and the task's starting files; tests the agent never sees are copied in afterwards and decide pass or fail.
+
+```bash
+docker build -f bench/Dockerfile -t rak-bench .
+```
+
+```bash
+python3 bench/run.py --model kimi-k2.6:cloud --attempts 2
+```
+
+First run, 2026-11-10, rak 0.1.0-alpha.1 with kimi-k2.6:cloud through Ollama, two attempts per task: **12/12 passed**, 530 s in total, 182K tokens in (median 13.6K per run), 44K out.
+
+These tasks are easy: a perfect score says the pipeline works, not how rak ranks. They are not the tasks sak was measured on, so the numbers do not compare with sak's.
