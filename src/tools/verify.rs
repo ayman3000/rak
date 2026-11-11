@@ -15,12 +15,12 @@
 //! - When a machine has several copies of an interpreter, the newest judges:
 //!   an old system Python must not reject code written for the one in use.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 
 /// Files above this size are not given to a parser.
 pub const MAX_CHECKED_BYTES: usize = 2_000_000;
@@ -355,7 +355,7 @@ fn run_with_timeout(mut command: Command, timeout: Duration) -> Outcome {
     command.stdin(Stdio::null()).stdout(writer).stderr(writer_err);
     let Ok(mut child) = command.spawn() else { return Outcome::Unavailable };
     drop(command); // the parent's copies of the pipe's writing end
-    // Read while it runs: a parser with a lot to say must not block on a full pipe.
+                   // Read while it runs: a parser with a lot to say must not block on a full pipe.
     let collector = std::thread::spawn(move || {
         let mut text = String::new();
         let _ = { reader }.read_to_string(&mut text);

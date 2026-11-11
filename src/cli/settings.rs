@@ -77,7 +77,11 @@ impl Keys {
     }
 
     pub fn get(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok().filter(|v| !v.is_empty()).or_else(|| self.values.get(name).map(|(v, _)| v.clone())).filter(|v| !v.is_empty())
+        std::env::var(name)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| self.values.get(name).map(|(v, _)| v.clone()))
+            .filter(|v| !v.is_empty())
     }
 
     /// Where a key that is set comes from: "the environment" or a file.

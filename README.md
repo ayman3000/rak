@@ -1,6 +1,6 @@
 # rak — Rust Agent Kit
 
-A small coding agent for the terminal. One binary, no runtime to install, for Linux and macOS (Windows is written but untested).
+A small coding agent for the terminal. One binary, no runtime to install, for Linux and macOS.
 
 rak is the cross-platform sibling of [sak](https://github.com/ayman3000/sak). sak is built on SwiftAgentKit and stays the Mac tool; rak carries the same prompt, the same tool designs and the same loop to everything else.
 
@@ -30,11 +30,25 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
 
 ## Install
 
-You need [Rust](https://rustup.rs) 1.87 or newer.
+On Linux or macOS:
 
 ```bash
-cargo install --path .
+curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 ```
+
+The script downloads the build for your system from rak's GitHub releases, checks it against its published SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed. `RAK_VERSION=v0.1.0-alpha.1` picks a release (the default is the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
+
+Builds: Linux on x86-64 and ARM (static, so they run on any distribution), and macOS on Apple Silicon and Intel. Windows is not supported yet.
+
+The macOS builds are not notarized by Apple. Installed with the script they run as they are; a build downloaded in a web browser is held back by macOS until you run `xattr -d com.apple.quarantine rak`.
+
+With Rust 1.87 or newer, from source:
+
+```bash
+cargo install --git https://github.com/ayman3000/rak
+```
+
+Then set up your keys with `rak keys` (see [Keys](#keys)).
 
 ## Use
 
@@ -262,7 +276,7 @@ Known limits of the chat:
 - The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
 - With Anthropic's API, trimming old tool output near a full context window changes earlier messages, which ends the cache from that point; the next call writes it again.
 
-Not yet tested: Windows, and any public benchmark. Anthropic's real API was tried on Claude Haiku 5.5 (2026-11-11): the first call wrote 1,514 tokens to the cache and the second read all 1,514 back, writing only the 87 new ones. Its other paths (thinking blocks sent back, refusal fallbacks) are tested against a local stand-in. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
+Not yet tested: Windows (not built yet), and any public benchmark. Anthropic's real API was tried on Claude Haiku 5.5 (2026-11-11): the first call wrote 1,514 tokens to the cache and the second read all 1,514 back, writing only the 87 new ones. Its other paths (thinking blocks sent back, refusal fallbacks) are tested against a local stand-in. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 
@@ -289,6 +303,14 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 | `mcp_command` | `rak mcp add/list/remove`. |
 | `editor`, `menu`, `markdown`, `welcome`, `style`, `term` | The interface's parts. Each is pure where it can be, and tested. |
 | `settings`, `signals` | What is kept between runs; Ctrl-C. |
+
+**Checks and releases.** Every push to `main` and every pull request runs the tests on Linux and macOS, the formatting and lint checks, and a build with the oldest Rust rak supports (`.github/workflows/ci.yml`). A version tag that matches `Cargo.toml` builds the four release archives and publishes them (`.github/workflows/release.yml`):
+
+```bash
+git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+```
+
+A tag with a `-` makes a pre-release.
 
 Dependencies only point down: `agent` uses `provider` and `tools`; `mcp` uses `tools`; nothing in the library uses `cli`. `rustfmt.toml` sets the formatting (`cargo fmt`).
 

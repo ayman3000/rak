@@ -69,7 +69,10 @@ impl Tool for WebSearch {
                     432 | 433 => " (Tavily plan or credit limit reached)",
                     _ => "",
                 };
-                ToolResult::err(format!("Tavily returned HTTP {code}{hint}: {}", one_line(&response.into_string().unwrap_or_default(), 300)))
+                ToolResult::err(format!(
+                    "Tavily returned HTTP {code}{hint}: {}",
+                    one_line(&response.into_string().unwrap_or_default(), 300)
+                ))
             }
             Err(ureq::Error::Transport(t)) => ToolResult::err(format!("web_search failed: {t}")),
         }
@@ -119,9 +122,15 @@ mod tests {
     #[test]
     fn the_request_is_clamped_and_defaults_are_filled_in() {
         let body = request_body("rust 1.95 release", None, None, false);
-        assert_eq!(body, json!({ "query": "rust 1.95 release", "max_results": 5, "topic": "general", "search_depth": "basic", "include_answer": true }));
+        assert_eq!(
+            body,
+            json!({ "query": "rust 1.95 release", "max_results": 5, "topic": "general", "search_depth": "basic", "include_answer": true })
+        );
         let body = request_body("q", Some(50), Some("news"), true);
-        assert_eq!((body["max_results"].as_i64(), body["topic"].as_str(), body["search_depth"].as_str()), (Some(10), Some("news"), Some("advanced")));
+        assert_eq!(
+            (body["max_results"].as_i64(), body["topic"].as_str(), body["search_depth"].as_str()),
+            (Some(10), Some("news"), Some("advanced"))
+        );
         assert_eq!(request_body("q", Some(0), Some("sports"), false)["max_results"], 1);
         assert_eq!(request_body("q", None, Some("sports"), false)["topic"], "general");
     }
@@ -151,13 +160,19 @@ mod tests {
                 seen.extend_from_slice(&buffer[..n]);
                 let text = String::from_utf8_lossy(&seen).to_string();
                 if let Some((head, sent)) = text.split_once("\r\n\r\n") {
-                    let length: usize = head.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap())).unwrap_or(0);
+                    let length: usize = head
+                        .lines()
+                        .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+                        .unwrap_or(0);
                     if sent.len() >= length {
                         break;
                     }
                 }
             }
-            let reply = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let reply = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
             stream.write_all(reply.as_bytes()).unwrap();
             String::from_utf8_lossy(&seen).to_string()
         });
@@ -166,7 +181,11 @@ mod tests {
 
     #[test]
     fn a_search_sends_the_key_and_returns_the_rendered_results() {
-        let (url, server) = serve_once("200 OK", json!({ "answer": "Paris", "results": [{ "title": "France", "url": "https://x/fr", "content": "Capital: Paris." }] }).to_string());
+        let (url, server) = serve_once(
+            "200 OK",
+            json!({ "answer": "Paris", "results": [{ "title": "France", "url": "https://x/fr", "content": "Capital: Paris." }] })
+                .to_string(),
+        );
         let tool = WebSearch::with_endpoint("tvly-test".into(), &url);
         assert!(!tool.needs_approval(), "reading the web needs no approval");
         let result = tool.run(&json!({ "query": " capital of France ", "max_results": 3 }));
@@ -181,7 +200,11 @@ mod tests {
         let (url, server) = serve_once("401 Unauthorized", json!({ "detail": "invalid key" }).to_string());
         let result = WebSearch::with_endpoint("bad".into(), &url).run(&json!({ "query": "x" }));
         server.join().unwrap();
-        assert!(!result.ok && result.text.contains("HTTP 401 (check TAVILY_API_KEY)") && result.text.contains("invalid key"), "{}", result.text);
+        assert!(
+            !result.ok && result.text.contains("HTTP 401 (check TAVILY_API_KEY)") && result.text.contains("invalid key"),
+            "{}",
+            result.text
+        );
         assert!(!WebSearch::new("k".into()).run(&json!({ "query": "  " })).ok);
     }
 }

@@ -469,7 +469,8 @@ mod tests {
 
     #[test]
     fn cached_tokens_and_native_forms_are_handled() {
-        let usage = openai_usage(&json!({ "prompt_tokens": 2000, "completion_tokens": 5, "prompt_tokens_details": { "cached_tokens": 1536 } }));
+        let usage =
+            openai_usage(&json!({ "prompt_tokens": 2000, "completion_tokens": 5, "prompt_tokens_details": { "cached_tokens": 1536 } }));
         assert_eq!(usage, Usage { input: 2000, output: 5, cached: 1536, cache_write: 0 });
         let p = OpenAICompatible::new("http://x/v1", None, "m");
         let body = p.request_body(&[json!({ "role": "assistant", "content": "hi", "native": [{ "type": "thinking" }] })], &[]);

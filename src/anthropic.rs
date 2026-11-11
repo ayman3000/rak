@@ -107,12 +107,8 @@ impl Model for Anthropic {
 
     fn chat_stream(&mut self, messages: &[Value], tools: &[Value], on_text: &mut dyn FnMut(&str)) -> Result<Reply, ModelError> {
         let url = format!("{}/v1/messages", self.base_url);
-        let mut request = self
-            .http
-            .post(&url)
-            .set("x-api-key", &self.api_key)
-            .set("anthropic-version", VERSION)
-            .set("content-type", "application/json");
+        let mut request =
+            self.http.post(&url).set("x-api-key", &self.api_key).set("anthropic-version", VERSION).set("content-type", "application/json");
         if self.has_fallback() {
             request = request.set("anthropic-beta", FALLBACK_BETA);
         }
@@ -121,7 +117,11 @@ impl Model for Anthropic {
             Err(ureq::Error::Status(code, response)) => {
                 let message = format!("the Anthropic API answered {code}: {}", error_text(response));
                 // 529 is "overloaded".
-                return Err(if code == 408 || code == 429 || code >= 500 { ModelError::Retryable(message) } else { ModelError::Fatal(message) });
+                return Err(if code == 408 || code == 429 || code >= 500 {
+                    ModelError::Retryable(message)
+                } else {
+                    ModelError::Fatal(message)
+                });
             }
             Err(ureq::Error::Transport(t)) => return Err(ModelError::Retryable(format!("could not reach {url}: {t}"))),
         };
@@ -153,7 +153,8 @@ impl Model for Anthropic {
 
     fn list_models(&self) -> Result<Vec<String>, String> {
         let body = self.get("/v1/models?limit=1000")?;
-        let mut ids: Vec<String> = body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_string)).collect();
+        let mut ids: Vec<String> =
+            body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_string)).collect();
         ids.sort();
         Ok(ids)
     }
@@ -167,7 +168,8 @@ impl Model for Anthropic {
 /// The message in an error body, or the body itself.
 fn error_text(response: ureq::Response) -> String {
     let text = response.into_string().unwrap_or_default();
-    let message = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string));
+    let message =
+        serde_json::from_str::<Value>(&text).ok().and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string));
     one_line(&message.unwrap_or(text), 300)
 }
 
@@ -336,8 +338,10 @@ impl Stream {
         // as it came, which tells the model it was not valid JSON.
         let mut blocks: Vec<Value> = self.blocks.into_iter().filter(|b| !b.is_null()).collect();
         for block in blocks.iter_mut().filter(|b| b["type"] == "tool_use") {
-            let text = block.as_object_mut().and_then(|o| o.remove("_partial")).and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-            let parsed = if text.trim().is_empty() { Some(json!({})) } else { serde_json::from_str::<Value>(&text).ok().filter(Value::is_object) };
+            let text =
+                block.as_object_mut().and_then(|o| o.remove("_partial")).and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let parsed =
+                if text.trim().is_empty() { Some(json!({})) } else { serde_json::from_str::<Value>(&text).ok().filter(Value::is_object) };
             match parsed {
                 Some(input) => block["input"] = input,
                 None => {
@@ -357,7 +361,11 @@ impl Stream {
                 // Only the model that answered in the end called tools.
                 "tool_use" if last_fallback.is_none_or(|f| i > f) => {
                     let arguments = block["_raw"].as_str().map(str::to_string).unwrap_or_else(|| block["input"].to_string());
-                    tool_calls.push(ToolCall { id: block["id"].as_str().unwrap_or("").to_string(), name: block["name"].as_str().unwrap_or("").to_string(), arguments });
+                    tool_calls.push(ToolCall {
+                        id: block["id"].as_str().unwrap_or("").to_string(),
+                        name: block["name"].as_str().unwrap_or("").to_string(),
+                        arguments,
+                    });
                 }
                 _ => {}
             }
@@ -436,7 +444,8 @@ mod tests {
     #[test]
     fn a_native_reply_is_sent_back_unchanged() {
         let native = json!([{ "type": "thinking", "thinking": "", "signature": "sig" }, { "type": "text", "text": "Done." }]);
-        let messages = vec![json!({ "role": "user", "content": "Go." }), json!({ "role": "assistant", "content": "Done.", "native": native })];
+        let messages =
+            vec![json!({ "role": "user", "content": "Go." }), json!({ "role": "assistant", "content": "Done.", "native": native })];
         let (_, out) = to_messages(&messages);
         assert_eq!(out[1]["content"], native);
     }
@@ -451,7 +460,10 @@ mod tests {
         assert_eq!(body["cache_control"], json!({ "type": "ephemeral" }));
         assert_eq!(body["system"][0]["cache_control"], json!({ "type": "ephemeral" }));
         assert_eq!(body["system"][0]["text"], "You are rak.");
-        assert_eq!(body["tools"][0], json!({ "name": "read_file", "description": "Reads.", "input_schema": { "type": "object", "properties": {} }, "eager_input_streaming": true }));
+        assert_eq!(
+            body["tools"][0],
+            json!({ "name": "read_file", "description": "Reads.", "input_schema": { "type": "object", "properties": {} }, "eager_input_streaming": true })
+        );
         assert_eq!(body["output_config"]["effort"], "high");
         assert_eq!(body["fallbacks"], "default");
         assert_eq!(body["max_tokens"], 64_000);
@@ -476,20 +488,52 @@ mod tests {
         let mut s = Stream::default();
         assert_eq!(s.push_line("event: message_start").unwrap(), None);
         s.push_line(&format!("data: {}", json!({ "type": "message_start", "message": { "usage": { "input_tokens": 40, "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 200, "output_tokens": 1 } } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking", "thinking": "" } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": "abc" } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "content_block_start", "index": 1, "content_block": { "type": "text", "text": "" } }))).unwrap();
-        let piece = s.push_line(&format!("data: {}", json!({ "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "Reading." } }))).unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking", "thinking": "" } })
+        ))
+        .unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": "abc" } })
+        ))
+        .unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "content_block_start", "index": 1, "content_block": { "type": "text", "text": "" } })
+        ))
+        .unwrap();
+        let piece = s
+            .push_line(&format!(
+                "data: {}",
+                json!({ "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "Reading." } })
+            ))
+            .unwrap();
         assert_eq!(piece.as_deref(), Some("Reading."));
         s.push_line(&format!("data: {}", json!({ "type": "content_block_start", "index": 2, "content_block": { "type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {} } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "{\"pa" } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "th\": \"a.py\"}" } }))).unwrap();
-        s.push_line(&format!("data: {}", json!({ "type": "message_delta", "delta": { "stop_reason": "tool_use" }, "usage": { "output_tokens": 57 } }))).unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "{\"pa" } })
+        ))
+        .unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "th\": \"a.py\"}" } })
+        ))
+        .unwrap();
+        s.push_line(&format!(
+            "data: {}",
+            json!({ "type": "message_delta", "delta": { "stop_reason": "tool_use" }, "usage": { "output_tokens": 57 } })
+        ))
+        .unwrap();
         s.push_line(&format!("data: {}", json!({ "type": "message_stop" }))).unwrap();
         assert!(s.finished);
         let reply = s.finish().unwrap();
         assert_eq!(reply.content, "Reading.");
-        assert_eq!(reply.tool_calls, [ToolCall { id: "toolu_1".into(), name: "read_file".into(), arguments: "{\"path\":\"a.py\"}".into() }]);
+        assert_eq!(
+            reply.tool_calls,
+            [ToolCall { id: "toolu_1".into(), name: "read_file".into(), arguments: "{\"path\":\"a.py\"}".into() }]
+        );
         assert_eq!(reply.usage, Usage { input: 3240, output: 57, cached: 3000, cache_write: 200 });
         let native = reply.native.unwrap();
         assert_eq!(native[0], json!({ "type": "thinking", "thinking": "", "signature": "abc" }), "thinking kept to send back");
@@ -511,7 +555,9 @@ mod tests {
 
     #[test]
     fn a_refusal_is_an_error_and_a_fallback_part_way_drops_what_came_before() {
-        let refused = events(&[json!({ "type": "message_delta", "delta": { "stop_reason": "refusal", "stop_details": { "type": "refusal", "category": "cyber" } } })]);
+        let refused = events(&[
+            json!({ "type": "message_delta", "delta": { "stop_reason": "refusal", "stop_details": { "type": "refusal", "category": "cyber" } } }),
+        ]);
         let Err(ModelError::Fatal(why)) = refused.finish() else { panic!() };
         assert!(why.contains("declined") && why.contains("cyber"), "{why}");
 
@@ -528,7 +574,8 @@ mod tests {
         assert_eq!(reply.content, "Part one and part two.");
         let ids: Vec<&str> = reply.tool_calls.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, ["late"], "only the model that answered runs tools");
-        let kinds: Vec<String> = reply.native.unwrap().as_array().unwrap().iter().map(|b| b["type"].as_str().unwrap().to_string()).collect();
+        let kinds: Vec<String> =
+            reply.native.unwrap().as_array().unwrap().iter().map(|b| b["type"].as_str().unwrap().to_string()).collect();
         assert_eq!(kinds, ["text", "fallback", "text", "tool_use"], "thinking and tool_use before the boundary are not echoed");
     }
 
@@ -537,8 +584,18 @@ mod tests {
         let overloaded = json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } });
         assert!(matches!(Stream::default().push_line(&format!("data: {overloaded}")), Err(ModelError::Retryable(_))));
         let mut started = Stream::default();
-        started.push_line(&format!("data: {}", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }))).unwrap();
-        started.push_line(&format!("data: {}", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Hi" } }))).unwrap();
+        started
+            .push_line(&format!(
+                "data: {}",
+                json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } })
+            ))
+            .unwrap();
+        started
+            .push_line(&format!(
+                "data: {}",
+                json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Hi" } })
+            ))
+            .unwrap();
         assert!(matches!(started.push_line(&format!("data: {overloaded}")), Err(ModelError::Fatal(_))));
     }
 }

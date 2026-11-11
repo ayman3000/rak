@@ -9,9 +9,9 @@ use super::settings::{config_dir, key, load_keys, save_model, saved_model};
 use super::style::{paint, Style};
 use super::{approval, chat, commands, markdown, menu, signals, welcome};
 use rak::agent::{system_prompt, Agent, Config, Outcome, RunResult};
+use rak::anthropic::Anthropic;
 use rak::interrupt::Stop;
 use rak::mcp;
-use rak::anthropic::Anthropic;
 use rak::provider::{Model, OpenAICompatible};
 use rak::tools::web::WebSearch;
 use rak::tools::{core_tools, Ctx};
@@ -309,7 +309,13 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
             eprintln!("rak: {problem}");
         }
     }
-    ui.progress(Some(Style::Dim), &format!("  {turns} turns · {tool_calls} tool calls · {input} tokens in{} · {output} out · {seconds} s", if cached > 0 { format!(" ({cached} cached)") } else { String::new() }));
+    ui.progress(
+        Some(Style::Dim),
+        &format!(
+            "  {turns} turns · {tool_calls} tool calls · {input} tokens in{} · {output} out · {seconds} s",
+            if cached > 0 { format!(" ({cached} cached)") } else { String::new() }
+        ),
+    );
     outcome
 }
 
