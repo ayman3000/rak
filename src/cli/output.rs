@@ -20,6 +20,7 @@ pub fn describe(name: &str, args: &Value) -> String {
         "edit_file" => format!("edit_file {}  ({} → {} lines)", text("path"), lines("old_text"), lines("new_text")),
         "write_file" => format!("write_file {}  ({} bytes)", text("path"), text("content").len()),
         "run_shell" => format!("run_shell {}", one_line(text("command"), 110)),
+        "save_skill" => format!("save_skill \"{}\"  ({} lines)", one_line(text("name"), 60), lines("instructions")),
         _ => {
             let mut parts: Vec<String> = args
                 .as_object()

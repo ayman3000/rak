@@ -107,6 +107,9 @@ pub struct Agent {
     pub stop: Stop,
     /// Input tokens of the latest model call: how full the context is.
     pub last_prompt_tokens: u64,
+    /// What the model is told when the user says no to a tool call.
+    /// `REFUSAL_NOTE` unless changed (rak adds a hint to keep the lesson).
+    pub refusal_note: String,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -125,6 +128,7 @@ impl Agent {
             stream: false,
             stop: Stop::new(),
             last_prompt_tokens: 0,
+            refusal_note: REFUSAL_NOTE.to_string(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -220,7 +224,7 @@ impl Agent {
             let mut images: Vec<Image> = Vec::new();
             for call in &reply.tool_calls {
                 let mut result = if refused.is_some() {
-                    (false, REFUSAL_NOTE.to_string())
+                    (false, self.refusal_note.clone())
                 } else if self.stop.requested() {
                     (false, STOP_NOTE.to_string())
                 } else {
@@ -319,8 +323,8 @@ impl Agent {
 
         if tool.needs_approval() && (self.approve)(name, &args) == Approval::No {
             *refused = Some(name.to_string());
-            (self.on_event)(&Event::ToolFinished { name, ok: false, denied: true, text: REFUSAL_NOTE, millis: 0 });
-            return (false, REFUSAL_NOTE.to_string(), None);
+            (self.on_event)(&Event::ToolFinished { name, ok: false, denied: true, text: &self.refusal_note, millis: 0 });
+            return (false, self.refusal_note.clone(), None);
         }
         let started = Instant::now();
         let result = tool.run(&args);
@@ -539,13 +543,15 @@ mod tests {
             10,
         );
         s.agent.on_approval(|_, _| Approval::No);
+        s.agent.refusal_note.push_str(" Keep the lesson.");
         let result = s.agent.run("write a.txt");
         assert_eq!(result.outcome, Outcome::Refused { tool: "write_file".into() });
         assert!(!s.dir.join("a.txt").exists());
         assert_eq!(s.seen.borrow().len(), 1, "the model must not get another turn after a no");
         let tool_results: Vec<&Value> = s.agent.messages.iter().filter(|m| m["role"] == "tool").collect();
         assert_eq!(tool_results.len(), 2);
-        assert!(tool_results.iter().all(|m| m["content"] == REFUSAL_NOTE));
+        let note = format!("{REFUSAL_NOTE} Keep the lesson.");
+        assert!(tool_results.iter().all(|m| m["content"] == note.as_str()), "both calls get the note, hint included");
     }
 
     #[test]

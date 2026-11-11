@@ -8,6 +8,7 @@
 //!   log          --log: every step as JSON lines
 //!   mcp_command  rak mcp add|list|remove
 //!   keys_command rak keys: the key file and what is set
+//!   skills_command rak skills list|add|remove, and /skills add
 //!   settings     what is kept between runs
 //!   signals      Ctrl-C
 //!   editor, menu, markdown, welcome, style, term, commands
@@ -27,6 +28,7 @@ pub mod output;
 pub mod session;
 pub mod settings;
 pub mod signals;
+pub mod skills_command;
 pub mod style;
 pub mod term;
 pub mod welcome;

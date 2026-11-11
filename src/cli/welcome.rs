@@ -264,7 +264,7 @@ pub fn group(tools: &[&str], mcp_servers: &[(String, usize)]) -> Vec<(String, Ve
         ("files", &["list_dir", "search_files", "read_file", "view_image", "edit_file", "write_file"]),
         ("shell", &["run_shell"]),
         ("web", &["web_search", "fetch_url"]),
-        ("skills", &["use_skill"]),
+        ("skills", &["use_skill", "save_skill"]),
     ];
     let mut rest: Vec<&str> = tools.to_vec();
     let mut groups = Vec::new();

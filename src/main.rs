@@ -12,6 +12,9 @@ fn main() {
     if argv.first().map(String::as_str) == Some("keys") {
         cli::keys_command::run(&argv[1..]);
     }
+    if argv.first().map(String::as_str) == Some("skills") {
+        cli::skills_command::run(&argv[1..]);
+    }
     let options = cli::args::parse_args(argv);
     std::process::exit(cli::session::run(options));
 }

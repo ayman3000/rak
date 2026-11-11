@@ -48,6 +48,13 @@ pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
             let lines: Vec<String> = command.trim_end().lines().map(|l| format!("    {l}")).collect();
             format!("run_shell{background}:\n{}", lines.join("\n"))
         }
+        // A skill is instructions every later session follows: shown whole.
+        ("save_skill", _) => {
+            let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").trim();
+            let scope = if text("scope") == "project" { "this project only" } else { "every project" };
+            let body: Vec<String> = text("instructions").lines().map(|l| format!("    │ {l}")).collect();
+            format!("save_skill \"{}\" for {scope}:\n    {}\n{}", text("name"), text("description"), body.join("\n"))
+        }
         _ => describe(name, args),
     };
     format!("? allow {what}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ")
@@ -136,6 +143,18 @@ mod tests {
         let asked = question("run_shell", &script, None);
         assert!(
             asked.starts_with("? allow run_shell (in the background):\n    mkdir -p Build\n    swiftc App.swift -o Build/App\n  [y]es"),
+            "{asked}"
+        );
+    }
+
+    #[test]
+    fn a_skill_is_shown_whole_before_it_is_saved() {
+        let skill = json!({ "name": "Deploy", "description": "Ship to staging", "instructions": "1. Test.\n2. Push.", "scope": "project" });
+        let asked = question("save_skill", &skill, None);
+        assert!(
+            asked.starts_with(
+                "? allow save_skill \"Deploy\" for this project only:\n    Ship to staging\n    │ 1. Test.\n    │ 2. Push.\n  [y]es"
+            ),
             "{asked}"
         );
     }

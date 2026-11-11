@@ -5,7 +5,7 @@ use super::session::{backend, make_provider, run_one, window_for, Session};
 use super::settings::{home, key_files, save_model};
 use super::style::{cut, pad, paint, Style};
 use super::welcome::grouped;
-use super::{commands, menu, term, welcome, VERSION};
+use super::{commands, menu, skills_command, term, welcome, VERSION};
 use rak::provider::Model;
 use rak::text::one_line;
 use serde_json::json;
@@ -34,7 +34,10 @@ pub fn banner(s: &Session) {
             .iter()
             .map(|_| ("notes".to_string(), "AGENTS.md".to_string()))
             .chain(key_files().iter().map(|f| ("config".to_string(), welcome::short_path(&f.to_string_lossy(), &home(), 26))))
-            .chain((!s.skills.is_empty()).then(|| ("skills".to_string(), format!("{} (/skills)", s.skills.len()))))
+            .chain({
+                let count = s.skills.read().unwrap().len();
+                (count > 0).then(|| ("skills".to_string(), format!("{count} (/skills)")))
+            })
             .collect(),
         tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
         tool_count: s.agent.tool_names().len(),
@@ -216,22 +219,24 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
                 println!("  {}", paint(color, Style::Yellow, problem));
             }
         }
-        "skills" => {
-            if s.skills.is_empty() {
-                println!("{}", dim("No skills. A skill is a Markdown file of know-how the agent loads when a task needs it:"));
-                println!("{}", dim("  .rak/skills/NAME.md in a project, or ~/.config/rak/skills/NAME.md for every project."));
-                println!("{}", dim("  It starts with \"# Name\" and a \"Description:\" line; folders with a SKILL.md work too."));
-            }
-            for skill in &s.skills {
-                println!("  {}  {}", paint(color, Style::Cyan, &skill.name), dim(&cut(&skill.description, 90)));
-                let place = if skill.builtin {
-                    "built into rak".to_string()
+        "skills" => match args.split_once(' ').unwrap_or((args, "")) {
+            ("add", source) if !source.trim().is_empty() => {
+                if s.o.no_skills {
+                    println!("{}", dim("Skills are off for this run (--no-skills)."));
                 } else {
-                    welcome::short_path(&skill.file.to_string_lossy(), &home(), 70)
-                };
-                println!("    {}", dim(&place));
+                    match skills_command::add(source.trim(), &s.skill_folder, false, color) {
+                        Ok(Some(skill)) => {
+                            println!("{}", dim(&format!("The agent can load \"{}\" now.", skill.name)));
+                            rak::skills::save::share(&s.skills, skill);
+                        }
+                        Ok(None) => {}
+                        Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+                    }
+                }
             }
-        }
+            ("add", _) => println!("{}", dim("usage: /skills add URL-or-FILE")),
+            _ => skills_command::print_list(&s.skills.read().unwrap(), color),
+        },
         "notes" => match &s.notes {
             Some(notes) => println!("{}", notes.trim()),
             None => println!("{}", dim("No project notes (no AGENTS.md in this folder).")),

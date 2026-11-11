@@ -15,9 +15,24 @@
 //! A skill's files (references, templates, scripts) are never read for the
 //! model: the instructions name them, and the model reads one when it needs it.
 
+pub mod fetch;
+pub mod save;
+
 use crate::tools::{str_arg, Tool, ToolResult};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+
+/// The skills of a run, shared: a skill saved with `save_skill` can be loaded
+/// with `use_skill` straight away.
+pub type Shared = Arc<RwLock<Vec<Skill>>>;
+
+/// The folders skills are read from, first one winning: the project's own
+/// (`.rak/skills`), then the user's (`~/.config/rak/skills`) when there is a
+/// config folder.
+pub fn folders(project: &Path, config_dir: Option<&Path>) -> Vec<PathBuf> {
+    std::iter::once(project.join(".rak").join("skills")).chain(config_dir.map(|d| d.join("skills"))).collect()
+}
 
 const MAX_DESCRIPTION_CHARS: usize = 200;
 
@@ -154,7 +169,10 @@ pub fn load(folders: &[PathBuf]) -> Vec<Skill> {
 
 /// Skills shipped inside rak: (file in the repository's skills/ folder, its
 /// text, the systems it applies to; empty means every system).
-const BUILT_IN: &[(&str, &str, &[&str])] = &[("skills/ios-app.md", include_str!("../skills/ios-app.md"), &["macos"])];
+const BUILT_IN: &[(&str, &str, &[&str])] = &[
+    ("skills/ios-app.md", include_str!("../../skills/ios-app.md"), &["macos"]),
+    ("skills/write-skill.md", include_str!("../../skills/write-skill.md"), &[]),
+];
 
 /// The skills built into rak that apply on this system (`std::env::consts::OS`).
 pub fn built_in(os: &str) -> Vec<Skill> {
@@ -197,11 +215,11 @@ pub fn index(skills: &[Skill]) -> String {
 
 /// Loads a skill's full instructions.
 pub struct UseSkill {
-    skills: Vec<Skill>,
+    skills: Shared,
 }
 
 impl UseSkill {
-    pub fn new(skills: Vec<Skill>) -> Self {
+    pub fn new(skills: Shared) -> Self {
         UseSkill { skills }
     }
 }
@@ -226,11 +244,12 @@ impl Tool for UseSkill {
         let Some(wanted) = str_arg(args, "name").map(str::trim).filter(|n| !n.is_empty()) else {
             return ToolResult::err("use_skill requires `name`.");
         };
-        match self.skills.iter().find(|s| s.name.eq_ignore_ascii_case(wanted)) {
+        let skills = self.skills.read().unwrap();
+        match skills.iter().find(|s| s.name.eq_ignore_ascii_case(wanted)) {
             Some(skill) => ToolResult::ok(skill.render()),
             // An unknown name gets the list, so the model can correct itself in one step.
             None => {
-                let names: Vec<&str> = self.skills.iter().map(|s| s.name.as_str()).collect();
+                let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
                 ToolResult::err(format!("No skill named \"{wanted}\". Available skills: {}.", names.join(", ")))
             }
         }
@@ -276,7 +295,9 @@ mod tests {
         }
         let mac = built_in("macos");
         assert!(mac.iter().any(|s| s.name == "iOS app" && s.builtin && s.resources.is_none()));
-        assert!(built_in("linux").iter().all(|s| s.name != "iOS app"), "no iOS skill off a Mac");
+        let linux = built_in("linux");
+        assert!(linux.iter().all(|s| s.name != "iOS app"), "no iOS skill off a Mac");
+        assert!(linux.iter().any(|s| s.name == "Write a skill"), "writing skills works everywhere");
     }
 
     #[test]
@@ -314,7 +335,7 @@ mod tests {
         assert!(text.contains("- Deploy — project version\n- pdf-tools — PDFs"));
         assert!(index(&[]).is_empty());
 
-        let tool = UseSkill::new(skills);
+        let tool = UseSkill::new(Arc::new(RwLock::new(skills)));
         assert!(!tool.needs_approval());
         let loaded = tool.run(&json!({ "name": "deploy" }));
         assert!(loaded.ok && loaded.text.contains("Steps.") && loaded.text.contains("ships files in"), "{}", loaded.text);

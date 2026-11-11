@@ -7,7 +7,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/models", "list the models the server offers"),
     ("/tools", "list the tools the agent can use"),
     ("/mcp", "the MCP servers and their tools"),
-    ("/skills", "the skills the agent can load"),
+    ("/skills", "the skills the agent can load; /skills add URL adds one"),
     ("/notes", "show the project notes rak loaded (AGENTS.md)"),
     ("/yes", "toggle auto-approve for edits and shell commands"),
     ("/usage", "tokens and tool calls so far"),

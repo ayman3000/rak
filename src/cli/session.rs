@@ -37,7 +37,9 @@ pub struct Session {
     /// Where the window's number came from, for /usage.
     pub window_source: &'static str,
     pub notes: Option<String>,
-    pub skills: Vec<rak::skills::Skill>,
+    pub skills: rak::skills::Shared,
+    /// Where `/skills add` saves: the user's skills folder, else the project's.
+    pub skill_folder: PathBuf,
     pub requests: usize,
     /// The built-in tools' names, and what the MCP servers brought.
     pub core_tools: Vec<String>,
@@ -159,19 +161,27 @@ pub fn run(mut o: Options) -> i32 {
     let config =
         Config { system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()), max_turns: o.max_turns, context_window: window };
     // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
-    let skill_folders: Vec<PathBuf> =
-        std::iter::once(ctx.cwd.join(".rak").join("skills")).chain(config_dir().map(|d| d.join("skills"))).collect();
+    let skill_folders = rak::skills::folders(&ctx.cwd, config_dir().as_deref());
     // Plus the ones built into rak for this system; --no-skills leaves all of them out.
-    let skills = if o.no_skills { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
+    let loaded = if o.no_skills { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
     let mut config = config;
-    config.system_prompt.push_str(&rak::skills::index(&skills));
+    // The index is fixed for the session, so the prompt stays cacheable; a skill
+    // saved now is loadable at once and listed from the next session.
+    config.system_prompt.push_str(&rak::skills::index(&loaded));
+    let skills: rak::skills::Shared = std::sync::Arc::new(std::sync::RwLock::new(loaded));
     let mut tools = core_tools(&ctx, o.read_only);
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
         tools.push(Box::new(WebSearch::new(tavily)));
     }
-    if !skills.is_empty() {
+    if !o.no_skills {
         tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));
+        // Writing skills changes what later sessions do, so read-only leaves it out.
+        if !o.read_only {
+            config.system_prompt.push_str(rak::skills::save::LEARNING);
+            let user = skill_folders.get(1).cloned();
+            tools.push(Box::new(rak::skills::save::SaveSkill::new(skills.clone(), skill_folders[0].clone(), user)));
+        }
     }
     // view_image, unless the server says the model can't see.
     if provider.sees_images() != Some(false) {
@@ -188,8 +198,12 @@ pub fn run(mut o: Options) -> i32 {
     let mcp_summary = connected.summary();
     tools.append(&mut connected.tools);
 
+    let learns = tools.iter().any(|t| t.name() == "save_skill");
     let mut agent = Agent::new(provider, tools, config);
     agent.stop = stop.clone();
+    if learns {
+        agent.refusal_note.push_str(rak::skills::save::AFTER_REFUSAL);
+    }
 
     let log = Log::open(o.log.as_ref());
     let live = stdout_tty && !o.json && !o.no_stream;
@@ -236,6 +250,7 @@ pub fn run(mut o: Options) -> i32 {
         window,
         window_source,
         notes,
+        skill_folder: skill_folders.last().cloned().unwrap_or_default(),
         skills,
         requests: 0,
         core_tools: core_tool_names,

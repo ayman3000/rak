@@ -145,7 +145,7 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/models` | List the models the server offers. |
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
-| `/skills` | List the skills the agent can load. |
+| `/skills` | List the skills the agent can load. `/skills add URL` adds one (it shows it and asks first). |
 | `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
@@ -217,15 +217,43 @@ rak reads skills from `.rak/skills/` in the project, then from `~/.config/rak/sk
 - **`NAME.md`**, as in SwiftAgentKit and sak: a `# Name` line, a `Description:` line, then the instructions. Files the skill ships (templates, references, scripts) go in a folder `NAME/` beside it.
 - **A folder with a `SKILL.md`**, as in Claude's Agent Skills: a `---` block with `name:` and `description:`, then the instructions. The folder holds the skill's files.
 
-The model reads a skill's files only when the instructions point it at one. In a chat, `/skills` lists the skills and where each came from; without any skills there is no `use_skill` tool and no cost.
+The model reads a skill's files only when the instructions point it at one. In a chat, `/skills` lists the skills and where each came from.
+
+### Writing skills with the agent
+
+The agent can write skills: `save_skill` saves one (a `NAME.md` in SwiftAgentKit's format) to `~/.config/rak/skills/` or, for this project only, to `.rak/skills/`. It works the way SwiftAgentKit's `learn_skill` does, with one difference: the user approves every save, because a skill is instructions every later session follows. The approval shows the whole skill. A saved skill can be loaded at once; the skills index in the prompt lists it from the next session, so the prompt stays the same within a session and stays cached.
+
+- **When the user asks for a skill,** the agent loads the built-in skill `Write a skill` and guides them. It asks only what it is missing (the task, how it is done now, how the result is checked, what to avoid, which projects it is for), shows the draft, and saves it once they agree.
+- **After a mistake,** the agent keeps the lesson. The system prompt tells it to save one when the user corrects it, or when something worked only after failed tries. And when the user says no to a tool call, the model is reminded to save what the user says next.
+
+Tried with kimi-k2.6:cloud (2026-11-11), in a test folder:
+
+- **Asked for "a skill for writing git commit messages the way my team does":** it loaded `Write a skill` and asked three questions. After the answers it showed a draft, saved it when told to, and the file was there.
+- **Corrected after recovering on its own:** told to run `python3 test_app.py`, it saw the error and switched to `./check.sh`. The user then said "Next time don't run the file directly: in this project tests always go through `./check.sh`, because it sets APP_ENV first". It saved a project skill holding the rule and the reason. A new session asked to "run the tests" loaded that skill and ran `./check.sh` first.
+- **Corrected after a refusal:** the user said no to `APP_ENV=test python3 test_app.py` and wrote "No. In this project tests always go through ./check.sh…". In three tries, each with a different wording of the prompt line, it ran `./check.sh` but kept nothing. With the reminder added to what the model is told after a no, the same exchange made it save the lesson unasked (one try).
+- **A plain correction with no refusal and no "next time"** was tried once, before the prompt line existed, and nothing was kept.
+
+These are a handful of tries with one model, not a measurement. A lesson was kept when the user said no to a step or said the correction was for next time. If a correction matters, you can also just ask the agent to save it.
+
+### Adding skills from elsewhere
+
+```bash
+rak skills add https://github.com/anthropics/skills/tree/main/skills/pdf
+rak skills add ./deploy.md --project
+rak skills                    # list them
+rak skills remove pdf
+```
+
+`rak skills add` takes a web address or a file. For GitHub, a file's page or a skill folder's page both work; for a folder, it also downloads the files the skill ships (scripts, references), through GitHub's API. Before saving it shows the skill and its files, and points out lines worth reading first: commands piped into a shell, deletions, `~/.ssh`, `.env`, and text telling the agent to ignore the user. That list is a hint, not a verdict: read the skill. Saving asks unless you pass `-y`. In a chat, `/skills add URL` does the same, and the agent can load the skill straight away. Like SwiftAgentKit's `import_skill`, nothing fetched is trusted before a person has seen it.
 
 **Built-in skills.** rak ships with skills of its own, compiled into the binary from the repository's [`skills/`](skills) folder, and offers each only on the systems it applies to. A skill of yours with the same name replaces a built-in one, and `--no-skills` leaves all skills out of a run. `/skills` says which are built in.
 
 | Skill | Offered on | What it does |
 |---|---|---|
 | `iOS app` | macOS | Builds an iOS app from the terminal and runs it in the Simulator (below) |
+| `Write a skill` | all | How to write a good skill, guide the user through one, keep a lesson, and review one from a web address |
 
-On a Mac, the iOS skill adds 127 input tokens to each model call (its line in the prompt and the `use_skill` tool); most of that is read back from the server's cache.
+Skills cost input tokens on every model call, mostly read back from the server's cache. Measured with kimi-k2.6:cloud on a Mac, asking for one word: 1,157 tokens with `--no-skills` and 1,459 with skills, so 302 more. That covers both built-in skills' index lines, the `use_skill` and `save_skill` tools, and the line about keeping lessons. `--read-only` leaves out `save_skill` and that line.
 
 [`skills/ios-app.md`](skills/ios-app.md) builds an iOS app from the terminal and runs it in the Simulator, without an Xcode project: `swiftc` for the Simulator, `simctl` to install, launch and screenshot it, and a Swift package for logic tests. Without it, gemma4:31b-cloud asked to "create an Xcode weather project with one nice screen and test it" invented a command that does not exist (`xcodebuild -create-project`), then gave up on the Simulator and told the user to finish in Xcode. With it, the same model built the app, fixed its own compile error, launched it in the Simulator, ran its test, and reported which checks it made.
 
@@ -319,6 +347,7 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 | `anthropic.rs` | Claude through Anthropic's Messages API: caching, thinking blocks, refusal fallbacks. |
 | `tools/` | The `Tool` trait and the six built-in tools; `Ctx` holds what they share; `verify` is the write check. |
 | `mcp/` | `config` (mcp.json), `client` (one server connection), and the bridge that turns a server's tools into `Tool`s. |
+| `skills/` | Reading skills, the index and `use_skill`; `save` writes and removes them (`save_skill`); `fetch` gets one from a web address. |
 | `interrupt.rs`, `read_slice.rs`, `text.rs` | The stop flag, the file-read window, small text helpers. |
 
 | Command (`src/cli/`) | |
@@ -326,7 +355,7 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 | `args`, `session` | The command line; one run set up from it, and a request run and reported. |
 | `chat` | The chat loop and its slash commands. |
 | `approval`, `output`, `log` | Asking before changes; what is shown; `--log`. |
-| `mcp_command` | `rak mcp add/list/remove`. |
+| `mcp_command`, `skills_command`, `keys_command` | `rak mcp add/list/remove`, `rak skills list/add/remove`, `rak keys`. |
 | `editor`, `menu`, `markdown`, `welcome`, `style`, `term` | The interface's parts. Each is pure where it can be, and tested. |
 | `settings`, `signals` | What is kept between runs; Ctrl-C. |
 
