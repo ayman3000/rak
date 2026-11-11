@@ -50,6 +50,8 @@ BEHAVIOUR
       --any-path          let file tools reach outside the project folder
       --no-mcp            don't connect the MCP servers for this run
       --no-skills         no skills for this run, built-in ones included
+  -c, --continue          continue this folder's last chat (chats are saved
+                          after every request; /resume lists them)
   -C, --cwd DIR           the project folder (default: where rak was started)
       --max-turns N       model calls allowed per request (default 30)
 
@@ -65,6 +67,7 @@ EXIT CODES
   130 stopped with Ctrl-C
 ";
 
+#[derive(Clone)]
 pub struct Options {
     pub task: Option<String>,
     pub model: Option<String>,
@@ -82,6 +85,7 @@ pub struct Options {
     pub any_path: bool,
     pub no_mcp: bool,
     pub no_skills: bool,
+    pub continue_last: bool,
     pub cwd: Option<PathBuf>,
     pub max_turns: usize,
     pub json: bool,
@@ -111,6 +115,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         any_path: false,
         no_mcp: false,
         no_skills: false,
+        continue_last: false,
         cwd: None,
         max_turns: 30,
         json: false,
@@ -152,6 +157,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--any-path" => o.any_path = true,
             "--no-mcp" => o.no_mcp = true,
             "--no-skills" => o.no_skills = true,
+            "-c" | "--continue" => o.continue_last = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
             "--json" => o.json = true,

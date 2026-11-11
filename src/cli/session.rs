@@ -47,7 +47,43 @@ pub struct Session {
     pub mcp_summary: Option<String>,
     pub mcp_problems: Vec<String>,
     pub server_of: std::collections::HashMap<String, String>,
+    /// Where chats are saved (`~/.config/rak/sessions`), this project's folder
+    /// in it, and this chat's id.
+    pub sessions_dir: Option<PathBuf>,
+    pub project_key: String,
+    pub chat_id: String,
+    pub todo: rak::tools::todo::TodoList,
+    /// The model delegate's helpers use, and what they spent since it was last counted.
+    pub helper_model: Rc<RefCell<(Backend, String, usize)>>,
+    pub helper_usage: Rc<Cell<rak::provider::Usage>>,
 }
+
+impl Session {
+    /// Saves the chat; a no-op without a config folder or before the first request.
+    pub fn save_chat(&self) {
+        let Some(dir) = &self.sessions_dir else { return };
+        if self.agent.history().is_empty() {
+            return;
+        }
+        if let Err(why) = rak::sessions::save(dir, &self.project_key, &self.chat_id, self.agent.history(), &self.model) {
+            self.ui.borrow_mut().progress(Some(Style::Yellow), &format!("chat not saved: {why}"));
+        }
+    }
+
+    /// Picks up a saved chat; it is saved under its own id from then on.
+    pub fn resume(&mut self, path: &std::path::Path) -> Result<usize, String> {
+        let history = rak::sessions::load(path)?;
+        let count = history.len();
+        self.agent.restore(history);
+        self.chat_id = rak::sessions::id_of(path);
+        Ok(count)
+    }
+}
+
+/// Added to the system prompt with code_map, delegate and todo.
+const BIG_PROJECTS: &str = "\n\nIn a codebase you don't know yet, start with code_map, then read only the parts you need \
+     (read_file with start_line and end_line). Give a question that means reading many files to delegate, so your own context \
+     keeps room for the work. For work with three or more steps, keep a todo list.";
 
 /// Which API rak speaks, where, and with which key.
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +205,18 @@ pub fn run(mut o: Options) -> i32 {
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
     let skills: rak::skills::Shared = std::sync::Arc::new(std::sync::RwLock::new(loaded));
+    let log = Log::open(o.log.as_ref());
+    let live = stdout_tty && !o.json && !o.no_stream;
+    let ui = Rc::new(RefCell::new(Ui {
+        chat,
+        show: !o.quiet && !o.json,
+        out_color,
+        err_color,
+        live,
+        renderer: (out_color && !o.json).then(markdown::Renderer::default),
+        line_open: false,
+    }));
+
     let mut tools = core_tools(&ctx, o.read_only);
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
@@ -187,6 +235,40 @@ pub fn run(mut o: Options) -> i32 {
     if provider.sees_images() != Some(false) {
         tools.push(Box::new(rak::tools::image::ViewImage(ctx.clone())));
     }
+    // delegate: a helper agent with read-only tools and a fresh context, on
+    // the chat's current model (`helper_model`, kept up to date by /model).
+    let helper_model = Rc::new(RefCell::new((backend.clone(), model_name.clone(), window)));
+    let delegate = {
+        let (current, o, stop, ui, ctx) = (helper_model.clone(), o.clone(), stop.clone(), ui.clone(), ctx.clone());
+        let (notes, tavily) = (notes.clone(), key("TAVILY_API_KEY"));
+        rak::delegate::Delegate::new(Box::new(move || {
+            let (backend, model, window) = current.borrow().clone();
+            let mut tools = core_tools(&ctx, true);
+            if let Some(tavily) = &tavily {
+                tools.push(Box::new(WebSearch::new(tavily.clone())));
+            }
+            let mut system_prompt = system_prompt(&ctx.cwd, true, notes.as_deref());
+            system_prompt.push_str(rak::delegate::HELPER_NOTE);
+            let config = Config { system_prompt, max_turns: 25, context_window: window };
+            let mut helper = Agent::new(make_provider(&o, &backend, &model, &stop), tools, config);
+            helper.stop = stop.clone();
+            let ui = ui.clone();
+            helper.on_event(move |event| {
+                if let rak::agent::Event::ToolStarted { name, args } = event {
+                    ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {}", output::describe(name, args)));
+                }
+            });
+            helper
+        }))
+    };
+    let helper_usage = delegate.usage.clone();
+    tools.push(Box::new(delegate));
+    // When to use code_map, delegate and todo: without this line, models
+    // searched and read whole files of a 45-file project instead.
+    config.system_prompt.push_str(BIG_PROJECTS);
+    // The task list, for work with several steps.
+    let todo = rak::tools::todo::TodoList::default();
+    tools.push(Box::new(rak::tools::todo::Todo(todo.clone())));
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
 
     // Tools from MCP servers join the built-in ones.
@@ -204,19 +286,10 @@ pub fn run(mut o: Options) -> i32 {
     if learns {
         agent.refusal_note.push_str(rak::skills::save::AFTER_REFUSAL);
     }
+    let open_steps = todo.clone();
+    agent.finish_check = Some(Box::new(move || open_steps.open_note()));
 
-    let log = Log::open(o.log.as_ref());
-    let live = stdout_tty && !o.json && !o.no_stream;
     agent.stream = live;
-    let ui = Rc::new(RefCell::new(Ui {
-        chat,
-        show: !o.quiet && !o.json,
-        out_color,
-        err_color,
-        live,
-        renderer: (out_color && !o.json).then(markdown::Renderer::default),
-        line_open: false,
-    }));
 
     // Approvals: -y (or /yes) runs everything; otherwise ask at the terminal,
     // and with no terminal to ask, stop rather than let the model look for
@@ -258,7 +331,25 @@ pub fn run(mut o: Options) -> i32 {
         mcp_summary,
         mcp_problems,
         server_of: connected.server_of,
+        sessions_dir: config_dir().map(|d| d.join("sessions")),
+        project_key: rak::sessions::project_key(&ctx.cwd),
+        chat_id: rak::sessions::new_id(),
+        todo,
+        helper_model,
+        helper_usage,
     };
+
+    if session.o.continue_last {
+        let last = session.sessions_dir.as_ref().and_then(|dir| rak::sessions::list(dir, &session.project_key).into_iter().next());
+        let note = match last {
+            Some(saved) => match session.resume(&saved.path) {
+                Ok(_) => format!("(continuing this folder's last chat: {})", saved.title),
+                Err(why) => format!("(could not continue the last chat: {why})"),
+            },
+            None => "(no earlier chat in this folder — starting fresh)".to_string(),
+        };
+        session.ui.borrow_mut().progress(Some(Style::Dim), &note);
+    }
 
     if chat {
         chat::run(&mut session, &mut editor);
@@ -294,8 +385,12 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     s.log.write(json!({ "event": "request", "text": task }));
     s.requests += 1;
     s.stop.clear();
+    s.todo.begin_request();
     signals::set_running(true);
     let RunResult { outcome, answer, turns } = s.agent.run(task);
+    // What delegate's helpers spent counts as this request's too.
+    let helpers = s.helper_usage.take();
+    s.agent.usage.add(helpers);
     signals::set_running(false);
     let seconds = (started.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     let input = s.agent.usage.input - usage_before.input;
@@ -321,6 +416,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let mut entry = summary.clone();
     entry["event"] = json!("finish");
     s.log.write(entry);
+    s.save_chat();
 
     if s.o.json {
         println!("{summary}");

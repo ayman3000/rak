@@ -3,7 +3,9 @@
 
 pub mod fs;
 pub mod image;
+pub mod map;
 pub mod shell;
+pub mod todo;
 pub mod verify;
 pub mod web;
 
@@ -65,8 +67,12 @@ pub fn definition(tool: &dyn Tool) -> Value {
 
 /// The standard set. Read-only leaves out everything that changes the machine.
 pub fn core_tools(ctx: &Arc<Ctx>, read_only: bool) -> Vec<Box<dyn Tool>> {
-    let mut tools: Vec<Box<dyn Tool>> =
-        vec![Box::new(fs::ListDir(ctx.clone())), Box::new(fs::SearchFiles(ctx.clone())), Box::new(fs::ReadFile(ctx.clone()))];
+    let mut tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(fs::ListDir(ctx.clone())),
+        Box::new(fs::SearchFiles(ctx.clone())),
+        Box::new(map::CodeMap(ctx.clone())),
+        Box::new(fs::ReadFile(ctx.clone())),
+    ];
     if !read_only {
         tools.push(Box::new(fs::WriteFile(ctx.clone())));
         tools.push(Box::new(fs::EditFile(ctx.clone())));

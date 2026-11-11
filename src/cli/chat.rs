@@ -153,6 +153,7 @@ pub fn switch_model(s: &mut Session, model: &str) {
     let moved = backend.anthropic != s.backend.anthropic;
     s.backend = backend;
     s.model = model.to_string();
+    *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
     save_model(model);
     s.log.write(json!({ "event": "model", "model": model, "provider": if s.backend.anthropic { "anthropic" } else { "openai" } }));
     let via = if moved { format!(" at {}", welcome::server_name(&s.backend.base_url)) } else { String::new() };
@@ -262,10 +263,47 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
         }
         "clear" | "reset" | "new" => {
             s.agent.clear();
-            println!("{}", dim("(conversation cleared)"));
+            s.chat_id = rak::sessions::new_id();
+            println!("{}", dim("(new conversation — the last one is saved: /resume)"));
         }
+        "resume" | "load" => resume(s, args.trim(), color),
         "exit" | "quit" | "q" => return false,
         other => println!("{}", paint(color, Style::Yellow, &format!("Unknown command /{other}. Type /help."))),
     }
     true
+}
+
+/// `/resume`: the folder's saved chats; `/resume N` picks one up.
+fn resume(s: &mut Session, args: &str, color: bool) {
+    let dim = |t: &str| paint(color, Style::Dim, t);
+    let Some(dir) = s.sessions_dir.clone() else {
+        println!("{}", dim("No config folder, so no saved chats."));
+        return;
+    };
+    let saved: Vec<_> = rak::sessions::list(&dir, &s.project_key)
+        .into_iter()
+        .filter(|c| c.path.file_stem().is_some_and(|id| id.to_string_lossy() != s.chat_id))
+        .collect();
+    if args.is_empty() {
+        if saved.is_empty() {
+            println!("{}", dim("No other saved chats in this folder. Chats are saved after every request."));
+            return;
+        }
+        let now = rak::sessions::now_seconds();
+        for (n, chat) in saved.iter().take(15).enumerate() {
+            let when = format!("{}, {} messages", rak::sessions::age(chat.saved_at, now), chat.messages);
+            println!("  {}  {}  {}", paint(color, Style::Cyan, &format!("{:>2}", n + 1)), cut(&chat.title, 70), dim(&when));
+        }
+        println!("{}", dim("Pick one: /resume N. The current chat stays saved."));
+        return;
+    }
+    let Some(chat) = args.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| saved.get(i)) else {
+        println!("{}", paint(color, Style::Yellow, "usage: /resume N, with N from the list /resume shows"));
+        return;
+    };
+    s.save_chat();
+    match s.resume(&chat.path) {
+        Ok(count) => println!("Resumed {} ({count} messages).", paint(color, Style::Bold, &chat.title)),
+        Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+    }
 }

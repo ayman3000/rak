@@ -149,7 +149,8 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
-| `/clear` | Start a fresh conversation. |
+| `/clear` | Start a fresh conversation. The last one stays saved. |
+| `/resume` | This folder's saved chats, newest first, with when and how long. `/resume N` picks one up. |
 | `/help`, `/exit` | The list of commands; quit. |
 
 The history and the last model picked are kept in `~/.config/rak/`.
@@ -169,6 +170,7 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp` | Don't connect the MCP servers for this run. |
 | `--no-skills` | No skills for this run, built-in ones included. |
+| `-c`, `--continue` | Continue this folder's last chat, in a chat or with one request (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
 | `--json` | Print one JSON object: answer, outcome, turns, tokens (cached ones too), seconds. |
@@ -194,11 +196,14 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 |---|---|
 | `list_dir` | Lists a folder. |
 | `search_files` | Finds files by name and by text inside them. Skips `.git`, `node_modules`, `target`, `.build`. |
-| `read_file` | Reads a file. Files up to 40,000 characters come back in one call; small `limit`s are widened, because many small reads cost more than one large one. |
+| `code_map` | Maps the project: every source file with the functions, types and classes it defines, and their lines. Rust, Python, JavaScript/TypeScript, Swift, Go, Kotlin, Java, C#, Dart, Ruby and PHP; found line by line, without a parser, so an oddly written definition can be missed. Skips dependency, build and hidden folders; stops at about 14,000 characters and says so (a `path` maps one folder). |
+| `read_file` | Reads a file. Files up to 40,000 characters come back in one call; small `limit`s are widened, because many small reads cost more than one large one. `start_line` and `end_line` read just part of a file, such as a function `code_map` found. |
 | `view_image` | Shows the model an image file (PNG, JPEG, GIF, WebP), such as a screenshot it took, so it can check what a screen really shows. Offered only when the model can see: Claude always; on Ollama, models that list "vision" (gemma4 and kimi-k2.6 do, glm-5.2 does not); on other servers, offered and left to the server. Images count as about 1,600 tokens each against the context window, and old ones are dropped first when it fills. |
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. Checked before writing (below). |
 | `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. Checked before writing (below). |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
+| `todo` | The agent's task list for work with three or more steps, shown to you each time it changes. If the agent says it is done while steps it listed are still open, rak sends it back once to finish them or say why not. The list is never dropped when the context fills. |
+| `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file` or `edit_file` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
@@ -313,11 +318,31 @@ println!("{}", result.answer);
 
 A runnable version is in [examples/minimal.rs](examples/minimal.rs). Add your own tool by implementing `rak::tools::Tool`; plug in another model API by implementing `rak::provider::Model`.
 
+## Large projects
+
+What helps the agent on a project too big to read whole:
+
+- **Chats are saved** after every request, one file per chat in `~/.config/rak/sessions/`, 30 kept per project folder. `rak -c` continues the last one and `/resume` picks any. The system prompt is not saved: a resumed chat gets today's, with today's skills and notes.
+- **A map first.** `code_map` shows where everything is, and `read_file` with `start_line`/`end_line` reads only those lines.
+- **A plan it keeps.** `todo` holds the steps; rak checks them when the agent says it is done.
+- **A helper for searching.** `delegate` reads many files in its own context and returns only the answer.
+- **Memory across sessions.** `AGENTS.md` notes and project skills (`.rak/skills`) carry conventions and lessons into every chat.
+- **When the context fills,** old tool outputs are replaced by a note saying which call they came from (`read_file src/main.rs`) and how they began, so the agent knows what it no longer has.
+
+A line in the system prompt says when to use these. The four tools add 214 input tokens to every call (1,157 → 1,371 with skills off, kimi-k2.6:cloud).
+
+Tried with kimi-k2.6:cloud (2026-11-11):
+
+- **A multi-file build:** a library CLI in Python, with models, JSON storage, argparse commands and tests, done with `-y` in the benchmark's container. It kept a five-step task list from start to finish, ran its tests, and ran the CLI end to end. I ran its 7 tests again afterwards: they pass. Its first `todo` call named the field `name` instead of `text`; the tool now takes either.
+- **A question about rak's own code** (about 45 files): "every condition under which this program talks to Anthropic's API, with file:line". Without the system-prompt line, it never used `code_map` (128,000 and 185,000 input tokens in two runs). With it, it started with `code_map` each time; runs took 88,000, 136,000 and 211,000 tokens, so the model's own choices vary more than the tools change. The answers were right every time.
+- **`delegate`:** kimi did not choose it on its own, even for "summarize how every tool checks its inputs" (13 files read in its own context). Asked to use it, the helper found the right file; one line number was exact and one was off by five. The main conversation spent three turns.
+
+Not tried yet: a real codebase of thousands of files, a session long enough to fill the context, and `delegate` with Claude.
+
 ## What is missing
 
 Compared with sak, rak does not yet have:
 
-- saved sessions (`-c` to continue, `/save`, `/resume`)
 - Ctrl-R to search the history, and the "still running" note during a long tool call
 - fetching a whole web page (an MCP server can supply it)
 - Gemini's own API (use an OpenAI-compatible endpoint)
@@ -342,10 +367,12 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 
 | Library (`src/`) | |
 |---|---|
-| `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, context trimming. |
+| `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, context trimming, the finish check. |
+| `sessions.rs` | Saved chats: one JSON file per chat, per project folder. |
+| `delegate.rs` | The `delegate` tool: a helper agent run inside a tool call. |
 | `provider.rs` | The `Model` trait and the OpenAI-compatible client, streaming included. |
 | `anthropic.rs` | Claude through Anthropic's Messages API: caching, thinking blocks, refusal fallbacks. |
-| `tools/` | The `Tool` trait and the six built-in tools; `Ctx` holds what they share; `verify` is the write check. |
+| `tools/` | The `Tool` trait and the built-in tools (`fs`, `shell`, `map`, `todo`, `image`, `web`); `Ctx` holds what they share; `verify` is the write check. |
 | `mcp/` | `config` (mcp.json), `client` (one server connection), and the bridge that turns a server's tools into `Tool`s. |
 | `skills/` | Reading skills, the index and `use_skill`; `save` writes and removes them (`save_skill`); `fetch` gets one from a web address. |
 | `interrupt.rs`, `read_slice.rs`, `text.rs` | The stop flag, the file-read window, small text helpers. |

@@ -22,7 +22,8 @@ impl Tool for ReadFile {
     fn description(&self) -> &'static str {
         "Read a UTF-8 text file and return its contents. Files up to ~40,000 characters come back whole — \
          read them in ONE call. Use `offset` and `limit` only to page through genuinely large files, in big \
-         slices: every call re-sends the whole conversation, so many small reads cost far more than one large one."
+         slices: every call re-sends the whole conversation, so many small reads cost far more than one large one. \
+         In a big file, `start_line` and `end_line` (from code_map) read just that part: take a whole function or more."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -30,7 +31,9 @@ impl Tool for ReadFile {
             "properties": {
                 "path": { "type": "string", "description": "File path (a leading ~ is expanded)." },
                 "offset": { "type": "integer", "description": "Start character offset (default 0)." },
-                "limit": { "type": "integer", "description": "Max characters to read (default 40000). Small values are widened — paging in tiny slices is the most expensive way to read a file." }
+                "limit": { "type": "integer", "description": "Max characters to read (default 40000). Small values are widened — paging in tiny slices is the most expensive way to read a file." },
+                "start_line": { "type": "integer", "description": "First line to read (1-based); instead of offset." },
+                "end_line": { "type": "integer", "description": "Last line to read (default: start_line + 200)." }
             },
             "required": ["path"]
         })
@@ -47,6 +50,10 @@ impl Tool for ReadFile {
             Ok(t) => t,
             Err(e) => return e,
         };
+        if let Some(first) = int_arg(args, "start_line") {
+            self.0.note_seen(&path);
+            return ToolResult::ok(lines_of(&text, first.max(1) as usize, int_arg(args, "end_line").map(|n| n.max(1) as usize)));
+        }
         let chars: Vec<char> = text.chars().collect();
         let to_usize = |key| int_arg(args, key).map(|n| n.max(0) as usize);
         let slice = ReadSlice::new(chars.len(), to_usize("offset"), to_usize("limit"));
@@ -54,6 +61,19 @@ impl Tool for ReadFile {
         self.0.note_seen(&path);
         ToolResult::ok(slice.annotate(&body))
     }
+}
+
+/// Pure — unit-tested. Lines `first` to `last` (1-based, inclusive; at most
+/// 2,000), with a header saying where they are in the file.
+pub fn lines_of(text: &str, first: usize, last: Option<usize>) -> String {
+    let total = text.lines().count();
+    if first > total {
+        return format!("[the file has {total} lines; line {first} is past its end]");
+    }
+    let last = last.unwrap_or(first + 200).clamp(first, total).min(first + 1_999);
+    let body: Vec<&str> = text.lines().skip(first - 1).take(last - first + 1).collect();
+    let more = if last < total { format!(" — call again with start_line {} for more", last + 1) } else { String::new() };
+    format!("[lines {first}–{last} of {total}{more}]\n{}", body.join("\n"))
 }
 
 // MARK: write_file
@@ -331,7 +351,7 @@ const FILE_SCAN_CAP: usize = 20_000;
 /// Larger files are not searched for content: they are data, not source.
 const CONTENT_SIZE_CAP: u64 = 2_000_000;
 /// Folders that hold dependencies and build output, not the project's own code.
-const SKIPPED_DIRS: [&str; 5] = [".git", "node_modules", "target", ".build", "__pycache__"];
+pub(crate) const SKIPPED_DIRS: [&str; 5] = [".git", "node_modules", "target", ".build", "__pycache__"];
 
 impl Tool for SearchFiles {
     fn name(&self) -> &'static str {
@@ -430,6 +450,15 @@ impl Tool for SearchFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_range_of_lines_is_read_with_where_it_is() {
+        let text = "a\nb\nc\nd\ne";
+        assert_eq!(lines_of(text, 2, Some(3)), "[lines 2–3 of 5 — call again with start_line 4 for more]\nb\nc");
+        assert_eq!(lines_of(text, 4, None), "[lines 4–5 of 5]\nd\ne");
+        assert_eq!(lines_of(text, 3, Some(1)), "[lines 3–3 of 5 — call again with start_line 4 for more]\nc");
+        assert!(lines_of(text, 9, None).contains("past its end"));
+    }
     use crate::tools::testing::temp_dir;
 
     fn ctx(label: &str) -> Arc<Ctx> {

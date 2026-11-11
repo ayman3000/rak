@@ -7,10 +7,12 @@
 
 pub mod agent;
 pub mod anthropic;
+pub mod delegate;
 pub mod interrupt;
 pub mod mcp;
 pub mod provider;
 pub mod read_slice;
+pub mod sessions;
 pub mod skills;
 pub mod text;
 pub mod tools;

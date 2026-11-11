@@ -20,6 +20,12 @@ pub fn describe(name: &str, args: &Value) -> String {
         "edit_file" => format!("edit_file {}  ({} → {} lines)", text("path"), lines("old_text"), lines("new_text")),
         "write_file" => format!("write_file {}  ({} bytes)", text("path"), text("content").len()),
         "run_shell" => format!("run_shell {}", one_line(text("command"), 110)),
+        "delegate" => format!("delegate  {}", one_line(text("task"), 90)),
+        "todo" => {
+            let steps = args.get("steps").and_then(Value::as_array).map_or(0, Vec::len);
+            let done = args.get("steps").and_then(Value::as_array).map_or(0, |s| s.iter().filter(|s| s["status"] == "done").count());
+            format!("todo  ({done}/{steps} done)")
+        }
         "save_skill" => format!("save_skill \"{}\"  ({} lines)", one_line(text("name"), 60), lines("instructions")),
         _ => {
             let mut parts: Vec<String> = args
@@ -142,6 +148,11 @@ pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>)
                 log.write(json!({ "event": "tool_result", "tool": name, "ok": ok, "denied": denied, "ms": millis, "result": text }));
                 if *denied {
                     ui.progress(Some(Style::Yellow), "  ✗ not allowed");
+                } else if *name == "todo" && *ok {
+                    // The task list is shown whole: it is the plan the person follows.
+                    for line in text.lines().skip(1) {
+                        ui.progress(Some(Style::Dim), &fit(&format!("    {line}")));
+                    }
                 } else {
                     let line = format!("  {} {}", if *ok { "✓" } else { "✗" }, one_line(text, 110));
                     ui.progress(Some(if *ok { Style::Dim } else { Style::Red }), &fit(&line));

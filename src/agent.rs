@@ -110,6 +110,10 @@ pub struct Agent {
     /// What the model is told when the user says no to a tool call.
     /// `REFUSAL_NOTE` unless changed (rak adds a hint to keep the lesson).
     pub refusal_note: String,
+    /// Asked when the model gives its final answer: a note sends it back to
+    /// work (rak: steps still open in the task list). Should say something
+    /// only once per request, or the model never gets to finish.
+    pub finish_check: Option<Box<dyn FnMut() -> Option<String>>>,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -129,6 +133,7 @@ impl Agent {
             stop: Stop::new(),
             last_prompt_tokens: 0,
             refusal_note: REFUSAL_NOTE.to_string(),
+            finish_check: None,
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -165,6 +170,17 @@ impl Agent {
     pub fn clear(&mut self) {
         self.messages.truncate(1);
         self.last_prompt_tokens = 0;
+    }
+
+    /// The conversation without its system prompt: what a saved chat keeps.
+    pub fn history(&self) -> &[Value] {
+        &self.messages[1..]
+    }
+
+    /// Picks up a saved conversation under this agent's system prompt.
+    pub fn restore(&mut self, history: Vec<Value>) {
+        self.clear();
+        self.messages.extend(history.into_iter().filter(|m| m["role"] != "system"));
     }
 
     fn stopped(&mut self, turn: usize) -> RunResult {
@@ -212,6 +228,12 @@ impl Agent {
                     message["native"] = native.clone();
                 }
                 self.messages.push(message);
+                // Work left undone (an open task list): asked once to finish it.
+                if let Some(note) = self.finish_check.as_mut().and_then(|check| check()) {
+                    (self.on_event)(&Event::Note("the task list has open steps: asked to finish them"));
+                    self.messages.push(json!({ "role": "user", "content": note }));
+                    continue;
+                }
                 return RunResult { outcome: Outcome::Done, answer: reply.content, turns: turn };
             }
 
@@ -382,6 +404,18 @@ fn assistant_message(reply: &Reply) -> Value {
     message
 }
 
+/// Pure — unit-tested. What replaces a removed output: which call it was and
+/// how it began, so the model knows what it no longer has and can get it back.
+pub fn dropped_stub(call: Option<&(String, String)>, output: &str) -> String {
+    let Some((name, target)) = call else { return DROPPED.to_string() };
+    let first = output.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    format!(
+        "[output of {name} {target} removed to save context. It began: {}. Run it again if you need it.]",
+        crate::text::one_line(first, 120)
+    )
+    .replace("  ", " ")
+}
+
 /// Pure — unit-tested. When the conversation is longer than `budget_chars`,
 /// the oldest tool outputs are replaced by a one-line stub, oldest first, until
 /// it fits. The most recent messages are never touched. Returns how many
@@ -389,17 +423,42 @@ fn assistant_message(reply: &Reply) -> Value {
 pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
     let size = message_size;
     let mut total: usize = messages.iter().map(size).sum();
+    if total <= budget_chars {
+        return 0;
+    }
+    // Which call each output answered, so its stub can say what was removed.
+    let calls: std::collections::HashMap<String, (String, String)> = messages
+        .iter()
+        .filter_map(|m| m["tool_calls"].as_array())
+        .flatten()
+        .filter_map(|call| {
+            let id = call["id"].as_str()?.to_string();
+            let name = call["function"]["name"].as_str()?.to_string();
+            let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}")).unwrap_or_default();
+            let target = ["path", "command", "directory", "task", "query", "name"]
+                .iter()
+                .find_map(|k| args[*k].as_str())
+                .map(|t| crate::text::one_line(t, 80))
+                .unwrap_or_default();
+            Some((id, (name, target)))
+        })
+        .collect();
     let last_droppable = messages.len().saturating_sub(KEEP_RECENT);
     let mut dropped = 0;
     for message in messages[..last_droppable].iter_mut() {
         if total <= budget_chars {
             break;
         }
-        let is_big_tool_output = message["role"] == "tool" && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 2);
+        let call = message["tool_call_id"].as_str().and_then(|id| calls.get(id)).cloned();
+        // The task list is the plan: it stays.
+        let is_plan = call.as_ref().is_some_and(|(name, _)| name == "todo");
+        let is_big_tool_output = message["role"] == "tool"
+            && !is_plan
+            && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 3 && !c.starts_with("[output of "));
         let has_image = message["content"].as_array().is_some_and(|parts| parts.iter().any(|p| p["type"] == "image_url"));
         if is_big_tool_output {
             let before = size(message);
-            message["content"] = json!(DROPPED);
+            message["content"] = json!(dropped_stub(call.as_ref(), message["content"].as_str().unwrap_or("")));
             total -= before - size(message);
             dropped += 1;
         } else if has_image {
@@ -533,6 +592,21 @@ mod tests {
     }
 
     #[test]
+    fn work_left_open_sends_the_model_back_once() {
+        let mut s = setup("finish-check", vec![Ok(text("Done.")), Ok(text("Now really done."))], 10);
+        let mut asked = 0;
+        s.agent.finish_check = Some(Box::new(move || {
+            asked += 1;
+            (asked == 1).then(|| "[task list] Run the tests.".to_string())
+        }));
+        let result = s.agent.run("fix it");
+        assert_eq!(result.outcome, Outcome::Done);
+        assert_eq!((result.answer.as_str(), result.turns), ("Now really done.", 2));
+        let second = &s.seen.borrow()[1];
+        assert_eq!(second.last().unwrap()["content"], "[task list] Run the tests.");
+    }
+
+    #[test]
     fn a_no_stops_the_request_and_every_call_still_gets_a_result() {
         let mut s = setup(
             "refuse",
@@ -631,6 +705,32 @@ mod tests {
         assert_eq!(messages[1]["content"], DROPPED);
         assert_eq!(messages[20]["content"].as_str().unwrap().len(), 4_000, "recent output is kept");
         assert_eq!(trim_context(&mut messages, 1_000_000), 0);
+    }
+
+    #[test]
+    fn a_removed_output_names_its_call_and_the_task_list_is_kept() {
+        let big = format!("fn main() {{}}\n{}", "x".repeat(4_000));
+        let call = |id: &str, name: &str, args: Value| {
+            json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": id, "type": "function",
+                "function": { "name": name, "arguments": args.to_string() } }] })
+        };
+        let mut messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            call("a", "todo", json!({ "steps": [] })),
+            json!({ "role": "tool", "tool_call_id": "a", "content": format!("Task list (0/1 done):\n[ ] {}", "y".repeat(4_000)) }),
+            call("b", "read_file", json!({ "path": "src/main.rs" })),
+            json!({ "role": "tool", "tool_call_id": "b", "content": big }),
+        ];
+        for i in 0..KEEP_RECENT {
+            messages.push(json!({ "role": "user", "content": format!("filler {i}") }));
+        }
+        assert_eq!(trim_context(&mut messages, 1_000), 1);
+        assert!(messages[2]["content"].as_str().unwrap().starts_with("Task list"), "the plan stays");
+        assert_eq!(
+            messages[4]["content"],
+            "[output of read_file src/main.rs removed to save context. It began: fn main() {}. Run it again if you need it.]"
+        );
+        assert_eq!(dropped_stub(None, "x"), DROPPED);
     }
 
     #[test]
