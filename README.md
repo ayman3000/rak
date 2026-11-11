@@ -38,11 +38,15 @@ cargo install --path .
 
 ## Use
 
-rak talks to any server that speaks OpenAI's chat-completions API: OpenAI, OpenRouter, Ollama, Hugging Face's router, vLLM, llama.cpp, LM Studio.
+rak talks to any server that speaks OpenAI's chat-completions API (OpenAI, OpenRouter, Ollama, Hugging Face's router, vLLM, llama.cpp, LM Studio), and to Claude through Anthropic's own API.
 
 ```bash
 # Ollama on this machine (the default address)
 rak -m kimi-k2.6:cloud "explain what this project does"
+
+# Claude: with ANTHROPIC_API_KEY set, a claude-* model uses Anthropic's API
+export ANTHROPIC_API_KEY=...
+rak -m claude-opus-5-5 "fix the failing test"
 
 # Any other server
 export RAK_BASE_URL=https://openrouter.ai/api/v1
@@ -52,6 +56,19 @@ rak -m some/model "add a --verbose flag to the CLI"
 # No task: a chat
 rak -m kimi-k2.6:cloud
 ```
+
+### Claude and prompt caching
+
+An agent sends the whole conversation again with every model call, so most of what it pays for is input it sent before. Prompt caching lets the server read that part back for a fraction of the price: on Anthropic's API a cache read costs a tenth of normal input, or less on the newest models.
+
+rak speaks Anthropic's Messages API directly for this, rather than going through its OpenAI-compatible endpoint:
+
+- **Caching** uses two markers: one on the system prompt (which covers the tools too, since they come first), and the automatic one that follows the end of the conversation. Each call then reads back everything the previous call sent.
+- **Thinking blocks** are sent back unchanged with each request, as the API requires.
+- **Refusals.** For the models that can decline a request (Claude Fable 5.2 and 5.1, Opus 5.5 and 5, Sonnet 5.5), rak asks for Anthropic's server-side fallback: on a decline, the API answers with the model it recommends in the same call. A decline with no fallback ends the request and says why.
+- **The context window** is read from Anthropic's models list.
+
+After each request rak shows how much of the input came from the cache (`6220 tokens in (3000 cached)`), and `/usage` and `--json` include it. Servers on the chat-completions API that report cached tokens show them the same way; Ollama's cloud models do.
 
 ## Chat
 
@@ -106,11 +123,12 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | Option | What it does |
 |---|---|
 | `-m`, `--model NAME` | Model to use. Or set `RAK_MODEL`. A chat can start without one. |
-| `--base-url URL` | Server address. Or set `RAK_BASE_URL`. Default `http://localhost:11434/v1`. |
-| `--api-key-env NAME` | Environment variable holding the key. Default `RAK_API_KEY`, then `OPENAI_API_KEY`. |
-| `--effort LEVEL` | Reasoning effort: `low`, `medium` or `high`. |
+| `--provider NAME` | `openai` (the chat-completions API) or `anthropic`. Or set `RAK_PROVIDER`. Default: `anthropic` for a `claude-*` model when `ANTHROPIC_API_KEY` is set and no `--base-url` is given, or when the address is Anthropic's; otherwise `openai`. |
+| `--base-url URL` | Server address. Or set `RAK_BASE_URL`. Default `http://localhost:11434/v1`, or `https://api.anthropic.com` for `anthropic`. |
+| `--api-key-env NAME` | Environment variable holding the key. Default `RAK_API_KEY`, then `OPENAI_API_KEY`; `ANTHROPIC_API_KEY` first for `anthropic`. |
+| `--effort LEVEL` | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `--max-tokens N` | Longest reply to ask for. |
-| `--context N` | The model's context window in tokens. Default: what an Ollama server reports for the model, otherwise 128000. |
+| `--context N` | The model's context window in tokens. Default: what Anthropic or an Ollama server reports for the model, otherwise 128000. |
 | `--no-stream` | Wait for each whole reply instead of showing it as it arrives. |
 | `-y`, `--yes` | Run every tool without asking. |
 | `--read-only` | No edits and no commands: read and report. |
@@ -118,7 +136,7 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | `--no-mcp` | Don't connect the MCP servers for this run. |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
-| `--json` | Print one JSON object: answer, outcome, turns, tokens, seconds. |
+| `--json` | Print one JSON object: answer, outcome, turns, tokens (cached ones too), seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |
 | `-q`, `--quiet` | Only the answer. |
 
@@ -142,9 +160,16 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `list_dir` | Lists a folder. |
 | `search_files` | Finds files by name and by text inside them. Skips `.git`, `node_modules`, `target`, `.build`. |
 | `read_file` | Reads a file. Files up to 40,000 characters come back in one call; small `limit`s are widened, because many small reads cost more than one large one. |
-| `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. |
-| `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. |
+| `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. Checked before writing (below). |
+| `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. Checked before writing (below). |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
+
+**The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file` or `edit_file` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
+
+- **Damaged content:** many lines starting with a diff's `+` in a code file means patch text leaked into the file. The model is told to resend.
+- **Syntax:** JSON is parsed by rak itself; files that by convention allow comments (`tsconfig.json`, `.vscode/*.json`, `.jsonc`) may have them. Python, JavaScript, shell scripts, Swift and Dart go to their own parser (`python3`, `node --check`, `bash -n`, `swiftc -parse`, `dart format`). The model is told resending the same content will fail the same way, and which interpreter judged it.
+- **When a machine has several copies of an interpreter, the newest judges,** so an old system Python does not reject code written for the one in use.
+- **A check that cannot run passes.** No parser installed, a file over 2 MB, a parser that hangs past 10 seconds or crashes: the write goes ahead. A false rejection would block the agent, which is worse than a miss.
 
 ## MCP servers
 
@@ -207,17 +232,17 @@ Compared with sak, rak does not yet have:
 - saved sessions (`-c` to continue, `/save`, `/resume`)
 - Ctrl-R to search the history, and the "still running" note during a long tool call
 - web fetch and web search (an MCP server can supply them)
-- native Anthropic and Gemini APIs (use an OpenAI-compatible endpoint)
+- Gemini's own API (use an OpenAI-compatible endpoint)
 - Naseem notes and skills
-- a syntax check on written files
 
 Known limits of the chat:
 
 - Ctrl-C takes effect when the model next sends something. While a model is silent (still thinking), the first Ctrl-C waits; a second one quits rak.
 - On Windows the chat falls back to plain line input: no menu, no arrow keys, no history.
 - The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
+- With Anthropic's API, trimming old tool output near a full context window changes earlier messages, which ends the cache from that point; the next call writes it again.
 
-Not yet tested: Windows, and any public benchmark. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
+Not yet tested: Windows, any public benchmark, and Anthropic's real API: the Anthropic provider was tested against a local stand-in that checks what rak sends (cache markers, headers, thinking blocks sent back), not with a real key. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 
@@ -231,7 +256,8 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 |---|---|
 | `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, context trimming. |
 | `provider.rs` | The `Model` trait and the OpenAI-compatible client, streaming included. |
-| `tools/` | The `Tool` trait and the six built-in tools; `Ctx` holds what they share. |
+| `anthropic.rs` | Claude through Anthropic's Messages API: caching, thinking blocks, refusal fallbacks. |
+| `tools/` | The `Tool` trait and the six built-in tools; `Ctx` holds what they share; `verify` is the write check. |
 | `mcp/` | `config` (mcp.json), `client` (one server connection), and the bridge that turns a server's tools into `Tool`s. |
 | `interrupt.rs`, `read_slice.rs`, `text.rs` | The stop flag, the file-read window, small text helpers. |
 
@@ -268,8 +294,11 @@ python3 bench/run.py --model kimi-k2.6:cloud --attempts 2
 |---|---|---|---|---|---|
 | 2026-11-10 | 0.1.0-alpha.1, before the chat and MCP | 12/12 | 530 s | 182K (13.6K) | 44K |
 | 2026-11-11 | after the chat, MCP and the module split | 11/12 | 552 s | 203K (14.1K) | 47K |
+| 2026-11-11 | with the write check | 12/12 | 434 s | 258K (19.3K), 222K of it cached | 41K |
 
-Both with kimi-k2.6:cloud through Ollama, two attempts per task. The system prompt and tools were the same in both runs.
+All with kimi-k2.6:cloud through Ollama, two attempts per task. The system prompt and tool descriptions were the same in every run.
+
+The third run is the first that records cached tokens: 86% of the input was read from Ollama's cache. Ollama's cloud did that caching on its own; the earlier runs most likely had it too, unrecorded. The write check rejected no write in this run, so it caused no false alarms, but these tasks gave it nothing to catch either. Input was higher than in the earlier runs because the model took more turns; with this few attempts per task, that is within the run-to-run spread.
 
 The miss was task 1: the model fixed the three bugs the visible tests catch and stopped, leaving the fourth thing the docstrings ask for (`restock` raising `KeyError` for an unknown item), which only the hidden test checks. Four more attempts at task 1 passed 3 of 4. Across all eight attempts that task passed 6 times, so the first run's 2/2 was luck rather than the second run's 1/2 a regression.
 

@@ -36,7 +36,7 @@ def main():
             row = run_attempt(task, attempt, a, out)
             rows.append(row)
             print(f"{'PASS' if row['passed'] else 'FAIL'}  {row['task']:<18} #{attempt}  {row['outcome']:<9} "
-                  f"{row['turns']:>2} turns  {row['tool_calls']:>2} calls  {row['input_tokens']:>7} in  "
+                  f"{row['turns']:>2} turns  {row['tool_calls']:>2} calls  {row['input_tokens']:>7} in ({row['cached_tokens']:>6} cached)  "
                   f"{row['output_tokens']:>5} out  {row['seconds']:>6.1f} s", flush=True)
 
     passed = sum(r["passed"] for r in rows)
@@ -46,11 +46,12 @@ def main():
         "passed": passed, "runs": len(rows),
         "seconds": round(sum(r["seconds"] for r in rows), 1),
         "input_tokens": sum(r["input_tokens"] for r in rows),
+        "cached_tokens": sum(r["cached_tokens"] for r in rows),
         "output_tokens": sum(r["output_tokens"] for r in rows),
         "rows": rows,
     }
     (out / "results.json").write_text(json.dumps(summary, indent=2))
-    print(f"\n{passed}/{len(rows)} passed · {summary['seconds']} s · {summary['input_tokens']} tokens in · "
+    print(f"\n{passed}/{len(rows)} passed · {summary['seconds']} s · {summary['input_tokens']} tokens in ({summary['cached_tokens']} cached) · "
           f"{summary['output_tokens']} out\n{out / 'results.json'}")
 
 
@@ -73,7 +74,7 @@ def run_attempt(task, attempt, a, out):
 
     started = time.time()
     row = {"task": task.name, "attempt": attempt, "outcome": "timeout", "turns": 0, "tool_calls": 0,
-           "input_tokens": 0, "output_tokens": 0, "seconds": 0.0, "error": None}
+           "input_tokens": 0, "cached_tokens": 0, "output_tokens": 0, "seconds": 0.0, "error": None}
     try:
         r = subprocess.run(command, capture_output=True, text=True, timeout=a.timeout)
         try:

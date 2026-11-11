@@ -6,6 +6,7 @@
 //! closely: sak's low token use comes from those, not from its language.
 
 pub mod agent;
+pub mod anthropic;
 pub mod interrupt;
 pub mod mcp;
 pub mod provider;

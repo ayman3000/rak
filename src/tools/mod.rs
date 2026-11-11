@@ -3,6 +3,7 @@
 
 pub mod fs;
 pub mod shell;
+pub mod verify;
 
 use serde_json::{json, Value};
 use std::collections::HashMap;

@@ -12,13 +12,22 @@ USAGE
   echo \"what to do\" | rak         the request from a pipe
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 
-MODEL (any server that speaks OpenAI's chat-completions API)
+MODEL
   -m, --model NAME        model to use                      [env RAK_MODEL]
+      --provider NAME     openai: any server that speaks OpenAI's chat-completions
+                          API (Ollama, OpenAI, OpenRouter, vLLM…)
+                          anthropic: Claude through Anthropic's own API, with
+                          prompt caching                    [env RAK_PROVIDER]
+                          default: anthropic for a claude-* model when
+                          ANTHROPIC_API_KEY is set and no --base-url is given,
+                          or when the address is Anthropic's; otherwise openai
       --base-url URL      server address                    [env RAK_BASE_URL]
-                          default: http://localhost:11434/v1 (Ollama)
+                          default: http://localhost:11434/v1 (Ollama), or
+                          https://api.anthropic.com for anthropic
       --api-key-env NAME  environment variable holding the key
-                          default: RAK_API_KEY, then OPENAI_API_KEY
-      --effort LEVEL      reasoning effort: low, medium or high
+                          default: RAK_API_KEY, then OPENAI_API_KEY;
+                          ANTHROPIC_API_KEY first for anthropic
+      --effort LEVEL      reasoning effort: low, medium, high, xhigh or max
       --max-tokens N      longest reply to ask for
       --context N         the model's context window in tokens
                           default: what an Ollama server reports, else 128000
@@ -50,7 +59,10 @@ EXIT CODES
 pub struct Options {
     pub task: Option<String>,
     pub model: Option<String>,
-    pub base_url: String,
+    /// "openai" or "anthropic"; None: decided from the model and address.
+    pub provider: Option<String>,
+    /// None: the provider's default address.
+    pub base_url: Option<String>,
     pub api_key_env: Option<String>,
     pub effort: Option<String>,
     pub max_tokens: Option<u64>,
@@ -77,7 +89,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
     let mut o = Options {
         task: None,
         model: env("RAK_MODEL"),
-        base_url: env("RAK_BASE_URL").unwrap_or_else(|| "http://localhost:11434/v1".to_string()),
+        provider: env("RAK_PROVIDER"),
+        base_url: env("RAK_BASE_URL"),
         api_key_env: None,
         effort: None,
         max_tokens: None,
@@ -110,12 +123,13 @@ pub fn parse_args(args: Vec<String>) -> Options {
                 std::process::exit(0);
             }
             "-m" | "--model" => o.model = Some(value("--model")),
-            "--base-url" => o.base_url = value("--base-url"),
+            "--base-url" => o.base_url = Some(value("--base-url")),
+            "--provider" => o.provider = Some(value("--provider")),
             "--api-key-env" => o.api_key_env = Some(value("--api-key-env")),
             "--effort" => {
                 let level = value("--effort");
-                if !["low", "medium", "high"].contains(&level.as_str()) {
-                    usage_error("--effort is low, medium or high");
+                if !["low", "medium", "high", "xhigh", "max"].contains(&level.as_str()) {
+                    usage_error("--effort is low, medium, high, xhigh or max");
                 }
                 o.effort = Some(level);
             }
@@ -138,6 +152,11 @@ pub fn parse_args(args: Vec<String>) -> Options {
     }
     if !words.is_empty() {
         o.task = Some(words.join(" "));
+    }
+    if let Some(provider) = &o.provider {
+        if provider != "openai" && provider != "anthropic" {
+            usage_error("--provider is openai or anthropic");
+        }
     }
     o
 }

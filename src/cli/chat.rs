@@ -1,12 +1,12 @@
 //! The chat: the welcome panel, the prompt loop and the slash commands.
 
 use super::editor::Editor;
-use super::session::{make_provider, run_one, window_for, Session};
+use super::session::{backend, make_provider, run_one, window_for, Session};
 use super::settings::{home, save_model};
 use super::style::{cut, pad, paint, Style};
 use super::welcome::grouped;
 use super::{commands, menu, term, welcome, VERSION};
-use rak::provider::OpenAICompatible;
+use rak::provider::Model;
 use rak::text::one_line;
 use serde_json::json;
 
@@ -24,7 +24,7 @@ pub fn banner(s: &Session) {
     let info = welcome::Info {
         version: VERSION.to_string(),
         model: s.model.clone(),
-        server: welcome::server_name(&s.o.base_url),
+        server: welcome::server_name(&s.backend.base_url),
         folder: welcome::short_path(&s.cwd.to_string_lossy(), &home(), 24),
         branch: welcome::git_branch(&s.cwd),
         mode: mode_label(s).to_string(),
@@ -86,7 +86,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
 }
 
 /// Lists the server's models, numbered. None when the server wouldn't say.
-pub fn list_models(provider: &OpenAICompatible, current: Option<&str>, color: bool) -> Option<Vec<String>> {
+pub fn list_models(provider: &dyn Model, current: Option<&str>, color: bool) -> Option<Vec<String>> {
     match provider.list_models() {
         Ok(mut models) => {
             // Only models that can chat.
@@ -112,7 +112,7 @@ pub fn list_models(provider: &OpenAICompatible, current: Option<&str>, color: bo
 }
 
 /// Lists the models and lets the person pick one by number or name.
-pub fn pick_model(provider: &OpenAICompatible, current: Option<&str>, editor: &mut Editor, color: bool) -> Option<String> {
+pub fn pick_model(provider: &dyn Model, current: Option<&str>, editor: &mut Editor, color: bool) -> Option<String> {
     let models = list_models(provider, current, color)?;
     let hint =
         if current.is_some() { "Pick a number, or Enter to keep the current model:" } else { "Pick a number, or type a model's name:" };
@@ -129,14 +129,25 @@ pub fn pick_model(provider: &OpenAICompatible, current: Option<&str>, editor: &m
 
 pub fn switch_model(s: &mut Session, model: &str) {
     let color = s.ui.borrow().out_color;
-    let provider = make_provider(&s.o, &s.api_key, model, &s.stop);
-    (s.window, s.window_source) = window_for(&s.o, &provider);
+    // A claude-* model may move the chat to Anthropic's API, and back.
+    let backend = match backend(&s.o, Some(model)) {
+        Ok(backend) => backend,
+        Err(why) => {
+            println!("{}", paint(color, Style::Yellow, &format!("Can't switch: {why}")));
+            return;
+        }
+    };
+    let provider = make_provider(&s.o, &backend, model, &s.stop);
+    (s.window, s.window_source) = window_for(&s.o, provider.as_ref());
     s.agent.set_context_window(s.window);
-    s.agent.set_model(Box::new(provider));
+    s.agent.set_model(provider);
+    let moved = backend.anthropic != s.backend.anthropic;
+    s.backend = backend;
     s.model = model.to_string();
     save_model(model);
-    s.log.write(json!({ "event": "model", "model": model }));
-    println!("Now using {}.", paint(color, Style::Bold, model));
+    s.log.write(json!({ "event": "model", "model": model, "provider": if s.backend.anthropic { "anthropic" } else { "openai" } }));
+    let via = if moved { format!(" at {}", welcome::server_name(&s.backend.base_url)) } else { String::new() };
+    println!("Now using {}{via}.", paint(color, Style::Bold, model));
 }
 
 /// Runs a slash command. False means leave the chat.
@@ -154,15 +165,15 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
         "model" | "m" => {
-            println!("Model: {} at {}", paint(color, Style::Bold, &s.model), welcome::server_name(&s.o.base_url));
-            let provider = make_provider(&s.o, &s.api_key, &s.model, &s.stop);
-            if let Some(model) = pick_model(&provider, Some(&s.model), editor, color) {
+            println!("Model: {} at {}", paint(color, Style::Bold, &s.model), welcome::server_name(&s.backend.base_url));
+            let provider = make_provider(&s.o, &s.backend, &s.model, &s.stop);
+            if let Some(model) = pick_model(provider.as_ref(), Some(&s.model), editor, color) {
                 switch_model(s, &model);
             }
         }
         "models" => {
-            let provider = make_provider(&s.o, &s.api_key, &s.model, &s.stop);
-            if list_models(&provider, Some(&s.model), color).is_none() {
+            let provider = make_provider(&s.o, &s.backend, &s.model, &s.stop);
+            if list_models(provider.as_ref(), Some(&s.model), color).is_none() {
                 println!("{}", dim("You can still switch by name: /model <name>"));
             }
         }
@@ -212,9 +223,11 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             }
         }
         "usage" | "cost" => {
-            println!("  model          {} ({})", s.model, welcome::server_name(&s.o.base_url));
+            println!("  model          {} ({})", s.model, welcome::server_name(&s.backend.base_url));
             println!("  requests       {}", s.requests);
-            println!("  input tokens   {}", grouped(s.agent.usage.input));
+            let cached = s.agent.usage.cached;
+            let from_cache = if cached > 0 { format!(" ({} from cache)", grouped(cached)) } else { String::new() };
+            println!("  input tokens   {}{from_cache}", grouped(s.agent.usage.input));
             println!("  output tokens  {}", grouped(s.agent.usage.output));
             println!("  tool calls     {}", s.agent.tool_calls);
             println!("  context        ~{} tokens in the last request", grouped(s.agent.last_prompt_tokens));

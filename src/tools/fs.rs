@@ -1,6 +1,6 @@
 //! File tools. Descriptions and behaviour follow SwiftAgentKit's.
 
-use super::{bool_arg, int_arg, str_arg, Ctx, Tool, ToolResult};
+use super::{bool_arg, int_arg, str_arg, verify, Ctx, Tool, ToolResult};
 use crate::read_slice::ReadSlice;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -105,6 +105,19 @@ impl Tool for WriteFile {
                 ));
             }
         }
+        // The file as it would be after this write must pass the check; if
+        // not, nothing is written.
+        let landed = if append && path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(existing) => Some(existing + content),
+                Err(_) => None, // not text: appending is not judged
+            }
+        } else {
+            Some(content.to_string())
+        };
+        if let Some(rejection) = landed.and_then(|text| verify::check(&path, &text)) {
+            return ToolResult::err(rejection.message(raw));
+        }
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 return ToolResult::err(format!("Write failed: {e}"));
@@ -198,6 +211,9 @@ impl Tool for EditFile {
                 }
             }
         };
+        if let Some(rejection) = verify::check(&path, &edited) {
+            return ToolResult::err(rejection.message(raw));
+        }
         if let Err(e) = std::fs::write(&path, edited) {
             return ToolResult::err(format!("Write failed: {e}"));
         }
@@ -527,5 +543,30 @@ mod tests {
         assert_eq!(r.text, c.cwd.join("src/deep/net.rs").to_string_lossy());
         assert_eq!(s.run(&json!({ "directory": ".", "name": "zzz" })).text, "No matches under ..");
         assert!(!s.run(&json!({ "directory": "." })).ok);
+    }
+
+    #[test]
+    fn a_write_or_edit_that_breaks_the_syntax_leaves_the_file_as_it_was() {
+        let c = ctx("verify");
+        let good = "{\n  \"name\": \"shop\"\n}\n";
+        std::fs::write(c.cwd.join("package.json"), good).unwrap();
+        ReadFile(c.clone()).run(&json!({ "path": "package.json" }));
+
+        let broken = WriteFile(c.clone()).run(&json!({ "path": "package.json", "content": "{ \"name\": " }));
+        assert!(!broken.ok && broken.text.contains("REJECTED") && broken.text.contains("NOT changed"), "{}", broken.text);
+        assert_eq!(std::fs::read_to_string(c.cwd.join("package.json")).unwrap(), good);
+
+        let edit = EditFile(c.clone()).run(&json!({ "path": "package.json", "old_text": "\"shop\"", "new_text": "\"shop\"," }));
+        assert!(!edit.ok && edit.text.contains("not valid JSON"), "{}", edit.text);
+        assert_eq!(std::fs::read_to_string(c.cwd.join("package.json")).unwrap(), good);
+
+        // Appending is judged on the whole file it would make.
+        std::fs::write(c.cwd.join("list.json"), "[1, 2").unwrap();
+        let appended = WriteFile(c.clone()).run(&json!({ "path": "list.json", "content": ", 3]", "append": true }));
+        assert!(appended.ok, "{}", appended.text);
+        // A new file that would be broken is not created.
+        let created = WriteFile(c.clone()).run(&json!({ "path": "new.json", "content": "{" }));
+        assert!(!created.ok && !c.cwd.join("new.json").exists());
+        let _ = std::fs::remove_dir_all(&c.cwd);
     }
 }

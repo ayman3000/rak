@@ -201,7 +201,13 @@ impl Agent {
                         "You sent an empty reply. Continue the task, or give your final summary if it is done." }));
                     continue;
                 }
-                self.messages.push(json!({ "role": "assistant", "content": reply.content }));
+                // The final answer keeps its native form too: Anthropic wants
+                // thinking blocks passed back unchanged on every request.
+                let mut message = json!({ "role": "assistant", "content": reply.content });
+                if let Some(native) = &reply.native {
+                    message["native"] = native.clone();
+                }
+                self.messages.push(message);
                 return RunResult { outcome: Outcome::Done, answer: reply.content, turns: turn };
             }
 
@@ -275,8 +281,7 @@ impl Agent {
             match result {
                 Ok(reply) => {
                     self.last_prompt_tokens = reply.usage.input;
-                    self.usage.input += reply.usage.input;
-                    self.usage.output += reply.usage.output;
+                    self.usage.add(reply.usage);
                     (self.on_event)(&Event::ModelCalled { turn, usage: reply.usage, millis: started.elapsed().as_millis() });
                     return Ok(reply);
                 }
@@ -329,7 +334,11 @@ fn assistant_message(reply: &Reply) -> Value {
         .map(|c| json!({ "id": c.id, "type": "function", "function": { "name": c.name, "arguments": c.arguments } }))
         .collect();
     let content = if reply.content.is_empty() { Value::Null } else { json!(reply.content) };
-    json!({ "role": "assistant", "content": content, "tool_calls": calls })
+    let mut message = json!({ "role": "assistant", "content": content, "tool_calls": calls });
+    if let Some(native) = &reply.native {
+        message["native"] = native.clone();
+    }
+    message
 }
 
 /// Pure — unit-tested. When the conversation is longer than `budget_chars`,
@@ -413,7 +422,7 @@ mod tests {
     }
 
     fn text(content: &str) -> Reply {
-        Reply { content: content.into(), tool_calls: vec![], usage: Usage { input: 10, output: 2 } }
+        Reply { content: content.into(), tool_calls: vec![], usage: Usage { input: 10, output: 2, ..Default::default() }, native: None }
     }
 
     fn call(name: &str, args: Value) -> Reply {
@@ -426,7 +435,7 @@ mod tests {
             .enumerate()
             .map(|(i, (name, args))| ToolCall { id: format!("c{i}"), name: name.into(), arguments: args.to_string() })
             .collect();
-        Reply { content: String::new(), tool_calls, usage: Usage { input: 10, output: 2 } }
+        Reply { content: String::new(), tool_calls, usage: Usage { input: 10, output: 2, ..Default::default() }, native: None }
     }
 
     struct Setup {
@@ -462,7 +471,7 @@ mod tests {
         assert_eq!(result.answer, "Done: wrote hi.txt.");
         assert_eq!(result.turns, 3);
         assert_eq!(std::fs::read_to_string(s.dir.join("hi.txt")).unwrap(), "hello");
-        assert_eq!(s.agent.usage, Usage { input: 30, output: 6 });
+        assert_eq!(s.agent.usage, Usage { input: 30, output: 6, ..Default::default() });
         assert_eq!(s.agent.tool_calls, 2);
 
         // The third request carries both tool results, matched to their calls.
@@ -509,6 +518,7 @@ mod tests {
                 ToolCall { id: "b".into(), name: "fly".into(), arguments: "{}".into() },
             ],
             usage: Usage::default(),
+            native: None,
         };
         let mut s = setup("bad-args", vec![Ok(bad), Ok(text("ok"))], 10);
         s.agent.run("go");

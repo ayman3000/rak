@@ -120,7 +120,7 @@ pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>)
         let mut ui = ui.borrow_mut();
         match event {
             Event::ModelCalled { turn, usage, millis } => {
-                log.write(json!({ "event": "model_call", "turn": turn, "input_tokens": usage.input, "output_tokens": usage.output, "ms": millis }));
+                log.write(json!({ "event": "model_call", "turn": turn, "input_tokens": usage.input, "cached_tokens": usage.cached, "cache_write_tokens": usage.cache_write, "output_tokens": usage.output, "ms": millis }));
             }
             Event::Retrying { attempt, error } => {
                 log.write(json!({ "event": "retry", "attempt": attempt, "error": error }));

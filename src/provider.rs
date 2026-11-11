@@ -10,8 +10,22 @@ use std::time::Duration;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Usage {
+    /// The whole prompt, cached part included.
     pub input: u64,
     pub output: u64,
+    /// The part of `input` read from the server's prompt cache.
+    pub cached: u64,
+    /// The part of `input` written to the cache this time (Anthropic reports it).
+    pub cache_write: u64,
+}
+
+impl Usage {
+    pub fn add(&mut self, other: Usage) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cached += other.cached;
+        self.cache_write += other.cache_write;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +41,10 @@ pub struct Reply {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
     pub usage: Usage,
+    /// The reply in the provider's own form, when sending it back as text and
+    /// tool calls would lose something (Anthropic's thinking blocks). The
+    /// agent keeps it with the message; only that provider reads it.
+    pub native: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -57,6 +75,16 @@ pub trait Model {
             on_text(&reply.content);
         }
         Ok(reply)
+    }
+
+    /// The ids of the models the server offers, sorted.
+    fn list_models(&self) -> Result<Vec<String>, String> {
+        Err("this server can't list its models".to_string())
+    }
+
+    /// The model's context window in tokens, when the server says.
+    fn context_window(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -92,6 +120,18 @@ impl OpenAICompatible {
 
     /// Pure — unit-tested.
     pub fn request_body(&self, messages: &[Value], tools: &[Value]) -> Value {
+        // A message's `native` form is for the provider that made it, not for this one.
+        let messages: Vec<Value> = messages
+            .iter()
+            .map(|m| match m.get("native") {
+                Some(_) => {
+                    let mut plain = m.clone();
+                    plain.as_object_mut().map(|o| o.remove("native"));
+                    plain
+                }
+                None => m.clone(),
+            })
+            .collect();
         let mut body = json!({ "model": self.model, "messages": messages });
         if !tools.is_empty() {
             body["tools"] = json!(tools);
@@ -130,7 +170,7 @@ impl OpenAICompatible {
 
     /// The model's context window in tokens, when the server is an Ollama
     /// one and says (`POST /api/show`). None for every other server.
-    pub fn context_window(&self) -> Option<usize> {
+    fn ollama_window(&self) -> Option<usize> {
         let root = self.base_url.strip_suffix("/v1")?;
         let body: Value = self
             .http
@@ -144,7 +184,7 @@ impl OpenAICompatible {
     }
 
     /// The ids of the models the server offers (`GET /models`), sorted.
-    pub fn list_models(&self) -> Result<Vec<String>, String> {
+    fn models(&self) -> Result<Vec<String>, String> {
         let url = format!("{}/models", self.base_url);
         let mut request = self.http.get(&url).timeout(Duration::from_secs(20));
         if let Some(key) = &self.api_key {
@@ -163,6 +203,14 @@ impl OpenAICompatible {
 }
 
 impl Model for OpenAICompatible {
+    fn list_models(&self) -> Result<Vec<String>, String> {
+        self.models()
+    }
+
+    fn context_window(&self) -> Option<usize> {
+        self.ollama_window()
+    }
+
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {
         let body: Value = self
             .post(self.request_body(messages, tools))?
@@ -232,10 +280,7 @@ impl StreamedReply {
             return Err(ModelError::Fatal(format!("the model server reported an error: {message}")));
         }
         if let Some(usage) = event.get("usage").filter(|u| u.is_object()) {
-            self.usage = Usage {
-                input: usage["prompt_tokens"].as_u64().unwrap_or(self.usage.input),
-                output: usage["completion_tokens"].as_u64().unwrap_or(self.usage.output),
-            };
+            self.usage = openai_usage(usage);
         }
         let Some(delta) = event.pointer("/choices/0/delta") else { return Ok(None) };
         for (position, call) in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten().enumerate() {
@@ -285,7 +330,7 @@ impl StreamedReply {
                 arguments: if arguments.trim().is_empty() { "{}".to_string() } else { arguments },
             })
             .collect();
-        Reply { content: self.content, tool_calls, usage: self.usage }
+        Reply { content: self.content, tool_calls, usage: self.usage, native: None }
     }
 }
 
@@ -316,11 +361,19 @@ pub fn parse_reply(body: &Value) -> Result<Reply, ModelError> {
         let id = call["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| format!("call_{i}"));
         tool_calls.push(ToolCall { id, name, arguments });
     }
-    let usage = Usage {
-        input: body.pointer("/usage/prompt_tokens").and_then(Value::as_u64).unwrap_or(0),
-        output: body.pointer("/usage/completion_tokens").and_then(Value::as_u64).unwrap_or(0),
-    };
-    Ok(Reply { content, tool_calls, usage })
+    let usage = openai_usage(&body["usage"]);
+    Ok(Reply { content, tool_calls, usage, native: None })
+}
+
+/// Pure — unit-tested. A chat-completions `usage` object. Servers that cache
+/// say how much of the prompt came from it in `prompt_tokens_details`.
+pub fn openai_usage(usage: &Value) -> Usage {
+    Usage {
+        input: usage["prompt_tokens"].as_u64().unwrap_or(0),
+        output: usage["completion_tokens"].as_u64().unwrap_or(0),
+        cached: usage.pointer("/prompt_tokens_details/cached_tokens").and_then(Value::as_u64).unwrap_or(0),
+        cache_write: 0,
+    }
 }
 
 #[cfg(test)]
@@ -344,7 +397,7 @@ mod tests {
         assert_eq!(reply.tool_calls[0], ToolCall { id: "a1".into(), name: "read_file".into(), arguments: "{\"path\":\"x\"}".into() });
         assert_eq!(reply.tool_calls[1].id, "call_1");
         assert_eq!(reply.tool_calls[1].arguments, "{\"path\":\".\"}");
-        assert_eq!(reply.usage, Usage { input: 120, output: 9 });
+        assert_eq!(reply.usage, Usage { input: 120, output: 9, ..Default::default() });
     }
 
     #[test]
@@ -393,7 +446,7 @@ mod tests {
         assert_eq!(reply.content, "Looking.");
         assert_eq!(reply.tool_calls[0], ToolCall { id: "a1".into(), name: "read_file".into(), arguments: "{\"path\":\"x\"}".into() });
         assert_eq!(reply.tool_calls[1], ToolCall { id: "a2".into(), name: "list_dir".into(), arguments: "{}".into() });
-        assert_eq!(reply.usage, Usage { input: 120, output: 9 });
+        assert_eq!(reply.usage, Usage { input: 120, output: 9, ..Default::default() });
     }
 
     #[test]
@@ -412,6 +465,15 @@ mod tests {
         assert_eq!(context_length(&show), Some(262_144));
         assert_eq!(context_length(&json!({ "model_info": {} })), None);
         assert_eq!(context_length(&json!({ "error": "not found" })), None);
+    }
+
+    #[test]
+    fn cached_tokens_and_native_forms_are_handled() {
+        let usage = openai_usage(&json!({ "prompt_tokens": 2000, "completion_tokens": 5, "prompt_tokens_details": { "cached_tokens": 1536 } }));
+        assert_eq!(usage, Usage { input: 2000, output: 5, cached: 1536, cache_write: 0 });
+        let p = OpenAICompatible::new("http://x/v1", None, "m");
+        let body = p.request_body(&[json!({ "role": "assistant", "content": "hi", "native": [{ "type": "thinking" }] })], &[]);
+        assert_eq!(body["messages"][0], json!({ "role": "assistant", "content": "hi" }));
     }
 
     #[test]
