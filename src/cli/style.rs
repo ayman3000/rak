@@ -139,6 +139,22 @@ pub fn pad(text: &str, width: usize) -> String {
     format!("{text}{}", " ".repeat(width.saturating_sub(text_width(text))))
 }
 
+pub fn cut(line: &str, columns: usize) -> String {
+    if text_width(line) <= columns {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in line.chars() {
+        used += char_width(c);
+        if used >= columns {
+            break;
+        }
+        out.push(c);
+    }
+    out + "…"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +182,14 @@ mod tests {
         assert_eq!(text_width("日本"), 4);
         assert_eq!(text_width("e\u{301}"), 1);
         assert_eq!(text_width("❯ ⏎ │"), 5);
+    }
+
+    #[test]
+    fn long_lines_are_cut_to_fit() {
+        assert_eq!(cut("short", 20), "short");
+        assert_eq!(cut("exactly ten", 11), "exactly ten");
+        let line = cut(&"x".repeat(200), 40);
+        assert_eq!(text_width(&line), 40);
+        assert!(line.ends_with('…'));
     }
 }

@@ -29,7 +29,9 @@ pub enum Outcome {
     /// The turn limit was reached; the answer is the model's own summary.
     MaxTurns,
     /// The person said no to this tool (or nobody was there to ask).
-    Refused { tool: String },
+    Refused {
+        tool: String,
+    },
     /// The model kept making the same call with the same result.
     Loop,
     /// The person stopped the request (Ctrl-C).
@@ -45,14 +47,30 @@ pub struct RunResult {
 }
 
 pub enum Event<'a> {
-    ModelCalled { turn: usize, usage: Usage, millis: u128 },
-    Retrying { attempt: usize, error: &'a str },
+    ModelCalled {
+        turn: usize,
+        usage: Usage,
+        millis: u128,
+    },
+    Retrying {
+        attempt: usize,
+        error: &'a str,
+    },
     /// A piece of the model's text as it arrives (only when `stream` is on).
     Delta(&'a str),
     /// Text the model wrote alongside tool calls, whole.
     Text(&'a str),
-    ToolStarted { name: &'a str, args: &'a Value },
-    ToolFinished { name: &'a str, ok: bool, denied: bool, text: &'a str, millis: u128 },
+    ToolStarted {
+        name: &'a str,
+        args: &'a Value,
+    },
+    ToolFinished {
+        name: &'a str,
+        ok: bool,
+        denied: bool,
+        text: &'a str,
+        millis: u128,
+    },
     Note(&'a str),
 }
 
@@ -71,6 +89,9 @@ const LOOP_STOP: usize = 6;
 const KEEP_RECENT: usize = 8;
 const DROPPED: &str = "[earlier output removed to save context; run the tool again if you need it]";
 
+/// Asked before a tool that changes something runs.
+type ApproveFn = Box<dyn FnMut(&str, &Value) -> Approval>;
+
 pub struct Agent {
     model: Box<dyn Model>,
     tools: Vec<Box<dyn Tool>>,
@@ -86,7 +107,7 @@ pub struct Agent {
     pub stop: Stop,
     /// Input tokens of the latest model call: how full the context is.
     pub last_prompt_tokens: u64,
-    approve: Box<dyn FnMut(&str, &Value) -> Approval>,
+    approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
 
@@ -324,8 +345,7 @@ pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
         if total <= budget_chars {
             break;
         }
-        let is_big_tool_output = message["role"] == "tool"
-            && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 2);
+        let is_big_tool_output = message["role"] == "tool" && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 2);
         if is_big_tool_output {
             let before = size(message);
             message["content"] = json!(DROPPED);

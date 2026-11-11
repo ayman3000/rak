@@ -3,6 +3,7 @@
 //! Ollama, Hugging Face's router, vLLM, llama.cpp, LM Studio…).
 
 use crate::interrupt::Stop;
+use crate::text::one_line;
 use serde_json::{json, Value};
 use std::io::BufRead;
 use std::time::Duration;
@@ -77,10 +78,7 @@ pub struct OpenAICompatible {
 
 impl OpenAICompatible {
     pub fn new(base_url: &str, api_key: Option<String>, model: &str) -> Self {
-        let http = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(30))
-            .timeout_read(Duration::from_secs(900))
-            .build();
+        let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(900)).build();
         OpenAICompatible {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
@@ -157,12 +155,8 @@ impl OpenAICompatible {
             Err(ureq::Error::Status(code, _)) => return Err(format!("{url} answered {code}")),
             Err(ureq::Error::Transport(t)) => return Err(format!("could not reach {url}: {t}")),
         };
-        let mut ids: Vec<String> = body["data"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|m| m["id"].as_str().map(str::to_string))
-            .collect();
+        let mut ids: Vec<String> =
+            body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_string)).collect();
         ids.sort();
         Ok(ids)
     }
@@ -329,15 +323,6 @@ pub fn parse_reply(body: &Value) -> Result<Reply, ModelError> {
     Ok(Reply { content, tool_calls, usage })
 }
 
-pub fn one_line(text: &str, max: usize) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() > max {
-        flat.chars().take(max).collect::<String>() + "…"
-    } else {
-        flat
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,9 +378,15 @@ mod tests {
         assert_eq!(r.push_line(": keep-alive").unwrap(), None);
         assert_eq!(r.push_line(r#"data: {"choices":[{"delta":{"role":"assistant","content":"Look"}}]}"#).unwrap().as_deref(), Some("Look"));
         assert_eq!(r.push_line(r#"data: {"choices":[{"delta":{"content":"ing."}}]}"#).unwrap().as_deref(), Some("ing."));
-        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}"#).unwrap();
+        r.push_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}"#,
+        )
+        .unwrap();
         r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"x\"}"}}]}}]}"#).unwrap();
-        r.push_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"a2","function":{"name":"list_dir","arguments":""}}]}}]}"#).unwrap();
+        r.push_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"a2","function":{"name":"list_dir","arguments":""}}]}}]}"#,
+        )
+        .unwrap();
         r.push_line(r#"data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":9}}"#).unwrap();
         assert_eq!(r.push_line("data: [DONE]").unwrap(), None);
         let reply = r.finish();

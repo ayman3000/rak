@@ -109,7 +109,11 @@ pub fn panel(info: &Info, requested: usize, color: bool) -> Vec<String> {
     let footer: Line = vec![
         span(format!("{} tool{}", info.tool_count, if info.tool_count == 1 { "" } else { "s" }), &[Style::C45]),
         span(
-            if two_columns { " · /help for commands · Ctrl-C stops a request · Ctrl-D quits" } else { " · /help · Ctrl-C stops · Ctrl-D quits" },
+            if two_columns {
+                " · /help for commands · Ctrl-C stops a request · Ctrl-D quits"
+            } else {
+                " · /help · Ctrl-C stops · Ctrl-D quits"
+            },
             &[Style::Dim],
         ),
     ];
@@ -121,7 +125,16 @@ pub fn panel(info: &Info, requested: usize, color: bool) -> Vec<String> {
 /// The rule above each prompt: model, how full the context is, where you are.
 ///   ── kimi-k2.6:cloud · ctx 7.2K/262K ▰▱▱▱▱▱▱▱▱▱ 3% · rak (main) · asks before changes ────
 #[allow(clippy::too_many_arguments)]
-pub fn status_rule(model: &str, used: usize, window: usize, folder: &str, branch: Option<&str>, mode: &str, requested: usize, color: bool) -> String {
+pub fn status_rule(
+    model: &str,
+    used: usize,
+    window: usize,
+    folder: &str,
+    branch: Option<&str>,
+    mode: &str,
+    requested: usize,
+    color: bool,
+) -> String {
     let total = requested.max(20);
     let fraction = if window > 0 { (used as f64 / window as f64).min(1.0) } else { 0.0 };
     let cells = 10usize;
@@ -176,6 +189,19 @@ pub fn short(n: usize) -> String {
         10_000..=999_999 => format!("{}K", (n as f64 / 1000.0).round() as u64),
         _ => tenths_text((n as f64 / 100_000.0).round() / 10.0, "M"),
     }
+}
+
+/// 1234567 → "1,234,567"
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Names joined with ", " into rows no wider than `width`; past `max_lines`
@@ -253,7 +279,8 @@ pub fn group(tools: &[&str], mcp_servers: &[(String, usize)]) -> Vec<(String, Ve
         groups.push(("more".to_string(), rest.into_iter().map(str::to_string).collect()));
     }
     if !mcp_servers.is_empty() {
-        let servers = mcp_servers.iter().map(|(name, count)| format!("{name} ({count} tool{})", if *count == 1 { "" } else { "s" })).collect();
+        let servers =
+            mcp_servers.iter().map(|(name, count)| format!("{name} ({count} tool{})", if *count == 1 { "" } else { "s" })).collect();
         groups.push(("mcp".to_string(), servers));
     }
     groups
@@ -327,7 +354,9 @@ mod tests {
     #[test]
     fn the_panel_shows_the_facts_and_the_tools() {
         let text = panel(&info(), 100, false).join("\n");
-        for needle in ["kimi-k2.6:cloud", "localhost:11434", "~/projects/rak", "main", "262K tokens", "AGENTS.md", "run_shell", "6 tools", "██████"] {
+        for needle in
+            ["kimi-k2.6:cloud", "localhost:11434", "~/projects/rak", "main", "262K tokens", "AGENTS.md", "run_shell", "6 tools", "██████"]
+        {
             assert!(text.contains(needle), "missing {needle}");
         }
         // Narrow: one column, tools under the facts.
@@ -357,7 +386,17 @@ mod tests {
 
     #[test]
     fn numbers_are_shortened() {
-        let cases = [(0, "0"), (999, "999"), (1_000, "1K"), (7_234, "7.2K"), (9_960, "10K"), (128_000, "128K"), (262_144, "262K"), (1_000_000, "1M"), (1_250_000, "1.3M")];
+        let cases = [
+            (0, "0"),
+            (999, "999"),
+            (1_000, "1K"),
+            (7_234, "7.2K"),
+            (9_960, "10K"),
+            (128_000, "128K"),
+            (262_144, "262K"),
+            (1_000_000, "1M"),
+            (1_250_000, "1.3M"),
+        ];
         for (n, text) in cases {
             assert_eq!(short(n), text);
         }
@@ -365,7 +404,8 @@ mod tests {
 
     #[test]
     fn names_wrap_and_the_overflow_is_counted() {
-        let names: Vec<String> = ["list_dir", "search_files", "read_file", "edit_file", "write_file"].iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> =
+            ["list_dir", "search_files", "read_file", "edit_file", "write_file"].iter().map(|s| s.to_string()).collect();
         assert_eq!(wrap(&names, 80, 2), ["list_dir, search_files, read_file, edit_file, write_file"]);
         assert_eq!(wrap(&names, 34, 2), ["list_dir, search_files, read_file,", "edit_file, write_file"]);
         let rows = wrap(&names, 22, 2);
@@ -391,5 +431,12 @@ mod tests {
         assert_eq!(short_path("/opt/x", "/Users/me", 40), "/opt/x");
         assert_eq!(server_name("http://localhost:11434/v1"), "localhost:11434");
         assert_eq!(server_name("https://openrouter.ai/api/v1"), "openrouter.ai");
+    }
+
+    #[test]
+    fn numbers_are_grouped_in_threes() {
+        for (n, text) in [(0, "0"), (999, "999"), (1_000, "1,000"), (12_345, "12,345"), (1_234_567, "1,234,567")] {
+            assert_eq!(grouped(n), text);
+        }
     }
 }

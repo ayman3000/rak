@@ -18,6 +18,19 @@ pub const HELP: &[(&str, &str)] = &[
 /// Every name the chat accepts, aliases included — what the "/" menu must
 /// leave alone when Enter is pressed.
 pub const KNOWN: &[&str] = &[
-    "/help", "/?", "/model", "/m", "/models", "/tools", "/mcp", "/notes", "/yes", "/auto", "/usage", "/cost", "/clear", "/reset",
-    "/new", "/exit", "/quit", "/q",
+    "/help", "/?", "/model", "/m", "/models", "/tools", "/mcp", "/notes", "/yes", "/auto", "/usage", "/cost", "/clear", "/reset", "/new",
+    "/exit", "/quit", "/q",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_command_is_known() {
+        for (usage, _) in HELP {
+            let name = usage.split(' ').next().unwrap();
+            assert!(KNOWN.contains(&name), "{name} is in /help but the chat would not take it");
+        }
+    }
+}

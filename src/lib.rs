@@ -10,4 +10,5 @@ pub mod interrupt;
 pub mod mcp;
 pub mod provider;
 pub mod read_slice;
+pub mod text;
 pub mod tools;

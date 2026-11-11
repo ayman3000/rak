@@ -194,10 +194,7 @@ impl Tool for EditFile {
                 Some((_, n)) if n > 1 && !replace_all => return too_many(n),
                 Some(done) => done,
                 None => {
-                    return ToolResult::err(format!(
-                        "`old_text` was not found in {raw}. Nothing was changed. {}",
-                        nearby(old, &source)
-                    ))
+                    return ToolResult::err(format!("`old_text` was not found in {raw}. Nothing was changed. {}", nearby(old, &source)))
                 }
             }
         };
@@ -250,9 +247,8 @@ pub fn nearby(old: &str, source: &str) -> String {
     let first = old.split('\n').find(|l| !l.is_empty()).map(str::trim).unwrap_or("");
     let prefix: String = first.chars().take(12).collect();
     let long = first.chars().count() > 12;
-    let hit = (!first.is_empty())
-        .then(|| lines.iter().position(|l| l.contains(first) || (long && l.trim().starts_with(&prefix))))
-        .flatten();
+    let hit =
+        (!first.is_empty()).then(|| lines.iter().position(|l| l.contains(first) || (long && l.trim().starts_with(&prefix)))).flatten();
     let Some(hit) = hit else {
         return "Read the file and copy the text exactly.".to_string();
     };

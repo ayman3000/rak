@@ -26,8 +26,8 @@ impl ReadSlice {
         let served = end - start;
 
         let widened_note = (served > requested).then(|| widen_reason(served, requested, remaining));
-        let truncated_note = (end < total_chars)
-            .then(|| format!("… [truncated at {end}/{total_chars} chars — call again with offset {end}]"));
+        let truncated_note =
+            (end < total_chars).then(|| format!("… [truncated at {end}/{total_chars} chars — call again with offset {end}]"));
         ReadSlice { start, end, widened_note, truncated_note }
     }
 

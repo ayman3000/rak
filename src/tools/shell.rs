@@ -97,11 +97,26 @@ pub fn effective_timeout(requested: Option<i64>, default: Duration) -> Duration 
 /// `grep vite package.json` must not be mistaken for a server.
 pub fn looks_like_long_lived_server(command: &str) -> bool {
     const SERVERS: [&str; 14] = [
-        "npm start", "npm run dev", "npm run serve", "yarn dev", "yarn start", "pnpm dev", "ng serve", "npx vite",
-        "vite", "python -m http.server", "python3 -m http.server", "flask run", "uvicorn ", "rails server",
+        "npm start",
+        "npm run dev",
+        "npm run serve",
+        "yarn dev",
+        "yarn start",
+        "pnpm dev",
+        "ng serve",
+        "npx vite",
+        "vite",
+        "python -m http.server",
+        "python3 -m http.server",
+        "flask run",
+        "uvicorn ",
+        "rails server",
     ];
     let c = command.trim();
-    !c.ends_with('&') && !c.contains("&&") && !c.contains('|') && SERVERS.iter().any(|s| c == s.trim() || c.starts_with(&format!("{} ", s.trim())))
+    !c.ends_with('&')
+        && !c.contains("&&")
+        && !c.contains('|')
+        && SERVERS.iter().any(|s| c == s.trim() || c.starts_with(&format!("{} ", s.trim())))
 }
 
 fn shell_command(command: &str, cwd: &Path) -> Command {
@@ -243,11 +258,8 @@ impl RunShell {
     /// with its pid and the log's path, leaving it running.
     fn run_background(&self, command: &str, cwd: &Path) -> ToolResult {
         static NEXT_LOG: AtomicU32 = AtomicU32::new(0);
-        let log_path: PathBuf = std::env::temp_dir().join(format!(
-            "run_shell-{}-{}.log",
-            std::process::id(),
-            NEXT_LOG.fetch_add(1, Ordering::SeqCst)
-        ));
+        let log_path: PathBuf =
+            std::env::temp_dir().join(format!("run_shell-{}-{}.log", std::process::id(), NEXT_LOG.fetch_add(1, Ordering::SeqCst)));
         let log = match std::fs::File::create(&log_path).and_then(|f| Ok((f.try_clone()?, f))) {
             Ok(pair) => pair,
             Err(e) => return ToolResult::err(format!("Failed to open background log file: {e}")),
@@ -270,18 +282,10 @@ impl RunShell {
         };
 
         if let Ok(Some(status)) = child.try_wait() {
-            let header = format!(
-                "exit {} (background command finished within {}s)",
-                exit_code(status),
-                self.background_grace.as_secs()
-            );
+            let header = format!("exit {} (background command finished within {}s)", exit_code(status), self.background_grace.as_secs());
             return ToolResult::ok(if early.is_empty() { header } else { format!("{header}\n{early}") });
         }
-        let mut header = format!(
-            "started in background (pid {}); still running. Full output: {}",
-            child.id(),
-            log_path.display()
-        );
+        let mut header = format!("started in background (pid {}); still running. Full output: {}", child.id(), log_path.display());
         if !early.is_empty() {
             header.push_str(&format!("\n--- startup output ---\n{early}"));
         }

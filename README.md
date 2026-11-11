@@ -225,6 +225,27 @@ Not yet tested: Windows, and any public benchmark. The chat and the MCP client w
 cargo test
 ```
 
+The code is in two layers. The library knows nothing about terminals; the `rak` command is one front end on top of it, and another (an editor plugin, a web server) could use the library the same way.
+
+| Library (`src/`) | |
+|---|---|
+| `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, context trimming. |
+| `provider.rs` | The `Model` trait and the OpenAI-compatible client, streaming included. |
+| `tools/` | The `Tool` trait and the six built-in tools; `Ctx` holds what they share. |
+| `mcp/` | `config` (mcp.json), `client` (one server connection), and the bridge that turns a server's tools into `Tool`s. |
+| `interrupt.rs`, `read_slice.rs`, `text.rs` | The stop flag, the file-read window, small text helpers. |
+
+| Command (`src/cli/`) | |
+|---|---|
+| `args`, `session` | The command line; one run set up from it, and a request run and reported. |
+| `chat` | The chat loop and its slash commands. |
+| `approval`, `output`, `log` | Asking before changes; what is shown; `--log`. |
+| `mcp_command` | `rak mcp add/list/remove`. |
+| `editor`, `menu`, `markdown`, `welcome`, `style`, `term` | The interface's parts. Each is pure where it can be, and tested. |
+| `settings`, `signals` | What is kept between runs; Ctrl-C. |
+
+Dependencies only point down: `agent` uses `provider` and `tools`; `mcp` uses `tools`; nothing in the library uses `cli`. `rustfmt.toml` sets the formatting (`cargo fmt`).
+
 ```bash
 cargo build --release
 ```
@@ -243,6 +264,13 @@ docker build -f bench/Dockerfile -t rak-bench .
 python3 bench/run.py --model kimi-k2.6:cloud --attempts 2
 ```
 
-First run, 2026-11-10, rak 0.1.0-alpha.1 (before the chat interface was added) with kimi-k2.6:cloud through Ollama, two attempts per task: **12/12 passed**, 530 s in total, 182K tokens in (median 13.6K per run), 44K out.
+| Run | rak | Passed | Time | Tokens in (median per run) | Tokens out |
+|---|---|---|---|---|---|
+| 2026-11-10 | 0.1.0-alpha.1, before the chat and MCP | 12/12 | 530 s | 182K (13.6K) | 44K |
+| 2026-11-11 | after the chat, MCP and the module split | 11/12 | 552 s | 203K (14.1K) | 47K |
+
+Both with kimi-k2.6:cloud through Ollama, two attempts per task. The system prompt and tools were the same in both runs.
+
+The miss was task 1: the model fixed the three bugs the visible tests catch and stopped, leaving the fourth thing the docstrings ask for (`restock` raising `KeyError` for an unknown item), which only the hidden test checks. Four more attempts at task 1 passed 3 of 4. Across all eight attempts that task passed 6 times, so the first run's 2/2 was luck rather than the second run's 1/2 a regression.
 
 These tasks are easy: a perfect score says the pipeline works, not how rak ranks. They are not the tasks sak was measured on, so the numbers do not compare with sak's.

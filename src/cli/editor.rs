@@ -221,7 +221,15 @@ fn shown(c: char) -> char {
 /// Everything from the prompt down is cleared and written again; moves are
 /// relative, so it works wherever on the screen the prompt is, and when the
 /// screen scrolls to make room.
-pub fn frame(prompt: &str, prompt_width: usize, buffer: &Buffer, bold: bool, menu_rows: &[String], cols: usize, previous_row: usize) -> (String, usize) {
+pub fn frame(
+    prompt: &str,
+    prompt_width: usize,
+    buffer: &Buffer,
+    bold: bool,
+    menu_rows: &[String],
+    cols: usize,
+    previous_row: usize,
+) -> (String, usize) {
     let cols = cols.max(2);
     let mut out = String::new();
     if previous_row > 0 {
@@ -349,7 +357,8 @@ impl Editor {
             if dismissed.as_deref() != Some(text.as_str()) {
                 dismissed = None;
             }
-            let matches = if with_menu && dismissed.is_none() && browsing.is_none() { menu::matches(&text, &self.commands) } else { Vec::new() };
+            let matches =
+                if with_menu && dismissed.is_none() && browsing.is_none() { menu::matches(&text, &self.commands) } else { Vec::new() };
             selected = selected.min(matches.len().saturating_sub(1));
 
             // While more input is already waiting (a paste), don't draw every step.
@@ -448,7 +457,10 @@ impl Editor {
                 Key::Eof => break None,
                 Key::Esc | Key::PasteEnd | Key::Other => {}
             }
-            if typing && browsing.is_some() && !matches!(key, Key::Left | Key::Right | Key::Home | Key::End | Key::WordLeft | Key::WordRight) {
+            if typing
+                && browsing.is_some()
+                && !matches!(key, Key::Left | Key::Right | Key::Home | Key::End | Key::WordLeft | Key::WordRight)
+            {
                 browsing = None; // an edited line is the person's own again
                 dismissed = Some(buffer.text());
             }
@@ -522,9 +534,10 @@ mod tests {
     fn letters_and_control_keys_are_read() {
         assert_eq!(keys(b"a/\r"), [Key::Char('a'), Key::Char('/'), Key::Enter]);
         assert_eq!(keys("é日🙂".as_bytes()), [Key::Char('é'), Key::Char('日'), Key::Char('🙂')]);
-        assert_eq!(keys(&[127, 9, 3, 4, 21, 23, 11, 1, 5]), [
-            Key::Backspace, Key::Tab, Key::CtrlC, Key::CtrlD, Key::KillToStart, Key::KillWord, Key::KillToEnd, Key::Home, Key::End
-        ]);
+        assert_eq!(
+            keys(&[127, 9, 3, 4, 21, 23, 11, 1, 5]),
+            [Key::Backspace, Key::Tab, Key::CtrlC, Key::CtrlD, Key::KillToStart, Key::KillWord, Key::KillToEnd, Key::Home, Key::End]
+        );
     }
 
     #[test]
