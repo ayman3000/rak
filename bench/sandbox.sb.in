@@ -1,0 +1,15 @@
+;; macOS sandbox for one benchmark run (sandbox-exec). Everything may be read;
+;; writes go only to the task's copy and the run's own temp folders; the only
+;; network allowed is Ollama on this machine.
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+  (subpath "@WORK@")
+  (subpath "@TMP@")
+  (subpath "@DARWIN_TEMP@")
+  (subpath "@DARWIN_CACHE@")
+  (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty")
+  (regex #"^/dev/fd/"))
+(deny network*)
+(allow network-outbound (remote ip "localhost:11434"))

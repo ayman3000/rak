@@ -302,4 +302,27 @@ The third run is the first that records cached tokens: 86% of the input was read
 
 The miss was task 1: the model fixed the three bugs the visible tests catch and stopped, leaving the fourth thing the docstrings ask for (`restock` raising `KeyError` for an unknown item), which only the hidden test checks. Four more attempts at task 1 passed 3 of 4. Across all eight attempts that task passed 6 times, so the first run's 2/2 was luck rather than the second run's 1/2 a regression.
 
+### Head to head with sak
+
+`bench/head_to_head.py` runs rak and sak on the same six tasks with the same model on the same Mac, taking turns on every attempt. sak runs only on macOS, so neither runs in a container here. Instead each runs inside macOS's sandbox (`bench/sandbox.sb.in`): writes only to its copy of the task and its own temporary folders, network only to Ollama. Both run in auto mode with MCP off, and are graded by the same hidden tests as above.
+
+```bash
+python3 bench/head_to_head.py --model kimi-k2.6:cloud --attempts 3
+```
+
+2026-11-11, kimi-k2.6:cloud through Ollama, three attempts per task:
+
+| | Passed | Model calls | Tokens in (median per run) | Tokens out | Time (median per run) |
+|---|---|---|---|---|---|
+| rak 0.1.0-alpha.1 | 17/18 | 161 | 385K (19.0K) | 75K | 724 s (20.8 s) |
+| sak 0.3.0-alpha | 18/18 | 157 | 511K (22.0K) | 75K | 685 s (25.7 s) |
+
+What this says:
+
+- **rak carries sak's design over faithfully.** Both made almost the same number of model calls (161 against 157) and wrote the same amount (75K tokens each). The pass rates are within one attempt of each other. rak's miss was the model's judgement, not the harness: on task 6 it let `"5 5"` through where the docstring wanted an error.
+- **rak sent 25% less input, and nearly all of that is a fixed cost per call, not smarter behaviour.** A request that uses no tools costs rak 1,037 tokens and sak 1,825. sak carries two more tools (`fetch_url`, and `web_search` because a Tavily key is set) and a longer prompt. That gap of 788 tokens, times sak's 157 calls, is 124K: almost all of the 126K difference.
+- **Neither is faster.** Time is the model writing. rak's median run was shorter and its total longer, because of one attempt where the model wrote 24K tokens. Rust against Swift makes no difference that shows.
+
+So rak is as good as sak at the same work. Its lower token count comes from carrying fewer tools by default, which sak could match by turning its web tools off. Whether this design beats other agents is a different test: against Hermes, OpenCode or Claude Code on the same open model.
+
 These tasks are easy: a perfect score says the pipeline works, not how rak ranks. They are not the tasks sak was measured on, so the numbers do not compare with sak's.
