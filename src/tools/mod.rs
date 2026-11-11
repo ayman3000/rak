@@ -25,8 +25,8 @@ impl ToolResult {
 }
 
 pub trait Tool {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     /// JSON Schema for the arguments.
     fn parameters(&self) -> Value;
     /// True for tools that change files or run commands.

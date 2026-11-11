@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod interrupt;
+pub mod mcp;
 pub mod provider;
 pub mod read_slice;
 pub mod tools;

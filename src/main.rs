@@ -8,6 +8,7 @@ use cli::style::{pad, paint, Style};
 use cli::{commands, markdown, menu, term, welcome};
 use rak::agent::{system_prompt, Agent, Approval, Config, Event, Outcome, RunResult};
 use rak::interrupt::Stop;
+use rak::mcp;
 use rak::provider::{one_line, OpenAICompatible};
 use rak::tools::{core_tools, Ctx};
 use serde_json::{json, Value};
@@ -27,6 +28,7 @@ USAGE
   rak [options] \"what to do\"      one request, then exit
   rak [options]                   chat (type / for the commands, /exit to leave)
   echo \"what to do\" | rak         the request from a pipe
+  rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 
 MODEL (any server that speaks OpenAI's chat-completions API)
   -m, --model NAME        model to use                      [env RAK_MODEL]
@@ -47,6 +49,7 @@ BEHAVIOUR
   -y, --yes               run every tool without asking
       --read-only         no edits and no commands: read and report
       --any-path          let file tools reach outside the project folder
+      --no-mcp            don't connect the MCP servers for this run
   -C, --cwd DIR           the project folder (default: where rak was started)
       --max-turns N       model calls allowed per request (default 30)
 
@@ -74,6 +77,7 @@ struct Options {
     yes: bool,
     read_only: bool,
     any_path: bool,
+    no_mcp: bool,
     cwd: Option<PathBuf>,
     max_turns: usize,
     json: bool,
@@ -100,6 +104,7 @@ fn parse_args(args: Vec<String>) -> Options {
         yes: false,
         read_only: false,
         any_path: false,
+        no_mcp: false,
         cwd: None,
         max_turns: 30,
         json: false,
@@ -138,6 +143,7 @@ fn parse_args(args: Vec<String>) -> Options {
             "-y" | "--yes" => o.yes = true,
             "--read-only" => o.read_only = true,
             "--any-path" => o.any_path = true,
+            "--no-mcp" => o.no_mcp = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
             "--json" => o.json = true,
@@ -390,6 +396,163 @@ fn grouped(n: u64) -> String {
     out
 }
 
+const MCP_HELP: &str = "\
+rak mcp — tools from MCP servers
+
+  rak mcp add NAME [options] -- COMMAND [ARG…]    a program rak starts
+  rak mcp add NAME [options] --url URL            a server at a web address
+  rak mcp list                                    the servers, and whether each connects
+  rak mcp remove NAME [--project]
+
+OPTIONS FOR add
+  -e, --env KEY=VALUE     an environment variable for the program (repeatable)
+  -H, --header 'N: V'     a header sent to the web address (repeatable)
+      --timeout SECONDS   how long one tool call may take (default 120)
+      --project           write ./.rak/mcp.json (this project only) instead of
+                          the file for all projects
+
+EXAMPLES
+  rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem .
+  rak mcp add docs --url https://example.com/mcp -H 'Authorization: Bearer KEY'
+
+The files are in the shape Claude Code and Cursor use: an entry can be pasted
+across. A project's file wins over the one for all projects.
+";
+
+/// `rak mcp add|list|remove`: edits the list of MCP servers. Never returns.
+fn mcp_command(args: &[String]) -> ! {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let files = mcp::config_files(&cwd, config_dir().as_deref());
+    let project_file = files[0].clone();
+    let Some(user_file) = files.get(1).cloned() else { usage_error("no home folder to keep mcp.json in") };
+    let fail = |why: String| -> ! {
+        eprintln!("rak: {why}");
+        std::process::exit(1);
+    };
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+
+    match args.first().map(String::as_str) {
+        Some("add") => {
+            let (mut name, mut command, mut url) = (None::<String>, Vec::<String>::new(), None::<String>);
+            let (mut env, mut headers) = (std::collections::BTreeMap::new(), std::collections::BTreeMap::new());
+            let (mut project, mut timeout) = (false, None);
+            let mut rest = args[1..].iter().cloned();
+            while let Some(arg) = rest.next() {
+                let mut value = |flag: &str| rest.next().unwrap_or_else(|| usage_error(&format!("{flag} needs a value")));
+                match arg.as_str() {
+                    "--project" => project = true,
+                    "--url" => url = Some(value("--url")),
+                    "--timeout" => timeout = Some(value("--timeout").parse::<u64>().unwrap_or_else(|_| usage_error("--timeout needs a number of seconds"))),
+                    "-e" | "--env" => match value("--env").split_once('=') {
+                        Some((key, v)) if !key.is_empty() => {
+                            env.insert(key.to_string(), v.to_string());
+                        }
+                        _ => usage_error("--env needs KEY=VALUE"),
+                    },
+                    "-H" | "--header" => match value("--header").split_once(':') {
+                        Some((key, v)) if !key.trim().is_empty() => {
+                            headers.insert(key.trim().to_string(), v.trim().to_string());
+                        }
+                        _ => usage_error("--header needs 'Name: value'"),
+                    },
+                    // Everything after -- is the program and its own options.
+                    "--" => command.extend(rest.by_ref()),
+                    flag if flag.starts_with('-') && name.is_none() => usage_error(&format!("unknown option {flag} (see rak mcp --help)")),
+                    _ if name.is_none() => name = Some(arg),
+                    // No --: the program starts at the first word after the name.
+                    _ => {
+                        command.push(arg);
+                        command.extend(rest.by_ref());
+                    }
+                }
+            }
+            let Some(name) = name else { usage_error("rak mcp add needs a name (see rak mcp --help)") };
+            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                usage_error("a server's name is letters, digits, - and _ only");
+            }
+            let transport = match (command.split_first(), url) {
+                (Some(_), Some(_)) => usage_error("give a program or --url, not both"),
+                (Some((program, arguments)), None) => mcp::Transport::Stdio { command: program.clone(), args: arguments.to_vec(), env },
+                (None, Some(url)) => mcp::Transport::Http { url, headers },
+                (None, None) => usage_error("rak mcp add needs a program to run or --url (see rak mcp --help)"),
+            };
+            let server = mcp::ServerConfig { name: name.clone(), transport, timeout };
+            let file = if project { project_file } else { user_file };
+            let replaced = mcp::add_to_file(&file, &server).unwrap_or_else(|why| fail(why));
+            println!("{} {name} in {}", if replaced { "Replaced" } else { "Added" }, file.display());
+
+            // Try it now, so a typo shows here and not in the next chat.
+            let connected = mcp::connect_all(&[server], &cwd, false, &Stop::new());
+            match connected.problems.first() {
+                Some(problem) => {
+                    println!("It is saved, but it did not connect: {problem}");
+                    std::process::exit(1);
+                }
+                None => {
+                    let names: Vec<&str> = connected.tools.iter().map(|t| t.name()).collect();
+                    println!("Connected: {} tool{} — {}", names.len(), plural(names.len()), cut(&names.join(", "), 160));
+                }
+            }
+            std::process::exit(0);
+        }
+        Some("list" | "ls") => {
+            let (servers, problems) = mcp::load(&files);
+            for problem in &problems {
+                println!("{problem}");
+            }
+            if servers.is_empty() {
+                println!("No MCP servers yet. Add one with:\n  rak mcp add NAME -- COMMAND [ARG…]\n  rak mcp add NAME --url URL");
+                std::process::exit(0);
+            }
+            let configs: Vec<mcp::ServerConfig> = servers.iter().map(|(server, _)| server.clone()).collect();
+            let connected = mcp::connect_all(&configs, &cwd, false, &Stop::new());
+            for (server, file) in &servers {
+                // Keys stay out of the listing: names of variables and headers only.
+                let what = match &server.transport {
+                    mcp::Transport::Stdio { command, args, env } => {
+                        let keys: Vec<&str> = env.keys().map(String::as_str).collect();
+                        format!("{command} {}{}", args.join(" "), if keys.is_empty() { String::new() } else { format!("  (env: {})", keys.join(", ")) })
+                    }
+                    mcp::Transport::Http { url, headers } => {
+                        let keys: Vec<&str> = headers.keys().map(String::as_str).collect();
+                        format!("{url}{}", if keys.is_empty() { String::new() } else { format!("  (headers: {})", keys.join(", ")) })
+                    }
+                };
+                let status = match connected.servers.iter().find(|(name, _)| name == &server.name) {
+                    Some((_, count)) => format!("✓ {count} tool{}", plural(*count)),
+                    None => {
+                        let prefix = format!("{}: ", server.name);
+                        let why = connected.problems.iter().find_map(|p| p.strip_prefix(&prefix)).unwrap_or("couldn't connect");
+                        format!("✗ {why}")
+                    }
+                };
+                let scope = if *file == project_file { "this project" } else { "all projects" };
+                println!("{}  {status}\n    {}\n    {scope}: {}", server.name, what.trim(), file.display());
+            }
+            std::process::exit(0);
+        }
+        Some("remove" | "rm") => {
+            let project = args[1..].iter().any(|a| a == "--project");
+            let Some(name) = args[1..].iter().find(|a| !a.starts_with('-')) else { usage_error("rak mcp remove needs a name") };
+            let (file, other, other_flag) = if project { (project_file, user_file, "without --project") } else { (user_file, project_file, "with --project") };
+            if mcp::remove_from_file(&file, name).unwrap_or_else(|why| fail(why)) {
+                println!("Removed {name} from {}", file.display());
+                std::process::exit(0);
+            }
+            let elsewhere = std::fs::read_to_string(&other).ok().and_then(|text| mcp::parse_config(&text).ok()).is_some_and(|list| list.iter().any(|s| &s.name == name));
+            if elsewhere {
+                fail(format!("{name} is not in {}, but it is in {}. Run it again {other_flag}.", file.display(), other.display()));
+            }
+            fail(format!("no server named {name} in {}", file.display()));
+        }
+        Some("-h" | "--help" | "help") | None => {
+            print!("{MCP_HELP}");
+            std::process::exit(0);
+        }
+        Some(other) => usage_error(&format!("rak mcp has add, list and remove, not `{other}` (see rak mcp --help)")),
+    }
+}
+
 /// Everything one run of rak holds.
 struct Session {
     agent: Agent,
@@ -406,6 +569,12 @@ struct Session {
     window_source: &'static str,
     notes: Option<String>,
     requests: usize,
+    /// The built-in tools' names, and what the MCP servers brought.
+    core_tools: Vec<String>,
+    mcp_servers: Vec<(String, usize)>,
+    mcp_summary: Option<String>,
+    mcp_problems: Vec<String>,
+    server_of: std::collections::HashMap<String, String>,
 }
 
 fn make_provider(o: &Options, api_key: &Option<String>, model: &str, stop: &Stop) -> OpenAICompatible {
@@ -426,7 +595,11 @@ fn window_for(o: &Options, provider: &OpenAICompatible) -> (usize, &'static str)
 }
 
 fn main() {
-    let o = parse_args(std::env::args().skip(1).collect());
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("mcp") {
+        mcp_command(&argv[1..]);
+    }
+    let o = parse_args(argv);
 
     let cwd = o.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     if !cwd.is_dir() {
@@ -474,7 +647,18 @@ fn main() {
         max_turns: o.max_turns,
         context_window: window,
     };
-    let mut agent = Agent::new(Box::new(provider), core_tools(&ctx, o.read_only), config);
+    let mut tools = core_tools(&ctx, o.read_only);
+    let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
+
+    // Tools from MCP servers join the built-in ones.
+    let (listed, mut mcp_problems) = if o.no_mcp { (Vec::new(), Vec::new()) } else { mcp::load(&mcp::config_files(&ctx.cwd, config_dir().as_deref())) };
+    let servers: Vec<mcp::ServerConfig> = listed.into_iter().map(|(server, _)| server).collect();
+    let mut connected = mcp::connect_all(&servers, &ctx.cwd, o.read_only, &stop);
+    mcp_problems.append(&mut connected.problems);
+    let mcp_summary = connected.summary();
+    tools.append(&mut connected.tools);
+
+    let mut agent = Agent::new(Box::new(provider), tools, config);
     agent.stop = stop.clone();
 
     let log = Log::open(o.log.as_ref());
@@ -496,10 +680,14 @@ fn main() {
     let auto = Rc::new(Cell::new(o.yes));
     let interactive = stdin_tty && std::io::stderr().is_terminal();
     let mut always: HashSet<String> = HashSet::new();
+    let mut whole_servers: HashSet<String> = HashSet::new();
     let mut everything = false;
+    let server_of = connected.server_of.clone();
     let (approval_ui, approval_auto, approval_stop) = (ui.clone(), auto.clone(), stop.clone());
     agent.on_approval(move |name, args| {
-        if approval_auto.get() || everything || always.contains(name) {
+        // An MCP server brings many tools: one answer can cover all of them.
+        let server = server_of.get(name);
+        if approval_auto.get() || everything || always.contains(name) || server.is_some_and(|s| whole_servers.contains(s)) {
             return Approval::Yes;
         }
         approval_ui.borrow_mut().end_line();
@@ -507,7 +695,8 @@ fn main() {
             eprintln!("  {name} needs approval and there's no terminal to ask — stopping (use -y to allow)");
             return Approval::No;
         }
-        let question = format!("? allow {}\n  [y]es  [n]o  [a]lways for {name}  [A] everything this session › ", describe(name, args));
+        let scope = server.map(|s| format!("  [s] all {s} tools")).unwrap_or_default();
+        let question = format!("? allow {}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ", describe(name, args));
         eprint!("{}", paint(err_color, Style::Yellow, &question));
         let _ = std::io::stderr().flush();
         let mut typed = String::new();
@@ -519,6 +708,10 @@ fn main() {
             "y" | "Y" | "yes" => Approval::Yes,
             "a" | "always" => {
                 always.insert(name.to_string());
+                Approval::Yes
+            }
+            "s" | "server" if server.is_some() => {
+                whole_servers.extend(server.cloned());
                 Approval::Yes
             }
             "A" | "all" | "everything" => {
@@ -584,6 +777,11 @@ fn main() {
         window_source,
         notes,
         requests: 0,
+        core_tools: core_tool_names,
+        mcp_servers: connected.servers,
+        mcp_summary,
+        mcp_problems,
+        server_of: connected.server_of,
     };
 
     if chat {
@@ -600,8 +798,18 @@ fn main() {
     let Some(task) = session.o.task.clone().or(piped).filter(|t| !t.is_empty()) else {
         usage_error("nothing to do: give a request, or pipe one in");
     };
-    let outcome = run_one(&mut session, &task);
-    std::process::exit(exit_code(&outcome));
+    {
+        let mut ui = session.ui.borrow_mut();
+        if let Some(summary) = &session.mcp_summary {
+            ui.progress(Some(Style::Dim), summary);
+        }
+        for problem in &session.mcp_problems {
+            ui.progress(Some(Style::Yellow), problem);
+        }
+    }
+    let code = exit_code(&run_one(&mut session, &task));
+    drop(session); // stops the MCP servers' programs
+    std::process::exit(code);
 }
 
 /// Runs one request and prints what came of it.
@@ -682,9 +890,9 @@ fn banner(s: &Session) {
         mode: mode_label(s).to_string(),
         window: s.window,
         notes: s.notes.iter().map(|_| ("notes".to_string(), "AGENTS.md".to_string())).collect(),
-        tool_groups: welcome::group(&s.agent.tool_names()),
+        tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
         tool_count: s.agent.tool_names().len(),
-        warnings: Vec::new(),
+        warnings: s.mcp_problems.clone(),
     };
     for line in welcome::panel(&info, term::size().0, s.ui.borrow().out_color) {
         println!("{line}");
@@ -824,6 +1032,23 @@ fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             }
             if s.o.read_only {
                 println!("{}", dim("  read-only mode: no edit or shell tools"));
+            }
+        }
+        "mcp" => {
+            if s.mcp_servers.is_empty() && s.mcp_problems.is_empty() {
+                println!("{}", dim("No MCP servers. Add one from the shell, then start rak again:"));
+                println!("{}", dim("  rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem ."));
+                println!("{}", dim("  rak mcp add docs --url https://example.com/mcp"));
+            }
+            for (server, count) in &s.mcp_servers {
+                println!("  {}  {}", paint(color, Style::Bold, server), dim(&format!("{count} tool{}", if *count == 1 { "" } else { "s" })));
+                for tool in s.agent.tools().iter().filter(|t| s.server_of.get(t.name()) == Some(server)) {
+                    let gate = if tool.needs_approval() && !s.auto.get() { paint(color, Style::Yellow, " (asks)") } else { String::new() };
+                    println!("    {}{gate}  {}", paint(color, Style::Cyan, tool.name()), dim(&cut(&one_line(tool.description(), 200), 70)));
+                }
+            }
+            for problem in &s.mcp_problems {
+                println!("  {}", paint(color, Style::Yellow, problem));
             }
         }
         "notes" => match &s.notes {

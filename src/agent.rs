@@ -118,7 +118,7 @@ impl Agent {
         self.on_event = Box::new(on_event);
     }
 
-    pub fn tool_names(&self) -> Vec<&'static str> {
+    pub fn tool_names(&self) -> Vec<&str> {
         self.tools.iter().map(|t| t.name()).collect()
     }
 

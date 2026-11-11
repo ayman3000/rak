@@ -94,6 +94,7 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/model [name]` | Show or switch the model. Without a name: pick from a list. |
 | `/models` | List the models the server offers. |
 | `/tools` | List the tools the agent can use. |
+| `/mcp` | List the MCP servers and their tools. |
 | `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
@@ -114,6 +115,7 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | `-y`, `--yes` | Run every tool without asking. |
 | `--read-only` | No edits and no commands: read and report. |
 | `--any-path` | Let file tools reach outside the project folder. |
+| `--no-mcp` | Don't connect the MCP servers for this run. |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
 | `--json` | Print one JSON object: answer, outcome, turns, tokens, seconds. |
@@ -131,6 +133,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **File tools stay in the project folder** unless you pass `--any-path`. Symlinks are resolved before the check.
 - **`run_shell` is not confined.** A command you approve can do anything your user can. Read it before you say yes.
+- **An MCP server is a program you chose to run.** rak starts it with your user's rights, and trusts what it says about which of its tools are read-only.
 
 ## Tools
 
@@ -142,6 +145,42 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. |
 | `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
+
+## MCP servers
+
+Tools from outside rak come through the [Model Context Protocol](https://modelcontextprotocol.io). A server is a separate program, or a web address; its tools join rak's own.
+
+```bash
+# A program rak starts
+rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem .
+
+# A server at a web address, with a key in a header
+rak mcp add docs --url https://example.com/mcp -H 'Authorization: Bearer KEY'
+
+rak mcp list
+rak mcp remove files
+```
+
+| Command | What it does |
+|---|---|
+| `rak mcp add NAME -- COMMAND [ARG…]` | Adds a program. `-e KEY=VALUE` sets an environment variable for it. |
+| `rak mcp add NAME --url URL` | Adds a web address. `-H 'Name: value'` sends a header. |
+| `rak mcp list` | Lists the servers and tries each one: how many tools, or why it failed. |
+| `rak mcp remove NAME` | Removes one. |
+
+`add` saves the server, then connects once so a typo shows straight away. `--project` on `add` and `remove` uses `./.rak/mcp.json`, for this project only; without it the file is `~/.config/rak/mcp.json`, for all projects. Both are in the shape Claude Code and Cursor use, so an entry can be pasted across. A project's entry wins over one with the same name for all projects.
+
+How the tools behave:
+
+- **Names** are `server__tool`, so a server's `read_file` cannot be mistaken for rak's.
+- **A tool the server marks read-only runs freely; any other asks first.** At the prompt, `s` allows all of that server's tools for the session.
+- **`--read-only` keeps only the read-only tools.** `--no-mcp` leaves the servers out of a run.
+- **Results over 20,000 characters are cut**, and Ctrl-C stops a call that is taking long.
+- **Every server costs tokens on every request**, because its tool descriptions are sent each time. The reference filesystem server's 14 tools added 1,165 tokens to each model call when measured (2,187 against 1,022). Add the servers you use.
+
+In a chat, `/mcp` lists the servers and their tools.
+
+Not there yet: signing in to servers that need OAuth (a key in a header works), and MCP prompts and resources — only tools are used. The file holds keys in plain text; it is written readable by you only, and `rak mcp list` shows the names of variables and headers, not their values.
 
 ## As a library
 
@@ -167,7 +206,7 @@ Compared with sak, rak does not yet have:
 
 - saved sessions (`-c` to continue, `/save`, `/resume`)
 - Ctrl-R to search the history, and the "still running" note during a long tool call
-- MCP servers, web fetch and web search
+- web fetch and web search (an MCP server can supply them)
 - native Anthropic and Gemini APIs (use an OpenAI-compatible endpoint)
 - Naseem notes and skills
 - a syntax check on written files
@@ -178,7 +217,7 @@ Known limits of the chat:
 - On Windows the chat falls back to plain line input: no menu, no arrow keys, no history.
 - The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
 
-Not yet tested: Windows, and any public benchmark. The chat was driven by hand on macOS only; on Linux it builds and its unit tests pass. Auto mode (`-y`) has only been run inside the benchmark's containers.
+Not yet tested: Windows, and any public benchmark. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
 ## Development
 

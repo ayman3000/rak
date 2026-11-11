@@ -6,6 +6,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/model [name]", "show or switch the model (no name: pick from a list)"),
     ("/models", "list the models the server offers"),
     ("/tools", "list the tools the agent can use"),
+    ("/mcp", "the MCP servers and their tools"),
     ("/notes", "show the project notes rak loaded (AGENTS.md)"),
     ("/yes", "toggle auto-approve for edits and shell commands"),
     ("/usage", "tokens and tool calls so far"),
@@ -17,6 +18,6 @@ pub const HELP: &[(&str, &str)] = &[
 /// Every name the chat accepts, aliases included — what the "/" menu must
 /// leave alone when Enter is pressed.
 pub const KNOWN: &[&str] = &[
-    "/help", "/?", "/model", "/m", "/models", "/tools", "/notes", "/yes", "/auto", "/usage", "/cost", "/clear", "/reset",
+    "/help", "/?", "/model", "/m", "/models", "/tools", "/mcp", "/notes", "/yes", "/auto", "/usage", "/cost", "/clear", "/reset",
     "/new", "/exit", "/quit", "/q",
 ];
