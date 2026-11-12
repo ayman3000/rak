@@ -353,6 +353,10 @@ fn run_with_timeout(mut command: Command, timeout: Duration) -> Outcome {
     };
     let Ok(writer_err) = writer.try_clone() else { return Outcome::Unavailable };
     command.stdin(Stdio::null()).stdout(writer).stderr(writer_err);
+    // Its own process group, so whatever it starts (swiftc's swift-frontend)
+    // can be stopped with it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let Ok(mut child) = command.spawn() else { return Outcome::Unavailable };
     drop(command); // the parent's copies of the pipe's writing end
                    // Read while it runs: a parser with a lot to say must not block on a full pipe.
@@ -366,7 +370,7 @@ fn run_with_timeout(mut command: Command, timeout: Duration) -> Outcome {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() > timeout => {
-                let _ = child.kill();
+                kill_group(&mut child);
                 let _ = child.wait();
                 return Outcome::Unavailable;
             }
@@ -374,12 +378,25 @@ fn run_with_timeout(mut command: Command, timeout: Duration) -> Outcome {
             Err(_) => return Outcome::Unavailable,
         }
     };
+    // The verdict is in. Anything it left running would hold the pipe open
+    // and the read below would wait for it: stop it.
+    kill_group(&mut child);
     let text = collector.join().unwrap_or_default();
     if status.success() {
         Outcome::Passed(text)
     } else {
         Outcome::Failed(text.trim().chars().take(600).collect())
     }
+}
+
+/// Stops the parser's whole process group (only the parser itself where
+/// there are no groups).
+fn kill_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+    }
+    let _ = child.kill();
 }
 
 /// A file in the temporary folder, removed when dropped.
@@ -407,6 +424,37 @@ mod tests {
 
     fn available(extension: &str) -> bool {
         parser_for(extension).and_then(|p| resolve(p.names, p.version)).is_some()
+    }
+
+    #[cfg(unix)]
+    fn sh(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(script);
+        command
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parser_that_leaves_a_child_behind_does_not_hold_the_check() {
+        let started = Instant::now();
+        let outcome = run_with_timeout(sh("sleep 8 & echo checked"), Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(2), "waited {:?}", started.elapsed());
+        assert!(matches!(outcome, Outcome::Passed(text) if text.contains("checked")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parser_past_its_time_is_killed_with_its_children() {
+        let dir = std::env::temp_dir().join(format!("rak-verify-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("alive");
+        let started = Instant::now();
+        let script = format!("(sleep 2; touch '{}') & sleep 30", marker.display());
+        assert!(matches!(run_with_timeout(sh(&script), Duration::from_millis(500)), Outcome::Unavailable));
+        assert!(started.elapsed() < Duration::from_secs(2), "waited {:?}", started.elapsed());
+        std::thread::sleep(Duration::from_millis(2_500));
+        assert!(!marker.exists(), "the parser's child outlived the kill");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

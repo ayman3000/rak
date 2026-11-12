@@ -97,17 +97,20 @@ pub fn run(args: &[String]) -> ! {
 
             // Try it now, so a typo shows here and not in the next chat.
             let connected = mcp::connect_all(&[server], &cwd, false, &Stop::new());
-            match connected.problems.first() {
+            let code = match connected.problems.first() {
                 Some(problem) => {
                     println!("It is saved, but it did not connect: {problem}");
-                    std::process::exit(1);
+                    1
                 }
                 None => {
                     let names: Vec<&str> = connected.tools.iter().map(|t| t.name()).collect();
                     println!("Connected: {} tool{} — {}", names.len(), plural(names.len()), cut(&names.join(", "), 160));
+                    0
                 }
-            }
-            std::process::exit(0);
+            };
+            // exit skips destructors: stop the server's program first.
+            drop(connected);
+            std::process::exit(code);
         }
         Some("list" | "ls") => {
             let (servers, problems) = mcp::load(&files);
@@ -147,6 +150,8 @@ pub fn run(args: &[String]) -> ! {
                 let scope = if *file == project_file { "this project" } else { "all projects" };
                 println!("{}  {status}\n    {}\n    {scope}: {}", server.name, what.trim(), file.display());
             }
+            // exit skips destructors: stop the servers' programs first.
+            drop(connected);
             std::process::exit(0);
         }
         Some("remove" | "rm") => {

@@ -363,6 +363,10 @@ pub fn run(mut o: Options) -> i32 {
         text.trim().to_string()
     });
     let Some(task) = session.o.task.clone().or(piped).filter(|t| !t.is_empty()) else {
+        // usage_error exits without running destructors: stop the MCP
+        // servers' programs first, or one that ignores its closed input
+        // outlives rak.
+        drop(session);
         usage_error("nothing to do: give a request, or pipe one in");
     };
     {
