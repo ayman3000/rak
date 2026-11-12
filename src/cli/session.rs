@@ -262,6 +262,7 @@ pub fn run(mut o: Options) -> i32 {
 
     // One stop flag for the loop, the model stream and a running command.
     let ctx = Ctx::new(&cwd, o.any_path);
+    output::set_project(&ctx.cwd);
     let stop = ctx.stop.clone();
     #[cfg(unix)]
     signals::install(stop.clone());

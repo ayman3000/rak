@@ -39,9 +39,12 @@ Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking t
 - [ ] Anthropic's real "prompt is too long" error triggering the retry (only
       a stand-in has so far).
 - [ ] `delegate` with Claude (only kimi has used it so far).
-- [ ] The model choosing `delegate` without being asked. It doesn't yet;
-      try rewording `BIG_PROJECTS` in `src/cli/session.rs` or the tool's
-      description, and measure the token cost of any change.
+- [ ] The model choosing `delegate` without being asked. kimi-k2.6 never
+      did; deepseek-v4.1-flash did on its own (2026-11-12, "check the
+      codebase": about 38 reads in the helper, 1.3M input tokens for the
+      request, 93% cached). So it depends on the model. Still to do: try
+      more models, and cap what a helper may spend (its 25 turns re-send a
+      growing context).
 - [ ] Fix whatever these turn up, with a unit test for each fix.
 
 ### 2. Try the untested providers
@@ -60,6 +63,14 @@ Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking t
 - [ ] From README "What is missing": Ctrl-R history search, the "still
       running" note during a long tool call, fetching a whole web page,
       Gemini's own API.
+- [ ] Esc stops a running request, as Ctrl-C does (Esc already cancels the
+      /provider and /model lists).
+- [ ] RAK_PROVIDER and RAK_MODEL from different files (a project's .env and
+      the global one) can still pair a model with the wrong provider: take
+      the model from the same place as the provider.
+- [ ] release.yml: actions/upload-artifact and download-artifact are still
+      v4 (Node 20, deprecated); move to v7 / v8 and check with a release.
+- [ ] Announce rak once the providers people will try first are confirmed.
 
 ## Working rules
 

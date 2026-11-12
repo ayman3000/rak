@@ -140,54 +140,130 @@ impl Tool for CodeMap {
     }
 }
 
-/// Pure but for reading the folder — unit-tested.
-pub fn map(root: &Path) -> String {
-    let mut out = String::new();
-    let (mut files, mut cut_short) = (0usize, false);
-    let mut other: Vec<String> = Vec::new();
+/// Folders mapped first: where a project's own code usually lives.
+const SOURCE_FIRST: [&str; 9] = ["src", "lib", "app", "sources", "pkg", "cmd", "internal", "crates", "packages"];
+/// Folders mapped last: benchmarks, examples, tests, fixtures, docs.
+const LAST: [&str; 19] = [
+    "bench",
+    "benches",
+    "benchmark",
+    "benchmarks",
+    "example",
+    "examples",
+    "sample",
+    "samples",
+    "test",
+    "tests",
+    "spec",
+    "specs",
+    "fixtures",
+    "testdata",
+    "docs",
+    "doc",
+    "vendor",
+    "third_party",
+    "e2e",
+];
+
+/// Pure — unit-tested. 0 for source folders, 2 for those mapped last, 1 otherwise.
+fn rank(folder: &str) -> u8 {
+    let folder = folder.to_lowercase();
+    if SOURCE_FIRST.contains(&folder.as_str()) {
+        0
+    } else if LAST.contains(&folder.as_str()) {
+        2
+    } else {
+        1
+    }
+}
+
+/// The files to map, in the order they are mapped: each folder's own files,
+/// then its subfolders, source folders first and benchmarks, examples and
+/// tests last. Dependency, build and hidden folders are left out. At most
+/// MAX_FILES + 1 (one more says there were too many).
+fn files_in_order(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
     let mut pending = vec![root.to_path_buf()];
-    'walk: while let Some(dir) = pending.pop() {
+    while let Some(dir) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         let mut entries: Vec<_> = entries.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
-        let mut subdirs = Vec::new();
+        let mut subdirs: Vec<(u8, std::path::PathBuf)> = Vec::new();
         for entry in entries {
             let Ok(kind) = entry.file_type() else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
             if kind.is_dir() {
-                if !SKIPPED_DIRS.contains(&name.as_str()) && !MORE_SKIPPED.contains(&name.as_str()) && !name.starts_with('.') {
-                    subdirs.push(entry.path());
+                if !SKIPPED_DIRS.contains(&name.as_str()) && !MORE_SKIPPED.contains(&name.as_str()) {
+                    subdirs.push((rank(&name), entry.path()));
                 }
-                continue;
+            } else if kind.is_file() {
+                files.push(entry.path());
+                if files.len() > MAX_FILES {
+                    return files;
+                }
             }
-            if !kind.is_file() || name.starts_with('.') {
-                continue;
-            }
-            files += 1;
-            if files > MAX_FILES || out.len() > MAX_CHARS {
-                cut_short = true;
-                break 'walk;
-            }
-            let path = entry.path();
-            let shown = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
-            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            let small = entry.metadata().map(|m| m.len() <= MAX_FILE_BYTES).unwrap_or(false);
-            let defs = if small && !keywords(&ext).is_empty() {
-                std::fs::read_to_string(&path).map(|text| outline(&ext, &text)).unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            if defs.is_empty() {
-                other.push(shown);
-                continue;
-            }
-            let mut listed: Vec<String> = defs.iter().take(MAX_DEFS).map(|(what, line)| format!("{what} {line}")).collect();
-            if defs.len() > MAX_DEFS {
-                listed.push(format!("… {} more", defs.len() - MAX_DEFS));
-            }
-            out.push_str(&format!("{shown}: {}\n", listed.join(", ")));
         }
-        pending.extend(subdirs.into_iter().rev());
+        subdirs.sort_by_key(|(rank, _)| *rank);
+        // A stack: the first subfolder is mapped next.
+        pending.extend(subdirs.into_iter().rev().map(|(_, path)| path));
+    }
+    files
+}
+
+/// Pure — unit-tested. The folders of files left off the map, with how many
+/// files each holds, nearest the top two levels.
+fn unmapped_folders(root: &Path, left: &[std::path::PathBuf]) -> Vec<(String, usize)> {
+    let mut folders: Vec<(String, usize)> = Vec::new();
+    for path in left {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        let parts: Vec<String> =
+            relative.parent().into_iter().flat_map(|p| p.iter()).take(2).map(|c| c.to_string_lossy().into_owned()).collect();
+        let folder = if parts.is_empty() { ".".to_string() } else { parts.join("/") };
+        match folders.iter_mut().find(|(f, _)| *f == folder) {
+            Some(entry) => entry.1 += 1,
+            None => folders.push((folder, 1)),
+        }
+    }
+    folders
+}
+
+/// Pure but for reading the folder — unit-tested.
+pub fn map(root: &Path) -> String {
+    map_within(root, MAX_CHARS)
+}
+
+fn map_within(root: &Path, max_chars: usize) -> String {
+    let mut files = files_in_order(root);
+    let too_many = files.len() > MAX_FILES;
+    files.truncate(MAX_FILES);
+    let mut out = String::new();
+    let mut other: Vec<String> = Vec::new();
+    let mut stopped_at = None;
+    for (i, path) in files.iter().enumerate() {
+        if out.len() > max_chars {
+            stopped_at = Some(i);
+            break;
+        }
+        let shown = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let small = std::fs::metadata(path).map(|m| m.len() <= MAX_FILE_BYTES).unwrap_or(false);
+        let defs = if small && !keywords(&ext).is_empty() {
+            std::fs::read_to_string(path).map(|text| outline(&ext, &text)).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if defs.is_empty() {
+            other.push(shown);
+            continue;
+        }
+        let mut listed: Vec<String> = defs.iter().take(MAX_DEFS).map(|(what, line)| format!("{what} {line}")).collect();
+        if defs.len() > MAX_DEFS {
+            listed.push(format!("… {} more", defs.len() - MAX_DEFS));
+        }
+        out.push_str(&format!("{shown}: {}\n", listed.join(", ")));
     }
     if !other.is_empty() {
         let mut list = other.join(", ");
@@ -199,8 +275,20 @@ pub fn map(root: &Path) -> String {
     if out.is_empty() {
         return "No files here (dependency, build and hidden folders are skipped).".to_string();
     }
-    if cut_short {
-        out.push_str("[The map stops here: the project is big. Map a folder with `path` to see the rest.]\n");
+    if let Some(i) = stopped_at {
+        // Say exactly what is missing, so it is mapped rather than guessed.
+        let folders = unmapped_folders(root, &files[i..]);
+        let mut named: Vec<String> = folders.iter().take(20).map(|(f, n)| format!("{f}: {n}")).collect();
+        if folders.len() > 20 {
+            named.push(format!("and {} more folders", folders.len() - 20));
+        }
+        out.push_str(&format!(
+            "[The map stops here: it is long enough. FILES NOT MAPPED, by folder: {}. They are not shown above; map a folder with code_map path=FOLDER before saying what is in it.]\n",
+            named.join(", ")
+        ));
+    }
+    if too_many {
+        out.push_str(&format!("[Over {MAX_FILES} files: the rest were not looked at. Map a folder with `path`.]\n"));
     }
     out
 }
@@ -230,6 +318,37 @@ mod tests {
             ["func Start@1", "type Config@2", "func main@3"]
         );
         assert!(outline("txt", "fn looks_like_code()").is_empty());
+    }
+
+    #[test]
+    fn source_comes_first_and_what_did_not_fit_is_named() {
+        let dir = temp_dir("code-map-order");
+        // Shaped like rak: a big bench/ that sorts before src/.
+        for i in 0..40 {
+            let task = dir.join(format!("bench/tasks/t{i:02}"));
+            std::fs::create_dir_all(&task).unwrap();
+            std::fs::write(task.join("check.py"), "def check_one():\n    pass\ndef check_two():\n    pass\n").unwrap();
+        }
+        std::fs::create_dir_all(dir.join("src/tools")).unwrap();
+        std::fs::write(dir.join("src/agent.rs"), "pub struct Agent {}\npub fn run() {}\n").unwrap();
+        std::fs::write(dir.join("src/tools/shell.rs"), "pub fn run_shell() {}\n").unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]").unwrap();
+
+        let text = map_within(&dir, 300);
+        let src = text.find("src/agent.rs").expect("src is mapped");
+        assert!(text.contains("src/tools/shell.rs: fn run_shell 1"), "{text}");
+        assert!(text.find("bench/").is_none_or(|b| b > src), "bench comes after src: {text}");
+        assert!(text.contains("FILES NOT MAPPED, by folder: bench/tasks: "), "{text}");
+        assert!(text.contains("map a folder with code_map path=FOLDER"));
+
+        // With room for everything, nothing is left out.
+        assert!(!map(&dir).contains("NOT MAPPED"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn folders_are_ranked() {
+        assert_eq!((rank("src"), rank("Sources"), rank("ui"), rank("bench"), rank("tests")), (0, 0, 1, 2, 2));
     }
 
     #[test]

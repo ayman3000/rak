@@ -13,12 +13,38 @@ use std::rc::Rc;
 
 /// `edit_file src/a.rs (3 → 5 lines)`: enough to follow along, never the
 /// whole text of an edit.
+/// The project folder, for showing paths in it relative to it.
+static PROJECT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Set once, when the run starts.
+pub fn set_project(folder: &std::path::Path) {
+    let _ = PROJECT.set(folder.to_string_lossy().trim_end_matches('/').to_string());
+}
+
+/// Pure — unit-tested. A path inside `project` shown relative to it, so the
+/// part that tells files apart is not cut off; anything else as it is.
+pub fn relative_to(project: &str, value: &str) -> String {
+    match value.strip_prefix(project) {
+        Some("") => ".".to_string(),
+        Some(rest) if rest.starts_with('/') => rest.trim_start_matches('/').to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn shown(value: &str) -> String {
+    match PROJECT.get() {
+        Some(project) if !project.is_empty() => relative_to(project, value),
+        _ => value.to_string(),
+    }
+}
+
 pub fn describe(name: &str, args: &Value) -> String {
+    let path_text = |key: &str| shown(args.get(key).and_then(Value::as_str).unwrap_or(""));
     let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
     let lines = |key: &str| text(key).split('\n').count();
     match name {
-        "edit_file" => format!("edit_file {}  ({} → {} lines)", text("path"), lines("old_text"), lines("new_text")),
-        "write_file" => format!("write_file {}  ({} bytes)", text("path"), text("content").len()),
+        "edit_file" => format!("edit_file {}  ({} → {} lines)", path_text("path"), lines("old_text"), lines("new_text")),
+        "write_file" => format!("write_file {}  ({} bytes)", path_text("path"), text("content").len()),
         "run_shell" => format!("run_shell {}", one_line(text("command"), 110)),
         "delegate" => format!("delegate  {}", one_line(text("task"), 90)),
         "todo" => {
@@ -32,7 +58,7 @@ pub fn describe(name: &str, args: &Value) -> String {
                 .as_object()
                 .into_iter()
                 .flatten()
-                .map(|(k, v)| format!("{k}={}", one_line(&v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()), 60)))
+                .map(|(k, v)| format!("{k}={}", one_line(&v.as_str().map(shown).unwrap_or_else(|| v.to_string()), 60)))
                 .collect();
             parts.sort();
             format!("{name} {}", parts.join(" "))
@@ -177,5 +203,9 @@ mod tests {
         assert_eq!(describe("write_file", &json!({ "path": "b", "content": "hello" })), "write_file b  (5 bytes)");
         assert_eq!(describe("run_shell", &json!({ "command": "cargo  test\n--quiet" })), "run_shell cargo test --quiet");
         assert_eq!(describe("files__search", &json!({ "q": "x", "limit": 3 })), "files__search limit=3 q=x");
+        assert_eq!(relative_to("/home/a/rak", "/home/a/rak/src/agent.rs"), "src/agent.rs");
+        assert_eq!(relative_to("/home/a/rak", "/home/a/rak"), ".");
+        assert_eq!(relative_to("/home/a/rak", "/home/a/rakish/x.rs"), "/home/a/rakish/x.rs", "a folder that only starts the same");
+        assert_eq!(relative_to("/home/a/rak", "/etc/hosts"), "/etc/hosts");
     }
 }
