@@ -117,7 +117,13 @@ rak reads the environment first, then `./.env` in the project, then `~/.config/r
 
 **A key never reaches another provider's server.** Each provider is sent its own key. Defaults from the file don't mix with flags: `--provider` on the command line uses that provider's own address even when `RAK_BASE_URL` is set, and `--base-url` on the command line drops the default provider and its key.
 
-`rak keys` only creates the file when there is none. If yours came from an older template, copy what you need from [`.env.example`](.env.example).
+`rak keys` only creates the file when there is none, and says when yours is from an older template. Then:
+
+```bash
+rak keys --update
+```
+
+This rewrites the file from the current template with your values on their lines, keeps any value the template has no line for in a section at the end, and saves the old file next to it as `.env.bak`. It names what moved and what changed meaning (never a value), and running it again changes nothing.
 
 The chat's welcome panel lists the `.env` files it read.
 

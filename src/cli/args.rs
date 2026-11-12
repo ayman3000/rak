@@ -11,6 +11,7 @@ USAGE
   rak [options]                   chat (type / for the commands, /exit to leave)
   echo \"what to do\" | rak         the request from a pipe
   rak keys                        set up ~/.config/rak/.env and see which keys are set
+  rak keys --update               bring an older key file up to date, keeping its values
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 
 MODEL
