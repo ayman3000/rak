@@ -25,6 +25,23 @@ pub struct RunShell {
     /// How long a background command is watched before returning, to catch a
     /// server's "listening on…" line.
     pub background_grace: Duration,
+    /// Where background commands' logs go.
+    pub log_dir: PathBuf,
+    /// Background commands still to clean up after: each log, and whether its
+    /// command has ended (set by the thread that reaps it).
+    logs: Mutex<Vec<(PathBuf, Arc<AtomicBool>)>>,
+}
+
+impl Drop for RunShell {
+    /// Logs of background commands that have ended go with the tool; a server
+    /// still running keeps writing to its log, so that one stays.
+    fn drop(&mut self) {
+        for (path, ended) in self.logs.lock().unwrap().iter() {
+            if ended.load(Ordering::SeqCst) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
 }
 
 impl RunShell {
@@ -34,6 +51,8 @@ impl RunShell {
             max_output_chars: 10_000,
             default_timeout: Duration::from_secs(120),
             background_grace: Duration::from_millis(2_500),
+            log_dir: std::env::temp_dir(),
+            logs: Mutex::new(Vec::new()),
         }
     }
 }
@@ -112,11 +131,17 @@ pub fn looks_like_long_lived_server(command: &str) -> bool {
         "uvicorn ",
         "rails server",
     ];
+    // `vite build`, `flask run --help`: the same tools, a command that ends.
+    const ONE_SHOT: [&str; 7] = ["build", "optimize", "--help", "-h", "--version", "-V", "--check"];
     let c = command.trim();
     !c.ends_with('&')
         && !c.contains("&&")
         && !c.contains('|')
-        && SERVERS.iter().any(|s| c == s.trim() || c.starts_with(&format!("{} ", s.trim())))
+        && SERVERS.iter().any(|s| {
+            let s = s.trim();
+            let rest = if c == s { Some("") } else { c.strip_prefix(&format!("{s} ")) };
+            rest.is_some_and(|rest| !rest.split_whitespace().any(|word| ONE_SHOT.contains(&word)))
+        })
 }
 
 fn shell_command(command: &str, cwd: &Path) -> Command {
@@ -259,7 +284,7 @@ impl RunShell {
     fn run_background(&self, command: &str, cwd: &Path) -> ToolResult {
         static NEXT_LOG: AtomicU32 = AtomicU32::new(0);
         let log_path: PathBuf =
-            std::env::temp_dir().join(format!("run_shell-{}-{}.log", std::process::id(), NEXT_LOG.fetch_add(1, Ordering::SeqCst)));
+            self.log_dir.join(format!("run_shell-{}-{}.log", std::process::id(), NEXT_LOG.fetch_add(1, Ordering::SeqCst)));
         let log = match std::fs::File::create(&log_path).and_then(|f| Ok((f.try_clone()?, f))) {
             Ok(pair) => pair,
             Err(e) => return ToolResult::err(format!("Failed to open background log file: {e}")),
@@ -272,24 +297,70 @@ impl RunShell {
         };
         drop(cmd);
 
-        std::thread::sleep(self.background_grace);
-        let text = String::from_utf8_lossy(&std::fs::read(&log_path).unwrap_or_default()).into_owned();
-        let count = text.chars().count();
-        let early = if count > self.max_output_chars {
-            text.chars().skip(count - self.max_output_chars).collect::<String>() + "\n… [truncated]"
-        } else {
-            text
+        // Watch until the command ends, its startup output settles (a server's
+        // "listening on…" line, then quiet), it is stopped, or the grace is up.
+        // At least a second, so a server that prints a banner and then crashes
+        // is still caught.
+        const SETTLED: Duration = Duration::from_millis(300);
+        let at_least = self.background_grace.min(Duration::from_secs(1));
+        let started = Instant::now();
+        let (mut last_len, mut last_change) = (0u64, Instant::now());
+        let finished = loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                break Some(status);
+            }
+            let len = std::fs::metadata(&log_path).map_or(0, |m| m.len());
+            if len != last_len {
+                (last_len, last_change) = (len, Instant::now());
+            }
+            if started.elapsed() >= self.background_grace
+                || (len > 0 && last_change.elapsed() >= SETTLED && started.elapsed() >= at_least)
+                || self.ctx.stop.requested()
+            {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(25));
         };
+        let early = log_tail(&log_path, self.max_output_chars);
 
-        if let Ok(Some(status)) = child.try_wait() {
-            let header = format!("exit {} (background command finished within {}s)", exit_code(status), self.background_grace.as_secs());
+        if let Some(status) = finished {
+            // Its output is all here and the model was never told the log's path.
+            let _ = std::fs::remove_file(&log_path);
+            let seconds = started.elapsed().as_secs_f32();
+            let header = format!("exit {} (background command finished within {seconds:.1}s)", exit_code(status));
             return ToolResult::ok(if early.is_empty() { header } else { format!("{header}\n{early}") });
         }
         let mut header = format!("started in background (pid {}); still running. Full output: {}", child.id(), log_path.display());
         if !early.is_empty() {
             header.push_str(&format!("\n--- startup output ---\n{early}"));
         }
+        // Reaped when it ends, so it does not linger as a zombie while rak runs.
+        let ended = Arc::new(AtomicBool::new(false));
+        self.logs.lock().unwrap().push((log_path, ended.clone()));
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            ended.store(true, Ordering::SeqCst);
+        });
         ToolResult::ok(header)
+    }
+}
+
+/// The end of a log, at most `max_chars` characters, without reading the
+/// whole file (a chatty server can write megabytes in its first seconds).
+fn log_tail(path: &Path, max_chars: usize) -> String {
+    use std::io::{Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
+    let len = file.metadata().map_or(0, |m| m.len());
+    let keep = (max_chars as u64).saturating_mul(4);
+    let cut = len > keep && file.seek(SeekFrom::Start(len - keep)).is_ok();
+    let mut bytes = Vec::new();
+    let _ = file.take(keep).read_to_end(&mut bytes);
+    let text = String::from_utf8_lossy(&bytes);
+    let count = text.chars().count();
+    if cut || count > max_chars {
+        text.chars().skip(count.saturating_sub(max_chars)).collect::<String>() + "\n… [truncated]"
+    } else {
+        text.into_owned()
     }
 }
 
@@ -369,6 +440,78 @@ mod tests {
         assert!(!looks_like_long_lived_server("npm start && echo done"));
         assert!(!looks_like_long_lived_server("npm test"));
         assert!(!looks_like_long_lived_server("vitest run"));
+    }
+
+    #[test]
+    fn one_shot_subcommands_of_server_tools_run_in_the_foreground() {
+        assert!(!looks_like_long_lived_server("vite build"));
+        assert!(!looks_like_long_lived_server("npx vite build --mode staging"));
+        assert!(!looks_like_long_lived_server("flask run --help"));
+        assert!(!looks_like_long_lived_server("uvicorn --version"));
+        assert!(looks_like_long_lived_server("vite preview"));
+        assert!(looks_like_long_lived_server("vite --port 3000"));
+        assert!(looks_like_long_lived_server("uvicorn app:app --reload"));
+    }
+
+    fn logs_in(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("run_shell-"))
+            .collect()
+    }
+
+    fn background_shell(label: &str) -> (RunShell, PathBuf) {
+        let mut s = shell(label);
+        let logs = s.ctx.cwd.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        s.log_dir = logs.clone();
+        (s, logs)
+    }
+
+    #[test]
+    fn background_mode_returns_once_the_startup_output_settles() {
+        let (mut s, _) = background_shell("bg-early");
+        s.background_grace = Duration::from_secs(5);
+        let started = Instant::now();
+        let r = s.run(&json!({ "command": "echo listening; sleep 20", "background": true }));
+        assert!(r.text.contains("still running") && r.text.contains("listening"), "{}", r.text);
+        assert!(started.elapsed() < Duration::from_secs(2), "waited {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_server_that_prints_a_banner_then_crashes_is_reported_as_ended() {
+        let (s, _) = background_shell("bg-crash");
+        let r = s.run(&json!({ "command": "echo banner; sleep 0.5; echo boom; exit 3", "background": true }));
+        assert!(r.text.starts_with("exit 3") && r.text.contains("boom"), "{}", r.text);
+    }
+
+    #[test]
+    fn a_background_command_that_finishes_leaves_no_log_and_no_zombie() {
+        let (mut s, logs) = background_shell("bg-reap");
+        s.background_grace = Duration::from_millis(300);
+        let quick = s.run(&json!({ "command": "echo done", "background": true }));
+        assert!(quick.text.starts_with("exit 0"), "{}", quick.text);
+        assert!(logs_in(&logs).is_empty(), "a log nobody was told about is removed at once");
+
+        let slow = s.run(&json!({ "command": "sleep 1", "background": true }));
+        let pid: String = slow.text.split("pid ").nth(1).unwrap().chars().take_while(char::is_ascii_digit).collect();
+        assert_eq!(logs_in(&logs).len(), 1, "a running command keeps its log");
+        std::thread::sleep(Duration::from_millis(1_800));
+        let ps = Command::new("ps").args(["-o", "stat=", "-p", &pid]).output().unwrap();
+        assert!(String::from_utf8_lossy(&ps.stdout).trim().is_empty(), "pid {pid} was not reaped");
+        drop(s);
+        assert!(logs_in(&logs).is_empty(), "logs of finished commands go when the tool does");
+    }
+
+    #[test]
+    fn a_flood_of_background_output_is_read_from_its_end() {
+        let (mut s, _) = background_shell("bg-flood");
+        s.max_output_chars = 100;
+        s.background_grace = Duration::from_millis(800);
+        let r = s.run(&json!({ "command": "head -c 3000000 /dev/zero | tr '\\0' a; echo; echo last-line; sleep 20", "background": true }));
+        assert!(r.text.contains("last-line") && r.text.contains("[truncated]"), "{}", r.text);
+        assert!(r.text.len() < 600);
     }
 
     #[test]
