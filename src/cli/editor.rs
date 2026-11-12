@@ -494,7 +494,7 @@ impl Editor {
     }
 }
 
-fn next_byte(wait_ms: Option<i32>) -> Option<u8> {
+pub fn next_byte(wait_ms: Option<i32>) -> Option<u8> {
     PEEKED.with(|p| p.take()).or_else(|| term::read_byte(wait_ms))
 }
 

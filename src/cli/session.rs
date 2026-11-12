@@ -277,7 +277,7 @@ pub fn run(mut o: Options) -> i32 {
         None if chat => {
             let backend = backend(&o, None).unwrap_or_else(|why| usage_error(&why));
             println!("No model picked yet for {}. These are its models:", provider_label(&backend));
-            let picked = chat::pick_model(make_provider(&o, &backend, "", &stop).as_ref(), None, &mut editor, out_color);
+            let picked = chat::pick_model(make_provider(&o, &backend, "", &stop).as_ref(), None, out_color);
             let Some(name) = picked else { usage_error("no model named. Pass --model NAME or set RAK_MODEL") };
             remember_model(&backend.memory_key(), &name);
             name

@@ -25,6 +25,7 @@ pub mod markdown;
 pub mod mcp_command;
 pub mod menu;
 pub mod output;
+pub mod picker;
 pub mod session;
 pub mod settings;
 pub mod signals;

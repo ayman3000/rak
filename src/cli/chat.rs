@@ -2,6 +2,7 @@
 
 use super::args::Options;
 use super::editor::Editor;
+use super::picker::{self, Choice, Picked};
 use super::session::{backend, make_provider, provider_label, run_one, window_for, Backend, Session};
 use super::settings::{home, key, key_files, last_model, remember_model};
 use super::style::{cut, pad, paint, Style};
@@ -84,7 +85,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
             continue;
         }
         if input.starts_with('/') {
-            if !run_command(s, editor, &input) {
+            if !run_command(s, &input) {
                 break;
             }
             continue;
@@ -121,19 +122,30 @@ pub fn list_models(provider: &dyn Model, current: Option<&str>, color: bool) -> 
     }
 }
 
-/// Lists the models and lets the person pick one by number or name.
-pub fn pick_model(provider: &dyn Model, current: Option<&str>, editor: &mut Editor, color: bool) -> Option<String> {
-    let models = list_models(provider, current, color)?;
-    let hint =
-        if current.is_some() { "Pick a number, or Enter to keep the current model:" } else { "Pick a number, or type a model's name:" };
-    println!("{}", paint(color, Style::Dim, hint));
-    let answer = editor.read_line("model › ", Style::C45, false)?.trim().to_string();
-    if answer.is_empty() {
+/// Lets the person pick one of the provider's models with the arrow keys, or
+/// type a name it doesn't list. None when they cancel (Esc) or the provider
+/// can't list its models.
+pub fn pick_model(provider: &dyn Model, current: Option<&str>, color: bool) -> Option<String> {
+    let mut models = match provider.list_models() {
+        Ok(models) => models,
+        Err(why) => {
+            println!("{}", paint(color, Style::Yellow, &format!("Couldn't list the models: {why}")));
+            println!("{}", paint(color, Style::Dim, "You can still switch by name: /model NAME"));
+            return None;
+        }
+    };
+    // Only models that can chat.
+    models.retain(|m| !m.to_lowercase().contains("embed"));
+    if models.is_empty() {
+        println!("{}", paint(color, Style::Dim, "The provider lists no models. Switch by name: /model NAME"));
         return None;
     }
-    match answer.parse::<usize>() {
-        Ok(n) if (1..=models.len()).contains(&n) => Some(models[n - 1].clone()),
-        _ => Some(answer),
+    let choices: Vec<Choice> = models.iter().map(|m| Choice { name: m.clone(), note: String::new(), dim: false }).collect();
+    let start = current.and_then(|c| models.iter().position(|m| m == c));
+    match picker::pick(&choices, start, true, color) {
+        Picked::Item(i) => Some(models[i].clone()),
+        Picked::Typed(name) => Some(name),
+        Picked::Cancelled => None,
     }
 }
 
@@ -152,24 +164,31 @@ pub fn switch_model(s: &mut Session, model: &str) {
     use_backend(s, o, backend, model, moved);
 }
 
-/// Lists the providers: which one is in use, and whether each one's key is set.
-fn list_providers(s: &Session, color: bool) {
-    for p in rak::providers::all() {
-        let current = s.backend.provider.as_deref() == Some(p.name.as_str());
-        let marker = if current { paint(color, Style::Green, "▸") } else { " ".to_string() };
-        let key_state = match &p.key {
-            None => paint(color, Style::Dim, "no key needed"),
-            Some(name) if key(name).is_some() => format!("{name} set"),
-            Some(name) => paint(color, Style::Dim, &format!("{name} not set")),
-        };
-        println!(" {marker} {} {} {}", paint(color, Style::Cyan, &pad(&p.name, 13)), pad(&p.label, 42), key_state);
+/// Lets the person pick a provider with the arrow keys; each row says whether
+/// its key is set. None when they cancel (Esc).
+fn pick_provider(s: &Session, color: bool) -> Option<String> {
+    let all = rak::providers::all();
+    let choices: Vec<Choice> = all
+        .iter()
+        .map(|p| {
+            let (state, usable) = match &p.key {
+                None => ("no key needed".to_string(), true),
+                Some(name) if key(name).is_some() => (format!("{name} set"), true),
+                Some(name) => (format!("{name} not set"), false),
+            };
+            Choice { name: p.name.clone(), note: format!("{}{}", pad(&p.label, 42), state), dim: !usable }
+        })
+        .collect();
+    let current = all.iter().position(|p| s.backend.provider.as_deref() == Some(p.name.as_str()));
+    match picker::pick(&choices, current, false, color) {
+        Picked::Item(i) => Some(all[i].name.clone()),
+        _ => None,
     }
-    println!("{}", paint(color, Style::Dim, "\n  /provider NAME switches; the chat so far comes along"));
 }
 
 /// Moves the chat to another provider: its own address and key, and the model
 /// last picked there (or RAK_MODEL for the default provider, or one picked now).
-pub fn switch_provider(s: &mut Session, editor: &mut Editor, name: &str) {
+pub fn switch_provider(s: &mut Session, name: &str) {
     let color = s.ui.borrow().out_color;
     let warn = |text: &str| println!("{}", paint(color, Style::Yellow, text));
     let Some(provider) = rak::providers::find(name) else {
@@ -193,7 +212,7 @@ pub fn switch_provider(s: &mut Session, editor: &mut Editor, name: &str) {
         Some(model) => model,
         None => {
             println!("No model picked yet for {}. These are its models:", provider.label);
-            match pick_model(make_provider(&o, &backend_now, "", &s.stop).as_ref(), None, editor, color) {
+            match pick_model(make_provider(&o, &backend_now, "", &s.stop).as_ref(), None, color) {
                 Some(model) => model,
                 None => return println!("Staying with {} at {}.", s.model, provider_label(&s.backend)),
             }
@@ -221,7 +240,7 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
 }
 
 /// Runs a slash command. False means leave the chat.
-pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
+pub fn run_command(s: &mut Session, line: &str) -> bool {
     let color = s.ui.borrow().out_color;
     let dim = |text: &str| paint(color, Style::Dim, text);
     let (name, args) = line[1..].split_once(' ').unwrap_or((&line[1..], ""));
@@ -234,16 +253,22 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             println!("{}", dim("\n  Ctrl-C stops a running request · ↑/↓ history · Tab completes a command\n  Multi-line: end a line with \\ to continue it, or paste"));
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
-        "provider" if !args.is_empty() => switch_provider(s, editor, args),
+        "provider" if !args.is_empty() => switch_provider(s, args),
         "provider" => {
             println!("Provider: {}", paint(color, Style::Bold, &provider_label(&s.backend)));
-            list_providers(s, color);
+            match pick_provider(s, color) {
+                Some(name) if Some(name.as_str()) == s.backend.provider.as_deref() => println!("{}", dim("Kept it.")),
+                Some(name) => switch_provider(s, &name),
+                None => println!("{}", dim("Kept it.")),
+            }
         }
         "model" | "m" => {
             println!("Model: {} at {}", paint(color, Style::Bold, &s.model), provider_label(&s.backend));
             let provider = make_provider(&s.o, &s.backend, &s.model, &s.stop);
-            if let Some(model) = pick_model(provider.as_ref(), Some(&s.model), editor, color) {
-                switch_model(s, &model);
+            match pick_model(provider.as_ref(), Some(&s.model), color) {
+                Some(model) if model == s.model => println!("{}", dim("Kept it.")),
+                Some(model) => switch_model(s, &model),
+                None => println!("{}", dim("Kept it.")),
             }
         }
         "models" => {

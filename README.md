@@ -231,13 +231,14 @@ Started without a task, rak opens a chat with the same interface as sak:
 - **Ctrl-C stops a request** — the answer being written, or a command that is running — and keeps the chat. A second Ctrl-C quits.
 - **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
 - **No model named?** rak uses the one you last picked for that provider, then `RAK_MODEL`, or lists the provider's models to pick from.
+- **Pick from a list:** `/provider` and `/model` open a list: ↑ and ↓ move, Enter picks, Esc cancels and keeps what you had, and typing narrows the list (for models, a name the list doesn't have can be typed and used). Providers whose key isn't set are shown dim.
 - **Switch provider mid-chat** with `/provider NAME`: its own address and key, and the model you last picked there. The conversation comes along.
 
 | Command | What it does |
 |---|---|
-| `/model [name]` | Show or switch the model. Without a name: pick from a list. |
+| `/model [name]` | Show or switch the model. Without a name: pick from a list (↑/↓, Enter, Esc cancels, type to narrow). |
 | `/models` | List the models the provider offers. |
-| `/provider [name]` | Show or switch the provider. Without a name: list them, with whether each one's key is set. |
+| `/provider [name]` | Show or switch the provider. Without a name: pick from a list that says whether each one's key is set. |
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
 | `/skills` | List the skills the agent can load. `/skills add URL` adds one (it shows it and asks first). |
