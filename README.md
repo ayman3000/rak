@@ -327,7 +327,9 @@ What helps the agent on a project too big to read whole:
 - **A plan it keeps.** `todo` holds the steps; rak checks them when the agent says it is done.
 - **A helper for searching.** `delegate` reads many files in its own context and returns only the answer.
 - **Memory across sessions.** `AGENTS.md` notes and project skills (`.rak/skills`) carry conventions and lessons into every chat.
-- **When the context fills,** old tool outputs are replaced by a note saying which call they came from (`read_file src/main.rs`) and how they began, so the agent knows what it no longer has.
+- **When the context fills,** old tool outputs are replaced by a note saying which call they came from (`read_file src/main.rs`) and how they began, so the agent knows what it no longer has. The tool descriptions count toward the window too.
+- **When that is not enough,** the older part of the conversation is replaced by a summary the model writes, and the newest turns stay word for word, the latest request always among them (as SwiftAgentKit's compaction does). The task list is copied into the summary unchanged. If the summary call fails, a plain list of the user's messages and the calls made stands in. Only after that are recent tool outputs replaced by notes too.
+- **When the server says the request is too long** (its token count can differ from rak's estimate), rak summarizes once more and asks again. If there is nothing older to summarize and nothing to trim, the request fails and says the latest message or output alone is too big.
 
 A line in the system prompt says when to use these. The four tools add 214 input tokens to every call (1,157 → 1,371 with skills off, kimi-k2.6:cloud).
 
@@ -337,7 +339,9 @@ Tried with kimi-k2.6:cloud (2026-11-11):
 - **A question about rak's own code** (about 45 files): "every condition under which this program talks to Anthropic's API, with file:line". Without the system-prompt line, it never used `code_map` (128,000 and 185,000 input tokens in two runs). With it, it started with `code_map` each time; runs took 88,000, 136,000 and 211,000 tokens, so the model's own choices vary more than the tools change. The answers were right every time.
 - **`delegate`:** kimi did not choose it on its own, even for "summarize how every tool checks its inputs" (13 files read in its own context). Asked to use it, the helper found the right file; one line number was exact and one was off by five. The main conversation spent three turns.
 
-Not tried yet: a real codebase of thousands of files, a session long enough to fill the context, and `delegate` with Claude.
+Compaction was tried with kimi-k2.6:cloud (2026-11-12) by forcing a tiny window (`--context 4000`) on a read-only chat about rak's own files. A second request summarized the first ("summarizing 7 earlier messages"), and the model still named the three files the first request was about. In the first request there was nothing older to summarize, so the last-resort step replaced the file just read with its note; the model answered about that file from the note instead of reading it again, and got it wrong. With real windows (128K and up) a single read of at most 40,000 characters does not reach that step.
+
+Not tried yet: a real codebase of thousands of files, a real session long enough to fill a full-size window, and `delegate` with Claude.
 
 ## What is missing
 
@@ -353,7 +357,7 @@ Known limits of the chat:
 - Ctrl-C takes effect when the model next sends something. While a model is silent (still thinking), the first Ctrl-C waits; a second one quits rak.
 - On Windows the chat falls back to plain line input: no menu, no arrow keys, no history.
 - The window rak shows for a local Ollama model is the model's own maximum. Ollama may run it with a smaller one.
-- With Anthropic's API, trimming old tool output near a full context window changes earlier messages, which ends the cache from that point; the next call writes it again.
+- With Anthropic's API, trimming old tool output or summarizing near a full context window changes earlier messages, which ends the cache from that point; the next call writes it again. A summary is one more model call, counted in the request's tokens.
 
 Not yet tested: Windows (not built yet), and any public benchmark. Anthropic's real API was tried on Claude Haiku 5.5 (2026-11-11): the first call wrote 1,514 tokens to the cache and the second read all 1,514 back, writing only the 87 new ones. Its other paths (thinking blocks sent back, refusal fallbacks) are tested against a local stand-in. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.
 
@@ -368,6 +372,7 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 | Library (`src/`) | |
 |---|---|
 | `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, context trimming, the finish check. |
+| `compact.rs` | Compaction: where the summarized part ends, what the summary is written from, how it rejoins the conversation, which server errors mean "too long". |
 | `sessions.rs` | Saved chats: one JSON file per chat, per project folder. |
 | `delegate.rs` | The `delegate` tool: a helper agent run inside a tool call. |
 | `provider.rs` | The `Model` trait and the OpenAI-compatible client, streaming included. |

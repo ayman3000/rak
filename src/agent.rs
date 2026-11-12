@@ -1,6 +1,7 @@
 //! The agent loop: ask the model, run the tools it calls, give it the results,
 //! repeat until it answers without calling a tool.
 
+use crate::compact;
 use crate::interrupt::Stop;
 use crate::provider::{Model, ModelError, Reply, Usage};
 use crate::tools::{definition, Image, Tool};
@@ -87,6 +88,9 @@ const LOOP_WARN: usize = 3;
 const LOOP_STOP: usize = 6;
 /// Tool results in the most recent messages are never dropped.
 const KEEP_RECENT: usize = 8;
+/// Characters counted as one token when sizing the conversation against the
+/// window. Low on purpose (code runs nearer 3.5–4): better early than over.
+const CHARS_PER_TOKEN: usize = 3;
 const DROPPED: &str = "[earlier output removed to save context; run the tool again if you need it]";
 
 /// Asked before a tool that changes something runs.
@@ -197,19 +201,38 @@ impl Agent {
         let nudge_at = (self.config.max_turns >= 10).then(|| self.config.max_turns * 4 / 5);
         let mut repeated: (String, usize) = (String::new(), 0);
         let mut empty_replies = 0;
+        // The tool descriptions go with every call, so they come out of the budget.
+        let definitions_size: usize = definitions.iter().map(|d| d.to_string().len()).sum();
+        let budget = (self.config.context_window * CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
 
         for turn in 1..=self.config.max_turns {
-            let dropped = trim_context(&mut self.messages, self.config.context_window * 3);
-            if dropped > 0 {
-                (self.on_event)(&Event::Note(&format!("context is filling up: dropped {dropped} old tool outputs")));
-            }
+            self.fit(budget);
             if self.stop.requested() {
                 return self.stopped(turn);
             }
-            let reply = match self.call_model(turn, &definitions) {
-                Ok(r) => r,
-                Err(_) if self.stop.requested() => return self.stopped(turn),
-                Err(e) => return RunResult { outcome: Outcome::Failed(e), answer: String::new(), turns: turn },
+            let mut overflow_handled = false;
+            let reply = loop {
+                match self.call_model(turn, &definitions) {
+                    Ok(r) => break r,
+                    Err(_) if self.stop.requested() => return self.stopped(turn),
+                    // The server counts tokens its own way: when it says the
+                    // request is too long, shrink harder and ask once more.
+                    Err(e) if compact::is_overflow(&e) && !overflow_handled => {
+                        overflow_handled = true;
+                        (self.on_event)(&Event::Note("the model says the conversation is too long for it"));
+                        // Our estimate said it fits, so shrink by what is there, not by the budget.
+                        let size = conversation_size(&self.messages);
+                        if self.compact(size / 4) || trim_keeping(&mut self.messages, size / 2, 0) > 0 {
+                            continue;
+                        }
+                        let why = format!(
+                            "{e}\nThe conversation is too long for the model even with its earlier part summarized: \
+                             the latest message or tool output alone is too big."
+                        );
+                        return RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: turn };
+                    }
+                    Err(e) => return RunResult { outcome: Outcome::Failed(e), answer: String::new(), turns: turn },
+                }
             };
 
             if reply.tool_calls.is_empty() {
@@ -300,6 +323,61 @@ impl Agent {
             Err(_) => String::new(),
         };
         RunResult { outcome: Outcome::MaxTurns, answer, turns }
+    }
+
+    /// Brings the conversation under `budget` characters, cheapest step first:
+    /// old tool outputs become one-line stubs; if that is not enough, the older
+    /// part is summarized; if even that is not enough, recent tool outputs are
+    /// stubbed too, oldest first.
+    fn fit(&mut self, budget: usize) {
+        let dropped = trim_context(&mut self.messages, budget);
+        if dropped > 0 {
+            (self.on_event)(&Event::Note(&format!("context is filling up: dropped {dropped} old tool outputs")));
+        }
+        if conversation_size(&self.messages) > budget {
+            self.compact(budget / 4);
+        }
+        if conversation_size(&self.messages) > budget {
+            let dropped = trim_keeping(&mut self.messages, budget, 0);
+            if dropped > 0 {
+                (self.on_event)(&Event::Note(&format!("context is still full: dropped {dropped} recent tool outputs")));
+            }
+        }
+    }
+
+    /// Replaces the older part of the conversation with a summary the model
+    /// writes, keeping about `tail_budget` characters of the newest turns word
+    /// for word. False when there is nothing older to summarize.
+    pub fn compact(&mut self, tail_budget: usize) -> bool {
+        let (middle, tail) = compact::split(&self.messages[1..], tail_budget, message_size);
+        if middle.is_empty() {
+            return false;
+        }
+        (self.on_event)(&Event::Note(&format!("context is full: summarizing {} earlier messages", middle.len())));
+        // Half the window for what the summary is written from: room for the reply.
+        let source = compact::transcript(&middle, (self.config.context_window * CHARS_PER_TOKEN / 2).max(4_000));
+        let request = [json!({ "role": "system", "content": compact::SUMMARY_PROMPT }), json!({ "role": "user", "content": source })];
+        let mut summary = None;
+        for attempt in 0..2 {
+            match self.model.chat(&request, &[]) {
+                Ok(reply) => {
+                    self.usage.add(reply.usage);
+                    summary = Some(reply.content).filter(|s| !s.trim().is_empty());
+                    break;
+                }
+                Err(ModelError::Retryable(_)) if attempt == 0 && !self.stop.requested() => std::thread::sleep(self.retry_base),
+                Err(_) => break,
+            }
+        }
+        let summary = summary.unwrap_or_else(|| {
+            (self.on_event)(&Event::Note("no summary could be written: kept a list of the requests and calls instead"));
+            compact::plain_summary(&middle)
+        });
+        let checkpoint = compact::checkpoint(&summary, compact::latest_task_list(&middle).as_deref());
+        self.messages.truncate(1);
+        self.messages.extend(compact::assemble(&checkpoint, tail));
+        self.last_prompt_tokens = 0;
+        true
     }
 
     fn call_model(&mut self, turn: usize, definitions: &[Value]) -> Result<Reply, String> {
@@ -416,34 +494,29 @@ pub fn dropped_stub(call: Option<&(String, String)>, output: &str) -> String {
     .replace("  ", " ")
 }
 
+/// The conversation's size for the context budget, in characters.
+pub fn conversation_size(messages: &[Value]) -> usize {
+    messages.iter().map(message_size).sum()
+}
+
 /// Pure — unit-tested. When the conversation is longer than `budget_chars`,
 /// the oldest tool outputs are replaced by a one-line stub, oldest first, until
 /// it fits. The most recent messages are never touched. Returns how many
 /// outputs were dropped.
 pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
+    trim_keeping(messages, budget_chars, KEEP_RECENT)
+}
+
+/// `trim_context`, leaving the last `keep_recent` messages alone.
+pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: usize) -> usize {
     let size = message_size;
     let mut total: usize = messages.iter().map(size).sum();
     if total <= budget_chars {
         return 0;
     }
     // Which call each output answered, so its stub can say what was removed.
-    let calls: std::collections::HashMap<String, (String, String)> = messages
-        .iter()
-        .filter_map(|m| m["tool_calls"].as_array())
-        .flatten()
-        .filter_map(|call| {
-            let id = call["id"].as_str()?.to_string();
-            let name = call["function"]["name"].as_str()?.to_string();
-            let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}")).unwrap_or_default();
-            let target = ["path", "command", "directory", "task", "query", "name"]
-                .iter()
-                .find_map(|k| args[*k].as_str())
-                .map(|t| crate::text::one_line(t, 80))
-                .unwrap_or_default();
-            Some((id, (name, target)))
-        })
-        .collect();
-    let last_droppable = messages.len().saturating_sub(KEEP_RECENT);
+    let calls = compact::call_index(messages);
+    let last_droppable = messages.len().saturating_sub(keep_recent);
     let mut dropped = 0;
     for message in messages[..last_droppable].iter_mut() {
         if total <= budget_chars {
@@ -731,6 +804,61 @@ mod tests {
             "[output of read_file src/main.rs removed to save context. It began: fn main() {}. Run it again if you need it.]"
         );
         assert_eq!(dropped_stub(None, "x"), DROPPED);
+    }
+
+    fn earlier_chat() -> Vec<Value> {
+        let mut history = Vec::new();
+        for i in 0..4 {
+            history.push(json!({ "role": "user", "content": format!("request {i}: {}", "r".repeat(2_000)) }));
+            history.push(json!({ "role": "assistant", "content": format!("answer {i}: {}", "a".repeat(2_000)) }));
+        }
+        history
+    }
+
+    #[test]
+    fn a_too_long_error_summarizes_the_older_part_and_asks_again() {
+        let too_long = Err(ModelError::Fatal("the Anthropic API answered 400: prompt is too long".into()));
+        let mut s = setup("overflow", vec![too_long, Ok(text("They asked for four things.")), Ok(text("done"))], 10);
+        s.agent.restore(earlier_chat());
+        let result = s.agent.run("request 4");
+        assert_eq!((result.outcome, result.answer.as_str()), (Outcome::Done, "done"));
+
+        let seen = s.seen.borrow();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[1][0]["content"], compact::SUMMARY_PROMPT, "the second call writes the summary");
+        assert!(seen[1][1]["content"].as_str().unwrap().contains("USER: request 0"));
+        let retried = &seen[2];
+        assert!(retried.len() < 10, "the older part is gone: {} messages", retried.len());
+        let checkpoint = retried[1]["content"].as_str().unwrap();
+        assert!(checkpoint.starts_with(compact::CHECKPOINT_HEAD) && checkpoint.contains("They asked for four things."));
+        assert_eq!(retried.last().unwrap()["content"], "request 4", "the latest request is kept word for word");
+        let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn a_conversation_over_budget_is_summarized_before_the_call() {
+        let mut s = setup("compact-ahead", vec![Err(ModelError::Fatal("down".into())), Ok(text("done"))], 10);
+        s.agent.set_context_window(4_000);
+        s.agent.restore(earlier_chat());
+        let result = s.agent.run("request 4");
+        assert_eq!(result.answer, "done");
+        let seen = s.seen.borrow();
+        // The summary call failed, so a plain list of the requests stands in.
+        let checkpoint = seen[1][1]["content"].as_str().unwrap();
+        assert!(checkpoint.contains("No summary could be written") && checkpoint.contains("- request 0"));
+        assert!(conversation_size(&seen[1]) < conversation_size(&earlier_chat()));
+        let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn a_too_long_error_with_nothing_to_shrink_fails_and_says_why() {
+        let too_long = || Err(ModelError::Fatal("the model server answered 400: context_length_exceeded".into()));
+        let mut s = setup("overflow-alone", vec![too_long(), too_long()], 10);
+        let result = s.agent.run("one huge message");
+        let Outcome::Failed(why) = result.outcome else { panic!("{:?}", result.outcome) };
+        assert!(why.contains("latest message or tool output alone is too big"), "{why}");
+        assert_eq!(s.seen.borrow().len(), 1, "nothing could shrink, so no second call");
+        let _ = std::fs::remove_dir_all(&s.dir);
     }
 
     #[test]

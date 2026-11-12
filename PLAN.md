@@ -23,6 +23,10 @@ Updated 2026-11-12. A working plan for picking the work up on another machine.
 - `code_map`: source files with their definitions and lines; `read_file` takes
   `start_line` / `end_line` (`src/tools/map.rs`, `src/tools/fs.rs`).
 - Trimmed outputs say which call they came from; the task list is never trimmed.
+- Compaction (`src/compact.rs`, `Agent::fit` / `Agent::compact`): when trimming is not
+  enough, the older part becomes a model-written summary; a "too long" error from
+  the server summarizes once and retries. Tool descriptions now count toward the
+  budget. Unit-tested; tried live with kimi and `--context 4000` only.
 
 ## Next steps
 
@@ -32,8 +36,11 @@ Updated 2026-11-12. A working plan for picking the work up on another machine.
       a large open-source repo): check the 14,000-char and 5,000-file limits,
       the "map a folder with `path`" note, and how long it takes. No model
       needed.
-- [ ] A session that fills the context, in a container: check that trimming
-      keeps the `todo` list and that the model makes sense of the stubs.
+- [ ] A session that fills a full-size context, in a container: check that
+      trimming and then compaction keep the `todo` list, that the model makes
+      sense of the stubs and the summary, and what the summary call costs.
+- [ ] Anthropic's real "prompt is too long" error triggering the retry (only
+      a stand-in has so far).
 - [ ] `delegate` with Claude (only kimi has used it so far).
 - [ ] The model choosing `delegate` without being asked. It doesn't yet;
       try rewording `BIG_PROJECTS` in `src/cli/session.rs` or the tool's
