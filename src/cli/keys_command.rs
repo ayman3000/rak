@@ -2,7 +2,7 @@
 //! exist yet, and shows which keys are set and where each comes from. Values
 //! are never printed.
 
-use super::settings::{global_key_file, home, Keys, KNOWN, TEMPLATE};
+use super::settings::{global_key_file, home, shows_value, Keys, KNOWN, TEMPLATE};
 use super::welcome::short_path;
 
 pub fn run(args: &[String]) -> ! {
@@ -27,13 +27,30 @@ pub fn run(args: &[String]) -> ! {
     }
     let cwd = std::env::current_dir().unwrap_or_default();
     let keys = Keys::load(&cwd);
-    println!();
-    for (name, purpose) in KNOWN {
-        let status = match keys.source(name) {
-            Some(source) => format!("set, from {}", if source.starts_with('/') { short(&source) } else { source }),
-            None => "not set".to_string(),
+    let status = |name: &str| match keys.source(name) {
+        Some(source) => format!("set, from {}", if source.starts_with('/') { short(&source) } else { source }),
+        None => "not set".to_string(),
+    };
+    let default = keys.get("RAK_PROVIDER");
+    println!("\nProviders (pick one with --provider NAME, or RAK_PROVIDER for the default)\n");
+    for p in rak::providers::all() {
+        let mark = if default.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(&p.name)) { "▸" } else { " " };
+        let key = match &p.key {
+            Some(name) => format!("{name:<20} {}", status(name)),
+            None => "no key needed".to_string(),
         };
-        println!("  {name:<18} {status:<36} {purpose}");
+        println!(" {mark} {:<13} {key:<52} {}", p.name, p.label);
+    }
+    println!("\nOther settings\n");
+    for (name, purpose) in KNOWN {
+        let state = match keys.get(name) {
+            Some(value) if shows_value(name) => format!("{value} ({})", status(name)),
+            _ => status(name),
+        };
+        println!("   {name:<16} {state:<50} {purpose}");
+    }
+    if default.is_none() {
+        println!("\nNo RAK_PROVIDER: rak uses Ollama on this machine (or Anthropic for a claude-* model when its key is set).");
     }
     println!("\nThe environment wins, then .env in the project folder, then {shown}.");
     std::process::exit(0);

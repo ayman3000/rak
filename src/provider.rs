@@ -183,13 +183,12 @@ impl OpenAICompatible {
     /// Ollama's description of the model (`POST /api/show`); None for other servers.
     fn ollama_show(&self) -> Option<Value> {
         let root = self.base_url.strip_suffix("/v1")?;
-        self.http
-            .post(&format!("{root}/api/show"))
-            .timeout(Duration::from_secs(4))
-            .send_json(json!({ "model": self.model }))
-            .ok()?
-            .into_json()
-            .ok()
+        let mut request = self.http.post(&format!("{root}/api/show")).timeout(Duration::from_secs(4));
+        // Ollama's cloud (ollama.com) answers only with the key.
+        if let Some(key) = &self.api_key {
+            request = request.set("Authorization", &format!("Bearer {key}"));
+        }
+        request.send_json(json!({ "model": self.model })).ok()?.into_json().ok()
     }
 
     /// The ids of the models the server offers (`GET /models`), sorted.

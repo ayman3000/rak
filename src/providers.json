@@ -1,0 +1,17 @@
+[
+  { "name": "ollama", "label": "Ollama on this machine", "base_url": "http://localhost:11434/v1", "key": null, "api": "openai" },
+  { "name": "ollama-cloud", "label": "Ollama's cloud (ollama.com)", "base_url": "https://ollama.com/v1", "key": "OLLAMA_API_KEY", "api": "openai" },
+  { "name": "anthropic", "label": "Claude, Anthropic's API", "base_url": "https://api.anthropic.com", "key": "ANTHROPIC_API_KEY", "api": "anthropic" },
+  { "name": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1", "key": "OPENAI_API_KEY", "api": "openai" },
+  { "name": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY", "api": "openai" },
+  { "name": "huggingface", "label": "Hugging Face's router", "base_url": "https://router.huggingface.co/v1", "key": "HF_TOKEN", "api": "openai" },
+  { "name": "groq", "label": "Groq", "base_url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY", "api": "openai" },
+  { "name": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com", "key": "DEEPSEEK_API_KEY", "api": "openai" },
+  { "name": "mistral", "label": "Mistral", "base_url": "https://api.mistral.ai/v1", "key": "MISTRAL_API_KEY", "api": "openai" },
+  { "name": "gemini", "label": "Google Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "GEMINI_API_KEY", "api": "openai" },
+  { "name": "zai", "label": "Z.ai (GLM)", "base_url": "https://api.z.ai/api/paas/v4", "key": "ZAI_API_KEY", "api": "openai" },
+  { "name": "zai-coding", "label": "Z.ai GLM Coding Plan", "base_url": "https://api.z.ai/api/coding/paas/v4", "key": "ZAI_API_KEY", "api": "openai" },
+  { "name": "lmstudio", "label": "LM Studio on this machine", "base_url": "http://localhost:1234/v1", "key": null, "api": "openai" },
+  { "name": "llamacpp", "label": "llama.cpp's llama-server on this machine", "base_url": "http://localhost:8080/v1", "key": null, "api": "openai" },
+  { "name": "vllm", "label": "vLLM on this machine", "base_url": "http://localhost:8000/v1", "key": null, "api": "openai" }
+]

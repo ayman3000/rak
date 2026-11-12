@@ -52,20 +52,38 @@ Then set up your keys with `rak keys` (see [Keys](#keys)).
 
 ## Use
 
-rak talks to any server that speaks OpenAI's chat-completions API (OpenAI, OpenRouter, Ollama, Hugging Face's router, vLLM, llama.cpp, LM Studio), and to Claude through Anthropic's own API.
+rak knows these providers by name. Each gets its own address and its own key:
+
+| `--provider` | Who | Key |
+|---|---|---|
+| `ollama` (the default) | Ollama on this machine, its `:cloud` models included | none |
+| `ollama-cloud` | Ollama's cloud at ollama.com, without Ollama installed | `OLLAMA_API_KEY` |
+| `anthropic` | Claude through Anthropic's API, with prompt caching | `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI | `OPENAI_API_KEY` |
+| `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
+| `huggingface` | Hugging Face's router | `HF_TOKEN` |
+| `groq` | Groq | `GROQ_API_KEY` |
+| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` |
+| `mistral` | Mistral | `MISTRAL_API_KEY` |
+| `gemini` | Google Gemini | `GEMINI_API_KEY` |
+| `zai`, `zai-coding` | Z.ai (GLM); `zai-coding` for GLM Coding Plan keys | `ZAI_API_KEY` |
+| `lmstudio`, `llamacpp`, `vllm` | those servers on this machine | none |
+
+The list is data, [`src/providers.json`](src/providers.json): adding a provider is one line there.
 
 ```bash
-# Ollama on this machine (the default address)
+# Ollama on this machine: nothing to set
 rak -m kimi-k2.6:cloud "explain what this project does"
 
-# Claude: with ANTHROPIC_API_KEY set, a claude-* model uses Anthropic's API
-export ANTHROPIC_API_KEY=...
-rak -m claude-opus-5-5 "fix the failing test"
+# Any other provider: its key in ~/.config/rak/.env, then
+rak --provider openrouter -m some/model "add a --verbose flag to the CLI"
+rak --provider anthropic -m claude-opus-5-5 "fix the failing test"
 
-# Any other server
-export RAK_BASE_URL=https://openrouter.ai/api/v1
-export RAK_API_KEY=...
-rak -m some/model "add a --verbose flag to the CLI"
+# With ANTHROPIC_API_KEY set, a claude-* model goes to Anthropic on its own
+rak -m claude-haiku-5-5 "summarize the README"
+
+# A server rak doesn't know by name: its address, and RAK_API_KEY if it needs one
+rak --base-url https://example.com/v1 -m some-model "…"
 
 # No task: a chat
 rak -m kimi-k2.6:cloud
@@ -77,16 +95,29 @@ rak -m kimi-k2.6:cloud
 rak keys
 ```
 
-The first time, this creates `~/.config/rak/.env` from a template ([`.env.example`](.env.example)) that lists every key rak uses, with what each is for. Open it in any editor and fill in the ones you need; leave the rest empty. After that, `rak keys` shows which keys are set and where each comes from, never the values.
+The first time, this creates `~/.config/rak/.env` from a template ([`.env.example`](.env.example)) with a line for every provider's key and a block for each provider to make it the default. Open it in any editor, fill in the keys you have, and uncomment one default block:
+
+```bash
+OPENROUTER_API_KEY=sk-or-…
+RAK_PROVIDER=openrouter
+RAK_MODEL=          # empty: rak lists the provider's models to pick from
+```
+
+After that, `rak keys` lists every provider with whether its key is set and where it comes from (never the key itself), marks the default, and shows the other settings.
 
 rak reads the environment first, then `./.env` in the project, then `~/.config/rak/.env`, the first one found winning. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them. The file is created readable by you only.
 
-| Key | For |
+| Setting | For |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude through Anthropic's API |
-| `RAK_API_KEY`, `OPENAI_API_KEY` | a chat-completions server that needs a key |
+| a provider's key (table above) | that provider, and only that provider |
 | `TAVILY_API_KEY` | `web_search` |
-| `RAK_MODEL`, `RAK_PROVIDER`, `RAK_BASE_URL` | defaults for `-m`, `--provider` and `--base-url` (optional) |
+| `RAK_PROVIDER`, `RAK_MODEL` | the default provider and model (optional) |
+| `RAK_BASE_URL` | the default provider at another address, e.g. Ollama on another machine (optional) |
+| `RAK_API_KEY` | the key for a server named only by `--base-url` |
+
+**A key never reaches another provider's server.** Each provider is sent its own key. Defaults from the file don't mix with flags: `--provider` on the command line uses that provider's own address even when `RAK_BASE_URL` is set, and `--base-url` on the command line drops the default provider and its key.
+
+`rak keys` only creates the file when there is none. If yours came from an older template, copy what you need from [`.env.example`](.env.example).
 
 The chat's welcome panel lists the `.env` files it read.
 
@@ -94,7 +125,7 @@ The chat's welcome panel lists the `.env` files it read.
 
 An agent sends the whole conversation again with every model call, so most of what it pays for is input it sent before. Prompt caching lets the server read that part back for a fraction of the price: on Anthropic's API a cache read costs a tenth of normal input, or less on the newest models.
 
-rak speaks Anthropic's Messages API directly for this, rather than going through its OpenAI-compatible endpoint:
+With `--provider anthropic` (or a `claude-*` model and `ANTHROPIC_API_KEY` set), rak speaks Anthropic's Messages API directly for this, rather than going through its OpenAI-compatible endpoint:
 
 - **Caching** uses two markers: one on the system prompt (which covers the tools too, since they come first), and the automatic one that follows the end of the conversation. Each call then reads back everything the previous call sent.
 - **Thinking blocks** are sent back unchanged with each request, as the API requires.
@@ -158,9 +189,9 @@ The history and the last model picked are kept in `~/.config/rak/`.
 | Option | What it does |
 |---|---|
 | `-m`, `--model NAME` | Model to use. Or set `RAK_MODEL`. A chat can start without one. |
-| `--provider NAME` | `openai` (the chat-completions API) or `anthropic`. Or set `RAK_PROVIDER`. Default: `anthropic` for a `claude-*` model when `ANTHROPIC_API_KEY` is set and no `--base-url` is given, or when the address is Anthropic's; otherwise `openai`. |
-| `--base-url URL` | Server address. Or set `RAK_BASE_URL`. Default `http://localhost:11434/v1`, or `https://api.anthropic.com` for `anthropic`. |
-| `--api-key-env NAME` | Environment variable holding the key. Default `RAK_API_KEY`, then `OPENAI_API_KEY`; `ANTHROPIC_API_KEY` first for `anthropic`. |
+| `--provider NAME` | Who runs the model (table above). Or set `RAK_PROVIDER`. Default: `ollama`, or `anthropic` for a `claude-*` model when `ANTHROPIC_API_KEY` is set. |
+| `--base-url URL` | Another address: a server rak doesn't know by name, or a provider somewhere else. Or set `RAK_BASE_URL`. |
+| `--api-key-env NAME` | The variable holding the key to send. Default: the provider's own key; `RAK_API_KEY` for a server named by `--base-url`. |
 | `--effort LEVEL` | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `--max-tokens N` | Longest reply to ask for. |
 | `--context N` | The model's context window in tokens. Default: what Anthropic or an Ollama server reports for the model, otherwise 128000. |
@@ -349,7 +380,7 @@ Compared with sak, rak does not yet have:
 
 - Ctrl-R to search the history, and the "still running" note during a long tool call
 - fetching a whole web page (an MCP server can supply it)
-- Gemini's own API (use an OpenAI-compatible endpoint)
+- Gemini's own API (`--provider gemini` uses its OpenAI-compatible endpoint)
 - Naseem's notes and skills (rak reads its own skills, in the same format)
 
 Known limits of the chat:

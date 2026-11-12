@@ -15,19 +15,17 @@ USAGE
 
 MODEL
   -m, --model NAME        model to use                      [env RAK_MODEL]
-      --provider NAME     openai: any server that speaks OpenAI's chat-completions
-                          API (Ollama, OpenAI, OpenRouter, vLLM…)
-                          anthropic: Claude through Anthropic's own API, with
-                          prompt caching                    [env RAK_PROVIDER]
-                          default: anthropic for a claude-* model when
-                          ANTHROPIC_API_KEY is set and no --base-url is given,
-                          or when the address is Anthropic's; otherwise openai
-      --base-url URL      server address                    [env RAK_BASE_URL]
-                          default: http://localhost:11434/v1 (Ollama), or
-                          https://api.anthropic.com for anthropic
-      --api-key-env NAME  environment variable holding the key
-                          default: RAK_API_KEY, then OPENAI_API_KEY;
-                          ANTHROPIC_API_KEY first for anthropic
+      --provider NAME     who runs the model; each gets its own address and key
+                          ollama, ollama-cloud, anthropic, openai, openrouter,
+                          huggingface, groq, deepseek, mistral, gemini, zai,
+                          zai-coding, lmstudio, llamacpp, vllm   [env RAK_PROVIDER]
+                          default: ollama, or anthropic for a claude-* model
+                          when ANTHROPIC_API_KEY is set
+      --base-url URL      another address: a server rak doesn't know by name,
+                          or a provider somewhere else            [env RAK_BASE_URL]
+      --api-key-env NAME  the variable holding the key to send
+                          default: the provider's own key (`rak keys` lists
+                          them); RAK_API_KEY for a server named by --base-url
       --effort LEVEL      reasoning effort: low, medium, high, xhigh or max
       --max-tokens N      longest reply to ask for
       --context N         the model's context window in tokens
@@ -40,8 +38,9 @@ MODEL
 KEYS (run `rak keys` to create the key file from a template)
   Read from the environment, then ./.env in the project, then
   ~/.config/rak/.env. Values from the files are not passed on to commands.
-  RAK_MODEL, RAK_PROVIDER and RAK_BASE_URL may be set there too.
-  ANTHROPIC_API_KEY, RAK_API_KEY, OPENAI_API_KEY   the model server
+  Each provider has its own key (ANTHROPIC_API_KEY, OPENROUTER_API_KEY,
+  OLLAMA_API_KEY, …); `rak keys` lists them all. RAK_PROVIDER, RAK_MODEL and
+  RAK_BASE_URL may be set there too.
   TAVILY_API_KEY                                   web_search (https://tavily.com)
 
 BEHAVIOUR
@@ -75,6 +74,11 @@ pub struct Options {
     pub provider: Option<String>,
     /// None: the provider's default address.
     pub base_url: Option<String>,
+    /// --provider / --base-url were on the command line, not defaults from
+    /// RAK_PROVIDER / RAK_BASE_URL: a flag never mixes with the other's
+    /// default, so one provider's key never reaches another's server.
+    pub provider_flag: bool,
+    pub base_url_flag: bool,
     pub api_key_env: Option<String>,
     pub effort: Option<String>,
     pub max_tokens: Option<u64>,
@@ -105,6 +109,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
         model: env("RAK_MODEL"),
         provider: env("RAK_PROVIDER"),
         base_url: env("RAK_BASE_URL"),
+        provider_flag: false,
+        base_url_flag: false,
         api_key_env: None,
         effort: None,
         max_tokens: None,
@@ -139,8 +145,14 @@ pub fn parse_args(args: Vec<String>) -> Options {
                 std::process::exit(0);
             }
             "-m" | "--model" => o.model = Some(value("--model")),
-            "--base-url" => o.base_url = Some(value("--base-url")),
-            "--provider" => o.provider = Some(value("--provider")),
+            "--base-url" => {
+                o.base_url = Some(value("--base-url"));
+                o.base_url_flag = true;
+            }
+            "--provider" => {
+                o.provider = Some(value("--provider"));
+                o.provider_flag = true;
+            }
             "--api-key-env" => o.api_key_env = Some(value("--api-key-env")),
             "--effort" => {
                 let level = value("--effort");
@@ -171,10 +183,19 @@ pub fn parse_args(args: Vec<String>) -> Options {
     if !words.is_empty() {
         o.task = Some(words.join(" "));
     }
-    if let Some(provider) = &o.provider {
-        if provider != "openai" && provider != "anthropic" {
-            usage_error("--provider is openai or anthropic");
-        }
+    if let Some(provider) = o.provider.as_deref().filter(|p| rak::providers::find(p).is_none()) {
+        usage_error(&format!("unknown provider `{provider}`. Known: {}", rak::providers::names()));
     }
     o
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_help_names_every_provider() {
+        let normalized = super::HELP.replace(['\n', ' '], ",");
+        for provider in rak::providers::all() {
+            assert!(normalized.split(',').any(|word| word == provider.name), "--help does not name {}", provider.name);
+        }
+    }
 }

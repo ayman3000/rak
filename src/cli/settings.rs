@@ -48,16 +48,20 @@ pub struct Keys {
 /// The template for ~/.config/rak/.env: the keys rak uses, explained.
 pub const TEMPLATE: &str = include_str!("../../.env.example");
 
-/// The keys `rak keys` reports on, and what each is for.
+/// Settings `rak keys` reports on besides the providers' keys, and what each
+/// is for. The defaults are not secrets, so their values are shown.
 pub const KNOWN: &[(&str, &str)] = &[
-    ("ANTHROPIC_API_KEY", "Claude through Anthropic's API"),
-    ("RAK_API_KEY", "a chat-completions server that needs a key"),
-    ("OPENAI_API_KEY", "a chat-completions server that needs a key"),
     ("TAVILY_API_KEY", "web_search"),
-    ("RAK_MODEL", "the default model"),
     ("RAK_PROVIDER", "the default provider"),
-    ("RAK_BASE_URL", "the default server address"),
+    ("RAK_MODEL", "the default model"),
+    ("RAK_BASE_URL", "the default provider's address, if not its usual one"),
+    ("RAK_API_KEY", "the key for a server named only by --base-url"),
 ];
+
+/// Which of `KNOWN` are settings whose values may be shown.
+pub fn shows_value(name: &str) -> bool {
+    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_BASE_URL")
+}
 
 /// rak's own key file: ~/.config/rak/.env.
 pub fn global_key_file() -> Option<PathBuf> {
@@ -135,6 +139,8 @@ pub fn parse_env(text: &str) -> HashMap<String, String> {
             if let Some(end) = value[1..].find(quote) {
                 value = &value[1..1 + end];
             }
+        } else if value.starts_with('#') {
+            value = ""; // `KEY=   # what it is for`: empty, with a comment
         } else if let Some(hash) = value.find(" #") {
             value = value[..hash].trim_end();
         }
@@ -177,10 +183,24 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_value_followed_by_a_comment_is_empty() {
+        let parsed = parse_env("A=      # the key for A\nB=b   # the key for B\nC='#not a comment'\n");
+        assert_eq!(parsed["A"], "");
+        assert_eq!(parsed["B"], "b");
+        assert_eq!(parsed["C"], "#not a comment");
+    }
+
+    #[test]
     fn the_template_lists_every_known_key_and_sets_none() {
         let parsed = parse_env(TEMPLATE);
         for (name, _) in KNOWN {
             assert!(TEMPLATE.contains(name), "{name} is missing from .env.example");
+        }
+        for provider in rak::providers::all() {
+            assert!(TEMPLATE.contains(&format!("RAK_PROVIDER={}\n", provider.name)), "no block for {} in .env.example", provider.name);
+            if let Some(key) = &provider.key {
+                assert!(parsed.contains_key(key), "{key} ({}) has no line in .env.example", provider.name);
+            }
         }
         assert!(parsed.values().all(String::is_empty), "the template must not set anything: {parsed:?}");
     }

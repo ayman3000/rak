@@ -12,6 +12,7 @@ pub mod delegate;
 pub mod interrupt;
 pub mod mcp;
 pub mod provider;
+pub mod providers;
 pub mod read_slice;
 pub mod sessions;
 pub mod skills;

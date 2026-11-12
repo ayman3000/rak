@@ -13,6 +13,7 @@ use rak::anthropic::Anthropic;
 use rak::interrupt::Stop;
 use rak::mcp;
 use rak::provider::{Model, OpenAICompatible};
+use rak::providers::{self, Provider};
 use rak::tools::web::WebSearch;
 use rak::tools::{core_tools, Ctx};
 use serde_json::json;
@@ -88,36 +89,87 @@ const BIG_PROJECTS: &str = "\n\nIn a codebase you don't know yet, start with cod
 /// Which API rak speaks, where, and with which key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Backend {
+    /// The provider's name ("openrouter"), or None for a server named only by
+    /// its address.
+    pub provider: Option<String>,
     pub anthropic: bool,
     pub base_url: String,
     pub api_key: Option<String>,
 }
 
-/// Pure — unit-tested. Anthropic's own API when asked for; when the address
-/// is Anthropic's; or for a claude-* model when an Anthropic key is set and
-/// no other address was given. Otherwise the chat-completions API.
-pub fn uses_anthropic(provider: Option<&str>, base_url: Option<&str>, model: Option<&str>, has_anthropic_key: bool) -> bool {
-    match (provider, base_url) {
-        (Some(provider), _) => provider == "anthropic",
-        (None, Some(url)) => url.contains("anthropic.com"),
-        (None, None) => has_anthropic_key && model.is_some_and(|m| m.starts_with("claude-")),
-    }
+/// Which variable the key comes from.
+#[derive(Debug, PartialEq)]
+pub enum KeySource {
+    /// No key: a server on this machine.
+    None,
+    /// This variable, and it must be set; the text says who wants it.
+    Required(String, String),
+    /// This variable when it is set, otherwise no key.
+    IfSet(&'static str),
+}
+
+/// Where a run goes, before any key is read.
+#[derive(Debug, PartialEq)]
+pub struct Route {
+    pub provider: Option<&'static Provider>,
+    pub base_url: String,
+    pub key: KeySource,
+}
+
+/// Pure — unit-tested. Where a run goes and which key it sends.
+///
+/// - `--provider NAME`: that provider's own address and its own key.
+/// - Nothing named: Ollama on this machine, or Anthropic for a claude-*
+///   model when ANTHROPIC_API_KEY is set.
+/// - An address alone (`--base-url`): that server, with RAK_API_KEY if set.
+/// - `--api-key-env NAME` always picks the key.
+///
+/// Defaults from the .env files never mix with flags: `--provider` on the
+/// command line ignores RAK_BASE_URL, and `--base-url` ignores RAK_PROVIDER.
+/// So one provider's key never goes to another's server.
+pub fn route(o: &Options, model: Option<&str>, has_anthropic_key: bool) -> Result<Route, String> {
+    let (provider, base_url) = match (o.provider_flag, o.base_url_flag) {
+        (true, false) => (o.provider.as_deref(), None),
+        (false, true) => (None, o.base_url.as_deref()),
+        _ => (o.provider.as_deref(), o.base_url.as_deref()),
+    };
+    let named = match provider {
+        Some(name) => Some(providers::find(name).ok_or(format!("unknown provider `{name}`. Known: {}", providers::names()))?),
+        None => match base_url {
+            Some(url) if url.contains("anthropic.com") => providers::find("anthropic"),
+            Some(_) => None,
+            None if has_anthropic_key && model.is_some_and(|m| m.starts_with("claude-")) => providers::find("anthropic"),
+            None => providers::find("ollama"),
+        },
+    };
+    let key = match (o.api_key_env.as_deref(), named) {
+        (Some(name), _) => KeySource::Required(name.to_string(), "named with --api-key-env".to_string()),
+        (None, Some(p)) => match &p.key {
+            Some(name) => KeySource::Required(name.clone(), format!("{} needs it", p.label)),
+            None => KeySource::None,
+        },
+        (None, None) => KeySource::IfSet("RAK_API_KEY"),
+    };
+    let base_url = base_url.map(str::to_string).or_else(|| named.map(|p| p.base_url.clone())).unwrap_or_default();
+    Ok(Route { provider: named, base_url, key })
 }
 
 /// The backend for the options and model, or why there can't be one.
 pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
-    let env = |name: &str| key(name);
-    let anthropic = uses_anthropic(o.provider.as_deref(), o.base_url.as_deref(), model, env("ANTHROPIC_API_KEY").is_some());
-    let api_key = match &o.api_key_env {
-        Some(name) => Some(env(name).ok_or(format!("{name} is not set"))?),
-        None if anthropic => env("ANTHROPIC_API_KEY").or_else(|| env("RAK_API_KEY")),
-        None => env("RAK_API_KEY").or_else(|| env("OPENAI_API_KEY")),
+    let route = route(o, model, key("ANTHROPIC_API_KEY").is_some())?;
+    let api_key = match &route.key {
+        KeySource::None => None,
+        KeySource::IfSet(name) => key(name),
+        KeySource::Required(name, why) => {
+            Some(key(name).ok_or(format!("{name} is not set ({why}). Add it to ~/.config/rak/.env; `rak keys` shows which keys are set"))?)
+        }
     };
-    if anthropic && api_key.is_none() {
-        return Err("Anthropic's API needs a key: set ANTHROPIC_API_KEY (or name another variable with --api-key-env)".to_string());
-    }
-    let default_url = if anthropic { rak::anthropic::DEFAULT_BASE_URL } else { "http://localhost:11434/v1" };
-    Ok(Backend { anthropic, base_url: o.base_url.clone().unwrap_or_else(|| default_url.to_string()), api_key })
+    Ok(Backend {
+        provider: route.provider.map(|p| p.name.clone()),
+        anthropic: route.provider.is_some_and(|p| p.anthropic),
+        base_url: route.base_url,
+        api_key,
+    })
 }
 
 pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -> Box<dyn Model> {
@@ -156,9 +208,6 @@ pub fn run(mut o: Options) -> i32 {
     o.model = o.model.or_else(|| key("RAK_MODEL"));
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
     o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
-    if o.provider.as_deref().is_some_and(|p| p != "openai" && p != "anthropic") {
-        usage_error("RAK_PROVIDER is openai or anthropic");
-    }
 
     let stdin_tty = std::io::stdin().is_terminal();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -307,7 +356,7 @@ pub fn run(mut o: Options) -> i32 {
 
     agent.on_event(output::reporter(log.clone(), ui.clone()));
 
-    log.write(json!({ "event": "start", "version": VERSION, "model": model_name, "base_url": backend.base_url, "provider": if backend.anthropic { "anthropic" } else { "openai" }, "cwd": ctx.cwd,
+    log.write(json!({ "event": "start", "version": VERSION, "model": model_name, "base_url": backend.base_url, "provider": backend.provider.as_deref().unwrap_or("custom"), "cwd": ctx.cwd,
         "effort": o.effort, "auto_approve": o.yes, "read_only": o.read_only, "tools": agent.tool_names() }));
 
     let mut session = Session {
@@ -478,14 +527,58 @@ pub fn outcome_name(outcome: &Outcome) -> &'static str {
 mod tests {
     use super::*;
 
+    fn options(provider: Option<&str>, provider_flag: bool, base_url: Option<&str>, base_url_flag: bool) -> Options {
+        let mut o = super::super::args::parse_args(Vec::new());
+        (o.provider, o.provider_flag) = (provider.map(str::to_string), provider_flag);
+        (o.base_url, o.base_url_flag) = (base_url.map(str::to_string), base_url_flag);
+        o
+    }
+
+    fn required(name: &str) -> KeySource {
+        let label = providers::all().iter().find(|p| p.key.as_deref() == Some(name)).map(|p| p.label.clone()).unwrap();
+        KeySource::Required(name.into(), format!("{label} needs it"))
+    }
+
     #[test]
-    fn anthropic_is_chosen_when_asked_for_or_when_nothing_else_was_given() {
-        assert!(uses_anthropic(Some("anthropic"), None, Some("kimi"), false));
-        assert!(!uses_anthropic(Some("openai"), None, Some("claude-opus-5-5"), true));
-        assert!(uses_anthropic(None, Some("https://api.anthropic.com"), None, false));
-        assert!(uses_anthropic(None, None, Some("claude-haiku-5-5"), true));
-        assert!(!uses_anthropic(None, None, Some("claude-haiku-5-5"), false), "no key: stays with the default server");
-        assert!(!uses_anthropic(None, Some("https://openrouter.ai/api/v1"), Some("claude-opus-5-5"), true), "an address given wins");
-        assert!(!uses_anthropic(None, None, Some("kimi-k2.6:cloud"), true));
+    fn a_named_provider_gets_its_own_address_and_key() {
+        let r = route(&options(Some("openrouter"), true, None, false), Some("x/y"), true).unwrap();
+        assert_eq!((r.base_url.as_str(), r.key), ("https://openrouter.ai/api/v1", required("OPENROUTER_API_KEY")));
+        let r = route(&options(Some("ollama-cloud"), false, None, false), None, false).unwrap();
+        assert_eq!((r.base_url.as_str(), r.key), ("https://ollama.com/v1", required("OLLAMA_API_KEY")));
+        let r = route(&options(Some("lmstudio"), true, None, false), None, false).unwrap();
+        assert_eq!(r.key, KeySource::None, "a server on this machine takes no key");
+        assert!(route(&options(Some("nope"), true, None, false), None, false).unwrap_err().contains("Known: ollama"));
+    }
+
+    #[test]
+    fn with_nothing_named_rak_uses_ollama_or_anthropic_for_claude() {
+        let r = route(&options(None, false, None, false), Some("kimi-k2.6:cloud"), true).unwrap();
+        assert_eq!((r.provider.unwrap().name.as_str(), r.key), ("ollama", KeySource::None));
+        let r = route(&options(None, false, None, false), Some("claude-haiku-5-5"), true).unwrap();
+        assert!(r.provider.unwrap().anthropic);
+        let r = route(&options(None, false, None, false), Some("claude-haiku-5-5"), false).unwrap();
+        assert_eq!(r.provider.unwrap().name, "ollama", "no Anthropic key: stays local");
+    }
+
+    #[test]
+    fn defaults_from_the_file_never_mix_with_flags() {
+        // The file says OpenRouter; --provider groq on the command line: Groq's own address.
+        let o = options(Some("groq"), true, Some("https://openrouter.ai/api/v1"), false);
+        let r = route(&o, None, false).unwrap();
+        assert_eq!((r.base_url.as_str(), r.key), ("https://api.groq.com/openai/v1", required("GROQ_API_KEY")));
+        // The file says OpenRouter; --base-url names another server: no OpenRouter key goes there.
+        let o = options(Some("openrouter"), false, Some("https://example.com/v1"), true);
+        let r = route(&o, None, false).unwrap();
+        assert_eq!((r.provider, r.key), (None, KeySource::IfSet("RAK_API_KEY")));
+        // Both from the file: they go together.
+        let o = options(Some("ollama"), false, Some("http://gpu-box:11434/v1"), false);
+        assert_eq!(route(&o, None, false).unwrap().base_url, "http://gpu-box:11434/v1");
+        // --api-key-env always wins.
+        let mut o = options(None, false, Some("https://example.com/v1"), true);
+        o.api_key_env = Some("MY_KEY".into());
+        assert_eq!(route(&o, None, false).unwrap().key, KeySource::Required("MY_KEY".into(), "named with --api-key-env".into()));
+        // Anthropic's address alone means Anthropic.
+        let o = options(None, false, Some("https://api.anthropic.com"), true);
+        assert_eq!(route(&o, None, false).unwrap().key, required("ANTHROPIC_API_KEY"));
     }
 }
