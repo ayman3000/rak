@@ -86,4 +86,8 @@ case ":$PATH:" in
         && say "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
 say ""
-say "Next: rak keys   (set up your API keys), then: rak -m <model>"
+say "Next:"
+say "  1. rak keys      creates ~/.config/rak/.env (an older one: rak keys --update)"
+say "  2. Fill in your keys, RAK_PROVIDER and RAK_MODEL in that file."
+say "  3. rak           starts a chat; /provider and /model switch."
+say "  With Ollama on this machine you need no key: rak -m <model>"
