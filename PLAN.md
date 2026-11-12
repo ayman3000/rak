@@ -1,32 +1,29 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-12. A working plan for picking the work up on another machine.
+Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- `main` holds the large-project work (`06cbd54`, CI re-run as `49e7d9a`): CI is
-  green on Linux, macOS and the oldest supported Rust.
-- The newest release is **v0.1.0-alpha.3**. It has the skills work (writing
-  skills, keeping lessons, `rak skills add URL`) but **not** the large-project
-  work below.
-- The CI run for `06cbd54` (43097912846) is stuck "queued" on GitHub's side and
-  can't be cancelled; ignore it.
+- The newest release is **v0.1.0-alpha.4** (2026-11-12). It has everything
+  below; `main` and the release match.
 
-### In main, not released yet
+### In v0.1.0-alpha.4
 
-- Saved chats, one file per chat per project in `~/.config/rak/sessions/`;
-  `rak -c` continues the last, `/resume` lists and picks one (`src/sessions.rs`).
-- `todo`: the agent's task list; if it finishes with steps open, rak sends it
-  back once (`src/tools/todo.rs`, `Agent::finish_check`).
-- `delegate`: a helper agent with read-only tools and a fresh context, on the
-  current model (`src/delegate.rs`).
-- `code_map`: source files with their definitions and lines; `read_file` takes
-  `start_line` / `end_line` (`src/tools/map.rs`, `src/tools/fs.rs`).
-- Trimmed outputs say which call they came from; the task list is never trimmed.
-- Compaction (`src/compact.rs`, `Agent::fit` / `Agent::compact`): when trimming is not
-  enough, the older part becomes a model-written summary; a "too long" error from
-  the server summarizes once and retries. Tool descriptions now count toward the
-  budget. Unit-tested; tried live with kimi and `--context 4000` only.
+- Large projects: saved chats (`rak -c`, `/resume`), `todo`, `delegate`,
+  `code_map`, `read_file` line ranges, stubs that name their call.
+- Compaction (`src/compact.rs`): when trimming is not enough, the older part
+  becomes a model-written summary; a "too long" error summarizes and retries.
+- Named providers (`src/providers.json`): 15, each with its own address and
+  key; `--provider`, `RAK_PROVIDER`, `/provider` with an arrow-key list,
+  the last model remembered per provider, `rak keys` listing every provider,
+  `rak keys --update` for older key files, the last value set wins.
+- Fixes from rak's own review: trim underflow, `--context` overflow, the
+  turn-limit summary error, background commands reaped and their logs
+  removed, `vite build` kept in the foreground, MCP servers stopped on every
+  way out (usage error, `rak mcp add/list`, Ctrl-C), parsers stopped with
+  their children.
+- Tried against real servers: `ollama`, `ollama-cloud`, `anthropic` (README,
+  "Tested so far"). The other providers have not had a real request yet.
 
 ## Next steps
 
@@ -47,15 +44,13 @@ Updated 2026-11-12. A working plan for picking the work up on another machine.
       description, and measure the token cost of any change.
 - [ ] Fix whatever these turn up, with a unit test for each fix.
 
-### 2. Publish v0.1.0-alpha.4
+### 2. Try the untested providers
 
-- [ ] Bump the version in `Cargo.toml`, `README.md` (status line and
-      `RAK_VERSION` example) and `install.sh`.
-- [ ] `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
-- [ ] Commit, push, wait for CI to pass.
-- [ ] `git tag v0.1.0-alpha.4 && git push origin v0.1.0-alpha.4`; the release
-      workflow builds the four archives and publishes them.
-- [ ] Check the install script picks up the new release.
+- [ ] One real request each for openai, gemini, zai, zai-coding, openrouter,
+      huggingface, groq, deepseek, mistral, lmstudio, llamacpp, vllm; update
+      the README's "Tested so far" table.
+- [ ] Ollama's cloud lists models without `:cloud` (`kimi-k2.6`); check
+      whether `kimi-k2.6:cloud` works there or needs the suffix dropped.
 
 ### 3. Larger gaps after that
 
