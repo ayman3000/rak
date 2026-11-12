@@ -143,6 +143,30 @@ rak knows these providers by name. Each gets its own address and its own key:
 
 The list is data, [`src/providers.json`](src/providers.json): adding a provider is one line there.
 
+### Tested so far
+
+Which providers have been used for real, against their own servers. The others are set up from each provider's documentation but have not had a real request yet. This table is updated as more are tried.
+
+| Provider | Status | Last tried | Notes |
+|---|---|---|---|
+| `ollama` | ✅ works | 2026-11-12 | the benchmarks run on it since 2026-11-10 (kimi-k2.6:cloud) |
+| `ollama-cloud` | ✅ works | 2026-11-12 | listing models and chatting |
+| `anthropic` | ✅ works | 2026-11-12 | prompt caching checked on 2026-11-11 (Claude Haiku 5.5) |
+| `openai` | not tried yet | | |
+| `gemini` | not tried yet | | |
+| `zai` | not tried yet | | |
+| `zai-coding` | not tried yet | | |
+| `openrouter` | not tried yet | | |
+| `huggingface` | not tried yet | | |
+| `groq` | not tried yet | | |
+| `deepseek` | not tried yet | | |
+| `mistral` | not tried yet | | |
+| `lmstudio` | not tried yet | | |
+| `llamacpp` | not tried yet | | |
+| `vllm` | not tried yet | | |
+
+Tried one? Tell us how it went, in an issue.
+
 **Three ways to choose:**
 
 | Where | How | Lasts |
