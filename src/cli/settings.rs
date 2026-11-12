@@ -80,6 +80,38 @@ pub struct Keys {
     values: HashMap<String, (String, PathBuf)>,
     /// The .env files read, project first.
     pub files: Vec<PathBuf>,
+    /// Settings set more than once in one file, and which value is used.
+    pub notes: Vec<String>,
+}
+
+/// Settings whose values may be named in a note: not secrets.
+const SHOWN: &[&str] = &["RAK_PROVIDER", "RAK_MODEL", "RAK_BASE_URL"];
+
+/// Pure — unit-tested. Names given a value more than once in a .env text:
+/// (name, how many times, the value used — the last one set).
+pub fn repeated(text: &str) -> Vec<(String, usize, String)> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for line in text.lines() {
+        let Some((key, value)) = parse_env(line).into_iter().next() else { continue };
+        if value.is_empty() {
+            continue;
+        }
+        match counts.iter_mut().find(|(k, _)| *k == key) {
+            Some(entry) => entry.1 += 1,
+            None => counts.push((key, 1)),
+        }
+    }
+    let used = parse_env(text);
+    counts.into_iter().filter(|(_, n)| *n > 1).map(|(k, n)| (k.clone(), n, used[&k].clone())).collect()
+}
+
+/// Pure — unit-tested. The note for a name set more than once.
+pub fn repeated_note(name: &str, times: usize, used: &str, file: &str) -> String {
+    if SHOWN.contains(&name) {
+        format!("{name} is set {times} times in {file}: the last one, {used}, is used")
+    } else {
+        format!("{name} is set {times} times in {file}: the last one is used")
+    }
 }
 
 /// The template for ~/.config/rak/.env: the keys rak uses, explained.
@@ -111,7 +143,11 @@ impl Keys {
         // Lowest priority first, so later files overwrite earlier ones.
         for file in global_key_file().into_iter().chain([project.join(".env")]) {
             let Ok(text) = std::fs::read_to_string(&file) else { continue };
-            keys.values.extend(parse_env(&text).into_iter().map(|(k, v)| (k, (v, file.clone()))));
+            // An empty line never overrides a value from another file.
+            keys.values.extend(parse_env(&text).into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k, (v, file.clone()))));
+            let (path, home) = (file.to_string_lossy().to_string(), home());
+            let shown = if home.is_empty() { path } else { path.replacen(&home, "~", 1) };
+            keys.notes.extend(repeated(&text).into_iter().map(|(k, n, used)| repeated_note(&k, n, &used, &shown)));
             keys.files.insert(0, file);
         }
         keys
@@ -149,6 +185,11 @@ pub fn key(name: &str) -> Option<String> {
     }
 }
 
+/// Settings set more than once in a .env file, and which value is used.
+pub fn key_notes() -> Vec<String> {
+    KEYS.get().map(|k| k.notes.clone()).unwrap_or_default()
+}
+
 /// The .env files that were read, project first.
 pub fn key_files() -> Vec<PathBuf> {
     KEYS.get().map(|k| k.files.clone()).unwrap_or_default()
@@ -181,7 +222,14 @@ pub fn parse_env(text: &str) -> HashMap<String, String> {
         } else if let Some(hash) = value.find(" #") {
             value = value[..hash].trim_end();
         }
-        if !key.is_empty() {
+        if key.is_empty() {
+            continue;
+        }
+        // The last value set wins; a later empty line (the template's own
+        // `RAK_PROVIDER=`, say) does not erase an earlier one.
+        if value.is_empty() {
+            out.entry(key.to_string()).or_default();
+        } else {
             out.insert(key.to_string(), value.to_string());
         }
     }
@@ -217,6 +265,34 @@ mod tests {
         assert_eq!(keys.get("RAK_TEST_SURELY_UNSET_KEY"), None);
         assert_eq!(keys.source("A").as_deref(), Some("p"));
         assert_eq!(keys.source("C"), None, "empty is not set");
+    }
+
+    #[test]
+    fn the_last_value_set_wins_and_an_empty_line_erases_nothing() {
+        let text = "RAK_PROVIDER=anthropic\nRAK_MODEL=claude-sonnet-5-5\nRAK_PROVIDER=zai\nRAK_MODEL=glm-5.2\nRAK_PROVIDER=\nOPENAI_API_KEY=a\nOPENAI_API_KEY=b\nEMPTY=\n";
+        let parsed = parse_env(text);
+        assert_eq!((parsed["RAK_PROVIDER"].as_str(), parsed["RAK_MODEL"].as_str()), ("zai", "glm-5.2"));
+        assert_eq!(parsed["OPENAI_API_KEY"], "b");
+        assert_eq!(parsed["EMPTY"], "", "an empty line still counts as present");
+        let notes: Vec<String> = repeated(text).into_iter().map(|(k, n, used)| repeated_note(&k, n, &used, "~/.config/rak/.env")).collect();
+        assert_eq!(
+            notes,
+            [
+                "RAK_PROVIDER is set 2 times in ~/.config/rak/.env: the last one, zai, is used",
+                "RAK_MODEL is set 2 times in ~/.config/rak/.env: the last one, glm-5.2, is used",
+                "OPENAI_API_KEY is set 2 times in ~/.config/rak/.env: the last one is used",
+            ]
+        );
+        assert!(notes.iter().all(|n| !n.contains("=b") && !n.contains(" b,")), "a key's value is never shown");
+    }
+
+    #[test]
+    fn an_empty_line_in_one_file_does_not_hide_a_key_from_another() {
+        let mut keys = Keys::default();
+        for (text, file) in [("A=global\n", "g"), ("A=\n", "p")] {
+            keys.values.extend(parse_env(text).into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k, (v, PathBuf::from(file)))));
+        }
+        assert_eq!(keys.get("A").as_deref(), Some("global"));
     }
 
     #[test]

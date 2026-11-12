@@ -373,6 +373,8 @@ pub fn run(mut o: Options) -> i32 {
     let servers: Vec<mcp::ServerConfig> = listed.into_iter().map(|(server, _)| server).collect();
     let mut connected = mcp::connect_all(&servers, &ctx.cwd, o.read_only, &stop);
     mcp_problems.append(&mut connected.problems);
+    // Settings set twice in a .env file: shown with the MCP warnings.
+    mcp_problems.extend(super::settings::key_notes());
     let mcp_summary = connected.summary();
     tools.append(&mut connected.tools);
 

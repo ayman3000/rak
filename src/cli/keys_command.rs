@@ -60,12 +60,15 @@ pub fn run(args: &[String]) -> ! {
         }
     } else {
         println!("Keys file: {shown}");
-        if std::fs::read_to_string(&file).is_ok_and(|text| is_older(&text)) {
+        if std::fs::read_to_string(&file).is_ok_and(|text| is_older(TEMPLATE, &text)) {
             println!("It is from an older template: `rak keys --update` brings it up to date and keeps your values.");
         }
     }
     let cwd = std::env::current_dir().unwrap_or_default();
     let keys = Keys::load(&cwd);
+    for note in &keys.notes {
+        println!("Note: {note}.");
+    }
     let status = |name: &str| match keys.source(name) {
         Some(source) => format!("set, from {}", if source.starts_with('/') { short(&source) } else { source }),
         None => "not set".to_string(),
@@ -111,11 +114,12 @@ fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
     std::fs::rename(&temporary, file)
 }
 
-/// Whether a key file lacks lines the current template has: a provider's key
-/// added since it was made.
-fn is_older(text: &str) -> bool {
+/// Pure — unit-tested. Whether a key file lacks a line the template has (a
+/// key or setting added since the file was made), so any change to the
+/// template is noticed, not only a new provider.
+pub fn is_older(template: &str, text: &str) -> bool {
     let present = parse_env(text);
-    rak::providers::all().iter().filter_map(|p| p.key.as_ref()).any(|key| !present.contains_key(key))
+    parse_env(template).keys().any(|key| !present.contains_key(key))
 }
 
 /// Saves the old file as .env.bak (or .env.bak.2, …) and writes the updated
@@ -276,6 +280,17 @@ mod tests {
     #[test]
     fn an_empty_file_gives_the_template() {
         assert_eq!(update(TEMPLATE, &HashMap::new()).text.trim_end(), TEMPLATE.trim_end());
+    }
+
+    #[test]
+    fn a_file_missing_any_template_line_is_older() {
+        assert!(!is_older(TEMPLATE, TEMPLATE));
+        assert!(!is_older(TEMPLATE, &update(TEMPLATE, &env(&[("OPENAI_API_KEY", "k")])).text), "after --update it is current");
+        // The layout from before RAK_PROVIDER and RAK_MODEL had lines of their own.
+        let without_settings: String =
+            TEMPLATE.lines().filter(|l| !l.starts_with("RAK_PROVIDER=") && !l.starts_with("RAK_MODEL=")).collect::<Vec<_>>().join("\n");
+        assert!(is_older(TEMPLATE, &without_settings));
+        assert!(is_older(TEMPLATE, "ANTHROPIC_API_KEY=x\n"));
     }
 
     #[test]
