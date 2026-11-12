@@ -72,6 +72,75 @@ Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking t
       v4 (Node 20, deprecated); move to v7 / v8 and check with a release.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
+## Design: falling back to another provider (built 2026-11-12, unreleased)
+
+Discussed with the owner on 2026-11-12; build only after his go-ahead. Hermes (~/.hermes/hermes-agent) was read for this: its api_max_retries, FailoverReason, restore_primary_runtime.
+
+**Goal.** When the selected provider fails, rak carries on with another one
+instead of stopping. No new settings: the chain comes from the key file.
+
+**The chain.**
+1. The selected provider and model (`RAK_PROVIDER`, `RAK_MODEL`, or what
+   `--provider` / `-m` / `/provider` chose).
+2. Then every other provider whose key line in `~/.config/rak/.env` is set,
+   in the order the key lines appear in the file (local `ollama` and the
+   other no-key servers last).
+3. Each fallback uses the model last picked for that provider
+   (`~/.config/rak/models`). A provider with no remembered model is skipped:
+   rak never guesses a model name. A key in the file is not consent to spend;
+   having used the provider in rak is.
+4. Two entries that end at the same server (same address and key) count once.
+
+**When to move on** (rak's errors are `Retryable` / `Fatal` today; this needs
+a reason on each, like Hermes's `FailoverReason`):
+
+| Failure | Retry the same model | Then |
+|---|---|---|
+| network, timeout, 5xx, overloaded | 2 times (today 5), backoff 1 s, 2 s | next provider |
+| rate limit (429) | 2 times, honouring `Retry-After` up to 10 s | next provider |
+| out of credit or quota (402, "insufficient balance") | no | next provider |
+| bad key, model not found (401, 403, 404) | no | next provider, and say the config is wrong |
+| context too long | no: compact (built) | next provider only if compaction cannot fix it |
+| a request rak built wrongly (400), a refusal | no | stop, as today: another model will not fix it |
+
+**Consent and visibility.**
+- In a chat, ask once per switch: "ollama-cloud failed 3 times (503).
+  Continue with anthropic · claude-sonnet-5-5? [y/n]". No stops the request.
+- With `-y`, or with no one to ask (scripts, CI): switch without asking.
+- Every switch is printed, logged (`--log`), and in `--json` and `/usage`
+  (which model answered which turn).
+
+**Switching.**
+- Never mid-answer: if text was already shown, that turn is redone on the
+  next model, under a note that says so.
+- The conversation carries over, as with `/provider`. The context window is
+  re-read for the new model; compaction runs if it is smaller. Anthropic's
+  prompt cache is lost on a switch.
+- Turn-scoped, as in Hermes: the next request starts on the selected provider
+  again. Exception (also from Hermes): if the selected one failed for good
+  (bad key, model not found), the chat stays on the fallback and says so,
+  rather than failing again on every request.
+- The `delegate` helper uses the same chain.
+- Chain exhausted: stop with every attempt listed (provider, model, error).
+
+**As built.** `src/fallback.rs` (failure kinds, the hook), `Agent::fallback`
+and `Agent::switches`, `src/cli/chain.rs` (the chain, the question). Differences
+from the design above: the retry wait is a fixed 1 s then 2 s (`Retry-After`
+is not read); no duplicate check, since no two providers share an address; an
+overflow that compaction can't fix falls back too. Tried with stand-in servers
+only (busy, bad key, yes, no, back on the chosen one, staying after a bad key);
+not yet with real providers failing.
+
+**Not now** (Hermes has them; add only if needed): waiting out a rate limit
+that lifts within N seconds instead of switching; repeated wait-and-retry
+cycles after the whole chain fails.
+
+**Tests.** A pure `chain()` from the key file and the remembered models
+(order, skips, duplicates); the failure table as a pure `next_step(error)`;
+stand-in servers for "first fails, second answers", "fails mid-answer",
+"all fail", "permanent failure stays on the fallback"; the chat question and
+`-y` driven through `script`.
+
 ## Working rules
 
 - SwiftAgentKit is the design reference; read it, never change it (nor sak).

@@ -163,7 +163,7 @@ impl OpenAICompatible {
             Ok(response) => Ok(response),
             Err(ureq::Error::Status(code, response)) => {
                 let text = response.into_string().unwrap_or_default();
-                let message = format!("the model server answered {code}: {}", one_line(&text, 300));
+                let message = format!("the model server answered {code}: {}", one_line(&error_message(&text), 300));
                 if code == 408 || code == 429 || code >= 500 {
                     Err(ModelError::Retryable(message))
                 } else {
@@ -349,6 +349,17 @@ impl StreamedReply {
     }
 }
 
+/// Pure — unit-tested. The message in an error body (`{"error": {"message": …}}`,
+/// `{"error": "…"}` or `{"message": …}`), or the body itself.
+pub fn error_message(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(body) else { return body.to_string() };
+    ["/error/message", "/error", "/message"]
+        .iter()
+        .find_map(|path| value.pointer(path).and_then(Value::as_str))
+        .map(str::to_string)
+        .unwrap_or_else(|| body.to_string())
+}
+
 /// Pure — unit-tested. Reads one chat-completions response.
 pub fn parse_reply(body: &Value) -> Result<Reply, ModelError> {
     if let Some(err) = body.get("error") {
@@ -420,6 +431,13 @@ mod tests {
         let reply = parse_reply(&json!({ "choices": [{ "message": { "content": null } }] })).unwrap();
         assert_eq!(reply.content, "");
         assert!(reply.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn an_error_body_is_reduced_to_its_message() {
+        assert_eq!(error_message(r#"{"error": {"message": "model not found", "type": "x"}}"#), "model not found");
+        assert_eq!(error_message(r#"{"error": "unauthorized"}"#), "unauthorized");
+        assert_eq!(error_message("Bad Gateway"), "Bad Gateway");
     }
 
     #[test]

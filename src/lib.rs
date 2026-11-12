@@ -9,6 +9,7 @@ pub mod agent;
 pub mod anthropic;
 pub mod compact;
 pub mod delegate;
+pub mod fallback;
 pub mod interrupt;
 pub mod mcp;
 pub mod provider;

@@ -190,6 +190,18 @@ rak -m claude-haiku-5-5 "summarize the README"
 rak --base-url https://example.com/v1 -m some-model "…"
 ```
 
+### When a provider fails
+
+rak carries on with another provider instead of stopping, with nothing to set up:
+
+1. **The same model is asked again first**, twice, when that can help (network trouble, a busy or rate-limited server). Out of credit, a bad key or a model the server doesn't have move on at once.
+2. **Then the next provider**: each other provider whose key is set, in the order the key lines appear in your key file, then the servers on this machine. Each one is tried with **the model you last picked for it**; a provider you have never used in rak is skipped, so a key sitting in the file is never spent on its own.
+3. **In a chat, rak asks first**: `ollama-cloud · kimi-k2.6 failed: … Continue with anthropic · claude-sonnet-5-5? [y/n]`. No stops the request. With `-y`, or in a script with no one to ask, it switches and says so.
+4. **The step is done again** on the new model, with the conversation so far; an answer cut off part way is redone, not stitched together.
+5. **Your next message goes back** to the provider you chose. If that one can't work at all (a bad key, a missing model), the chat stays on the fallback and says why.
+
+Every switch is shown (`↪ now using …`), logged with `--log`, listed in `--json` (`fell_back_to`) and counted in `/usage`. A helper started by `delegate` falls back the same way. A request rak itself built wrongly, a refusal or a stop does not fall back: another model would not do better.
+
 ### Keys and settings
 
 rak reads the environment first, then `./.env` in the project, then `~/.config/rak/.env`; the first one that has a value wins. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them. `rak keys` shows what is set and where it comes from, never a key itself; the chat's welcome panel lists the `.env` files it read.

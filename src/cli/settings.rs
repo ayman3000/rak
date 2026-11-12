@@ -82,6 +82,22 @@ pub struct Keys {
     pub files: Vec<PathBuf>,
     /// Settings set more than once in one file, and which value is used.
     pub notes: Vec<String>,
+    /// Names given a value, in the order they appear: the project's .env
+    /// first, then the global file. The fallback chain follows it.
+    pub order: Vec<String>,
+}
+
+/// Pure — unit-tested. Names given a (non-empty) value, in line order, once each.
+pub fn assigned_in_order(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if let Some((name, value)) = parse_env(line).into_iter().next() {
+            if !value.is_empty() && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
 }
 
 /// Settings whose values may be named in a note: not secrets.
@@ -148,6 +164,10 @@ impl Keys {
             let (path, home) = (file.to_string_lossy().to_string(), home());
             let shown = if home.is_empty() { path } else { path.replacen(&home, "~", 1) };
             keys.notes.extend(repeated(&text).into_iter().map(|(k, n, used)| repeated_note(&k, n, &used, &shown)));
+            // The project's file is read last but comes first in the order.
+            let mut order = assigned_in_order(&text);
+            order.extend(keys.order.drain(..).filter(|name| !order.contains(name)).collect::<Vec<_>>());
+            keys.order = order;
             keys.files.insert(0, file);
         }
         keys
@@ -183,6 +203,11 @@ pub fn key(name: &str) -> Option<String> {
         Some(keys) => keys.get(name),
         None => std::env::var(name).ok().filter(|v| !v.is_empty()),
     }
+}
+
+/// Names given a value in the .env files, in the order they appear.
+pub fn key_order() -> Vec<String> {
+    KEYS.get().map(|k| k.order.clone()).unwrap_or_default()
 }
 
 /// Settings set more than once in a .env file, and which value is used.
@@ -284,6 +309,12 @@ mod tests {
             ]
         );
         assert!(notes.iter().all(|n| !n.contains("=b") && !n.contains(" b,")), "a key's value is never shown");
+    }
+
+    #[test]
+    fn names_are_listed_in_the_order_they_are_set() {
+        let text = "# keys\nGROQ_API_KEY=g\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=a\nGROQ_API_KEY=g2\nRAK_PROVIDER=zai\n";
+        assert_eq!(assigned_in_order(text), ["GROQ_API_KEY", "ANTHROPIC_API_KEY", "RAK_PROVIDER"]);
     }
 
     #[test]

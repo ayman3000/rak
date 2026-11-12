@@ -7,7 +7,7 @@ use super::log::Log;
 use super::output::{self, Ui};
 use super::settings::{config_dir, key, last_model, load_keys, remember_model};
 use super::style::{paint, Style};
-use super::{approval, chat, commands, markdown, menu, signals};
+use super::{approval, chain, chat, commands, markdown, menu, signals};
 use rak::agent::{system_prompt, Agent, Config, Outcome, RunResult};
 use rak::anthropic::Anthropic;
 use rak::interrupt::Stop;
@@ -57,6 +57,9 @@ pub struct Session {
     /// The model delegate's helpers use, and what they spent since it was last counted.
     pub helper_model: Rc<RefCell<(Backend, String, usize)>>,
     pub helper_usage: Rc<Cell<rak::provider::Usage>>,
+    /// Where the fallback chain stands, and what its hook needs.
+    pub chain: Rc<RefCell<chain::State>>,
+    pub asker: chain::Asker,
 }
 
 impl Session {
@@ -335,8 +338,14 @@ pub fn run(mut o: Options) -> i32 {
     // delegate: a helper agent with read-only tools and a fresh context, on
     // the chat's current model (`helper_model`, kept up to date by /model).
     let helper_model = Rc::new(RefCell::new((backend.clone(), model_name.clone(), window)));
+    // Approvals and fallbacks: -y (or /yes) runs everything; otherwise ask at
+    // the terminal, and with no terminal to ask, approvals stop.
+    let auto = Rc::new(Cell::new(o.yes));
+    let interactive = stdin_tty && std::io::stderr().is_terminal();
+    let asker = chain::Asker { o: o.clone(), stop: stop.clone(), ui: ui.clone(), auto: auto.clone(), interactive, color: err_color };
     let delegate = {
         let (current, o, stop, ui, ctx) = (helper_model.clone(), o.clone(), stop.clone(), ui.clone(), ctx.clone());
+        let asker = asker.clone();
         let (notes, tavily) = (notes.clone(), key("TAVILY_API_KEY"));
         rak::delegate::Delegate::new(Box::new(move || {
             let (backend, model, window) = current.borrow().clone();
@@ -349,11 +358,21 @@ pub fn run(mut o: Options) -> i32 {
             let config = Config { system_prompt, max_turns: 25, context_window: window };
             let mut helper = Agent::new(make_provider(&o, &backend, &model, &stop), tools, config);
             helper.stop = stop.clone();
+            // A helper falls back along the same chain, on its own.
+            let links = fallback_chain(&backend);
+            if !links.is_empty() {
+                let state = chain::State { links, current_label: chain::label(&backend, &model), ..Default::default() };
+                helper.fallback = Some(chain::hook(asker.clone(), Rc::new(RefCell::new(state))));
+            }
             let ui = ui.clone();
-            helper.on_event(move |event| {
-                if let rak::agent::Event::ToolStarted { name, args } = event {
+            helper.on_event(move |event| match event {
+                rak::agent::Event::ToolStarted { name, args } => {
                     ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {}", output::describe(name, args)));
                 }
+                rak::agent::Event::FellBack { to, why, failure } => {
+                    ui.borrow_mut().progress(Some(Style::Yellow), &format!("    ↪ {}", output::fallback_note(to, why, *failure)));
+                }
+                _ => {}
             });
             helper
         }))
@@ -393,8 +412,6 @@ pub fn run(mut o: Options) -> i32 {
     // Approvals: -y (or /yes) runs everything; otherwise ask at the terminal,
     // and with no terminal to ask, stop rather than let the model look for
     // another way.
-    let auto = Rc::new(Cell::new(o.yes));
-    let interactive = stdin_tty && std::io::stderr().is_terminal();
     agent.on_approval(approval::prompter(approval::Prompter {
         ui: ui.clone(),
         auto: auto.clone(),
@@ -436,6 +453,8 @@ pub fn run(mut o: Options) -> i32 {
         todo,
         helper_model,
         helper_usage,
+        chain: Rc::new(RefCell::new(chain::State::default())),
+        asker,
     };
 
     if session.o.continue_last {
@@ -482,6 +501,49 @@ pub fn run(mut o: Options) -> i32 {
 }
 
 /// Runs one request and prints what came of it.
+/// The providers to fall back to from this backend (see chain.rs).
+pub fn fallback_chain(from: &Backend) -> Vec<chain::Link> {
+    let order = super::settings::key_order();
+    chain::chain(providers::all(), from.provider.as_deref(), &order, &|k| key(k).is_some(), &|p| last_model(p))
+}
+
+/// Before a request: back on the chosen provider if the last request fell
+/// back for a passing reason, and the chain built afresh from it.
+fn prepare_fallback(s: &mut Session) {
+    let state = s.chain.clone();
+    let mut st = state.borrow_mut();
+    if st.current.take().is_some() {
+        s.agent.set_model(make_provider(&s.o, &s.backend, &s.model, &s.stop));
+        s.agent.set_context_window(s.window);
+        s.ui.borrow_mut().progress(Some(Style::Dim), &format!("(back on {})", chain::label(&s.backend, &s.model)));
+    }
+    st.links = fallback_chain(&s.backend);
+    st.next = 0;
+    st.for_good = false;
+    st.current_label = chain::label(&s.backend, &s.model);
+    let mut asker = s.asker.clone();
+    asker.o = s.o.clone();
+    s.agent.fallback = (!st.links.is_empty()).then(|| chain::hook(asker, state.clone()));
+}
+
+/// After a request: a fallback made because the chosen provider can't work
+/// (a bad key, a missing model) becomes the chat's provider and model.
+fn settle_fallback(s: &mut Session) {
+    let state = s.chain.clone();
+    let mut st = state.borrow_mut();
+    if !st.for_good {
+        return;
+    }
+    let Some((o, backend, model, window)) = st.current.take() else { return };
+    let chosen = chain::label(&s.backend, &s.model);
+    (s.o, s.backend, s.model, s.window) = (o, backend, model, window);
+    s.window_source = "reported by the server";
+    *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
+    st.for_good = false;
+    let note = format!("Staying with {} for this chat: {chosen} needs its key or model fixed (rak keys).", st.current_label);
+    s.ui.borrow_mut().progress(Some(Style::Yellow), &note);
+}
+
 pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let started = Instant::now();
     let (usage_before, calls_before) = (s.agent.usage, s.agent.tool_calls);
@@ -489,8 +551,12 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     s.requests += 1;
     s.stop.clear();
     s.todo.begin_request();
+    prepare_fallback(s);
+    let switches_before = s.agent.switches.len();
     signals::set_running(true);
     let RunResult { outcome, answer, turns } = s.agent.run(task);
+    let fell_back_to: Vec<String> = s.agent.switches[switches_before..].to_vec();
+    settle_fallback(s);
     // What delegate's helpers spent counts as this request's too.
     let helpers = s.helper_usage.take();
     s.agent.usage.add(helpers);
@@ -515,6 +581,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let summary = json!({
         "outcome": outcome_name(&outcome), "answer": answer, "error": problem, "turns": turns, "tool_calls": tool_calls,
         "input_tokens": input, "cached_tokens": cached, "output_tokens": output, "seconds": seconds,
+        "fell_back_to": fell_back_to,
     });
     let mut entry = summary.clone();
     entry["event"] = json!("finish");

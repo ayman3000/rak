@@ -16,6 +16,7 @@
 
 pub mod approval;
 pub mod args;
+pub mod chain;
 pub mod chat;
 pub mod commands;
 pub mod editor;

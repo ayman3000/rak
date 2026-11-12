@@ -350,6 +350,9 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             println!("  tool calls     {}", s.agent.tool_calls);
             println!("  context        ~{} tokens in the last request", grouped(s.agent.last_prompt_tokens));
             println!("  window         {} tokens ({})", grouped(s.window as u64), s.window_source);
+            if !s.agent.switches.is_empty() {
+                println!("  fallbacks      {} this chat, last to {}", s.agent.switches.len(), s.agent.switches.last().unwrap());
+            }
         }
         "clear" | "reset" | "new" => {
             s.agent.clear();

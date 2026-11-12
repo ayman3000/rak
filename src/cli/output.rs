@@ -66,6 +66,18 @@ pub fn describe(name: &str, args: &Value) -> String {
     }
 }
 
+/// Pure — unit-tested. The line shown when rak moves to another model.
+pub fn fallback_note(to: &str, why: &str, failure: rak::fallback::Failure) -> String {
+    use rak::fallback::Failure;
+    let why = one_line(why, 100);
+    // What happens now comes first: a long error is what gets cut.
+    match failure {
+        Failure::Midway => format!("doing this step again with {to}: the answer stopped part way ({why})"),
+        Failure::Config => format!("now using {to}: the last provider won't work until its key or model is fixed ({why})"),
+        _ => format!("now using {to} ({why})"),
+    }
+}
+
 /// What is on screen, shared by everything that prints during a request.
 pub struct Ui {
     /// Chat: progress goes to stdout with the answer. One request: to stderr,
@@ -188,6 +200,11 @@ pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>)
                 log.write(json!({ "event": "note", "note": note }));
                 ui.progress(Some(Style::Dim), &format!("  {note}"));
             }
+            Event::FellBack { to, why, failure } => {
+                log.write(json!({ "event": "fallback", "to": to, "error": why, "reason": format!("{failure:?}") }));
+                ui.end_line();
+                ui.progress(Some(Style::Yellow), &fit(&format!("↪ {}", fallback_note(to, why, *failure))));
+            }
         }
     }
 }
@@ -207,5 +224,12 @@ mod tests {
         assert_eq!(relative_to("/home/a/rak", "/home/a/rak"), ".");
         assert_eq!(relative_to("/home/a/rak", "/home/a/rakish/x.rs"), "/home/a/rakish/x.rs", "a folder that only starts the same");
         assert_eq!(relative_to("/home/a/rak", "/etc/hosts"), "/etc/hosts");
+        use rak::fallback::Failure;
+        assert_eq!(
+            fallback_note("anthropic · claude-haiku-5-5", "the model server answered 503: busy", Failure::Transient),
+            "now using anthropic · claude-haiku-5-5 (the model server answered 503: busy)"
+        );
+        assert!(fallback_note("x · y", "connection reset", Failure::Midway).starts_with("doing this step again with x · y"));
+        assert!(fallback_note("x · y", "answered 401: bad key", Failure::Config).contains("won't work until its key or model is fixed"));
     }
 }

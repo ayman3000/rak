@@ -2,6 +2,7 @@
 //! repeat until it answers without calling a tool.
 
 use crate::compact;
+use crate::fallback::{self, Failure, Next};
 use crate::interrupt::Stop;
 use crate::provider::{Model, ModelError, Reply, Usage};
 use crate::tools::{definition, Image, Tool};
@@ -73,6 +74,14 @@ pub enum Event<'a> {
         millis: u128,
     },
     Note(&'a str),
+    /// The model in use failed and the agent carried on with another.
+    FellBack {
+        /// The model now in use: "anthropic · claude-sonnet-5-5".
+        to: &'a str,
+        /// The error the last one gave.
+        why: &'a str,
+        failure: Failure,
+    },
 }
 
 const STOP_NOTE: &str = "Not run: the user stopped the request.";
@@ -118,6 +127,11 @@ pub struct Agent {
     /// work (rak: steps still open in the task list). Should say something
     /// only once per request, or the model never gets to finish.
     pub finish_check: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Asked for another model when the one in use fails (rak builds it from
+    /// the key file). None: a failure ends the request, as before.
+    pub fallback: Option<fallback::Hook>,
+    /// Every model fallen back to, in order, since the agent was made.
+    pub switches: Vec<String>,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -138,6 +152,8 @@ impl Agent {
             last_prompt_tokens: 0,
             refusal_note: REFUSAL_NOTE.to_string(),
             finish_check: None,
+            fallback: None,
+            switches: Vec::new(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -203,7 +219,8 @@ impl Agent {
         let mut empty_replies = 0;
         // The tool descriptions go with every call, so they come out of the budget.
         let definitions_size: usize = definitions.iter().map(|d| d.to_string().len()).sum();
-        let budget = self.config.context_window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
+        let budget_for = |window: usize| window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
+        let mut budget = budget_for(self.config.context_window);
 
         for turn in 1..=self.config.max_turns {
             self.fit(budget);
@@ -212,27 +229,49 @@ impl Agent {
             }
             let mut overflow_handled = false;
             let reply = loop {
-                match self.call_model(turn, &definitions) {
+                let error = match self.call_model(turn, &definitions) {
                     Ok(r) => break r,
                     Err(_) if self.stop.requested() => return self.stopped(turn),
-                    // The server counts tokens its own way: when it says the
-                    // request is too long, shrink harder and ask once more.
-                    Err(e) if compact::is_overflow(&e) && !overflow_handled => {
-                        overflow_handled = true;
-                        (self.on_event)(&Event::Note("the model says the conversation is too long for it"));
-                        // Our estimate said it fits, so shrink by what is there, not by the budget.
-                        let size = conversation_size(&self.messages);
-                        if self.compact(size / 4) || trim_keeping(&mut self.messages, size / 2, 0) > 0 {
+                    Err(error) => error,
+                };
+                let failure = fallback::classify(&error);
+                // The server counts tokens its own way: when it says the
+                // request is too long, shrink harder and ask once more.
+                if failure == Failure::Overflow && !overflow_handled {
+                    overflow_handled = true;
+                    (self.on_event)(&Event::Note("the model says the conversation is too long for it"));
+                    // Our estimate said it fits, so shrink by what is there, not by the budget.
+                    let size = conversation_size(&self.messages);
+                    if self.compact(size / 4) || trim_keeping(&mut self.messages, size / 2, 0) > 0 {
+                        continue;
+                    }
+                }
+                let text = error.to_string();
+                // Another model, when there is one to try: the turn is asked again there.
+                if failure.falls_back() {
+                    match self.fall_back(&text, failure) {
+                        Some(true) => {
+                            budget = budget_for(self.config.context_window);
+                            self.fit(budget);
+                            overflow_handled = false;
                             continue;
                         }
-                        let why = format!(
-                            "{e}\nThe conversation is too long for the model even with its earlier part summarized: \
-                             the latest message or tool output alone is too big."
-                        );
-                        return RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: turn };
+                        Some(false) => {
+                            let why = format!("{text}\nStopped: you chose not to switch to another model.");
+                            return RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: turn };
+                        }
+                        None => {}
                     }
-                    Err(e) => return RunResult { outcome: Outcome::Failed(e), answer: String::new(), turns: turn },
                 }
+                let why = if failure == Failure::Overflow {
+                    format!(
+                        "{text}\nThe conversation is too long for the model even with its earlier part summarized: \
+                         the latest message or tool output alone is too big."
+                    )
+                } else {
+                    text
+                };
+                return RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: turn };
             };
 
             if reply.tool_calls.is_empty() {
@@ -381,7 +420,28 @@ impl Agent {
         true
     }
 
-    fn call_model(&mut self, turn: usize, definitions: &[Value]) -> Result<Reply, String> {
+    /// Moves to the model the fallback hook offers. Some(true): switched;
+    /// Some(false): the person said no; None: nothing (left) to try.
+    fn fall_back(&mut self, why: &str, failure: Failure) -> Option<bool> {
+        let hook = self.fallback.as_mut()?;
+        match hook(why, failure) {
+            Next::Switch(switch) => {
+                self.model = switch.model;
+                self.config.context_window = switch.context_window;
+                self.last_prompt_tokens = 0;
+                self.switches.push(switch.label.clone());
+                (self.on_event)(&Event::FellBack { to: &switch.label, why, failure });
+                Some(true)
+            }
+            Next::Declined => Some(false),
+            Next::NoneLeft => None,
+        }
+    }
+
+    /// One model call, retried while that can help: a few times when there is
+    /// another model to fall back to, more when there is not.
+    fn call_model(&mut self, turn: usize, definitions: &[Value]) -> Result<Reply, ModelError> {
+        let retries = if self.fallback.is_some() { fallback::RETRIES_BEFORE_FALLBACK } else { MAX_RETRIES };
         let mut attempt = 0;
         loop {
             let started = Instant::now();
@@ -398,12 +458,12 @@ impl Agent {
                     (self.on_event)(&Event::ModelCalled { turn, usage: reply.usage, millis: started.elapsed().as_millis() });
                     return Ok(reply);
                 }
-                Err(ModelError::Retryable(message)) if attempt < MAX_RETRIES && !self.stop.requested() => {
+                Err(e) if attempt < retries && fallback::classify(&e).retries() && !self.stop.requested() => {
                     attempt += 1;
-                    (self.on_event)(&Event::Retrying { attempt, error: &message });
+                    (self.on_event)(&Event::Retrying { attempt, error: &e.to_string() });
                     std::thread::sleep((self.retry_base * 2u32.pow(attempt as u32 - 1)).min(MAX_RETRY_BACKOFF));
                 }
-                Err(e) => return Err(e.to_string()),
+                Err(e) => return Err(e),
             }
         }
     }
@@ -852,6 +912,79 @@ mod tests {
         assert!(result.answer.contains("401 bad key"), "{}", result.answer);
         assert_eq!(s.agent.messages.last().unwrap()["role"], "assistant", "the chat stays well formed");
         let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    /// A hook that offers `next` once (then nothing), recording what it was asked.
+    fn offer(next: Script, asked: Rc<RefCell<Vec<(String, Failure)>>>) -> fallback::Hook {
+        let mut next = Some(next);
+        Box::new(move |why, failure| {
+            asked.borrow_mut().push((why.to_string(), failure));
+            match next.take() {
+                Some(model) => {
+                    Next::Switch(fallback::Switch { model: Box::new(model), context_window: 50_000, label: "second · m2".into() })
+                }
+                None => Next::NoneLeft,
+            }
+        })
+    }
+
+    fn script(replies: Vec<Result<Reply, ModelError>>) -> (Script, Rc<RefCell<Vec<Vec<Value>>>>) {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        (Script { replies, seen: seen.clone() }, seen)
+    }
+
+    #[test]
+    fn a_failing_model_is_retried_twice_then_the_next_one_answers() {
+        let busy = || Err(ModelError::Retryable("the model server answered 503: busy".into()));
+        let mut s = setup("fallback", vec![busy(), busy(), busy(), Ok(text("never"))], 10);
+        let (second, second_seen) = script(vec![Ok(text("answered by the second"))]);
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        s.agent.fallback = Some(offer(second, asked.clone()));
+        let heard = Rc::new(RefCell::new(Vec::new()));
+        let sink = heard.clone();
+        s.agent.on_event(move |event| {
+            if let Event::FellBack { to, failure, .. } = event {
+                sink.borrow_mut().push((to.to_string(), *failure));
+            }
+        });
+        let result = s.agent.run("go");
+        assert_eq!((result.outcome, result.answer.as_str()), (Outcome::Done, "answered by the second"));
+        assert_eq!(s.seen.borrow().len(), 3, "the first model: one call and two retries");
+        assert_eq!(second_seen.borrow()[0].last().unwrap()["content"], "go", "the same turn is asked again");
+        assert_eq!(asked.borrow()[0].1, Failure::Transient);
+        assert_eq!(*heard.borrow(), [("second · m2".to_string(), Failure::Transient)]);
+        assert_eq!((s.agent.switches.len(), s.agent.config.context_window), (1, 50_000), "the new model's window");
+        let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn a_bad_key_falls_back_at_once_and_rak_s_own_mistake_does_not() {
+        let mut s = setup("fallback-config", vec![Err(ModelError::Fatal("the model server answered 401: bad key".into()))], 10);
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        s.agent.fallback = Some(offer(script(vec![Ok(text("ok"))]).0, asked.clone()));
+        assert_eq!(s.agent.run("go").answer, "ok");
+        assert_eq!(s.seen.borrow().len(), 1, "no retry: it would fail the same way");
+        assert_eq!(asked.borrow()[0].1, Failure::Config);
+
+        let mut s = setup("fallback-stop", vec![Err(ModelError::Fatal("the model server answered 400: tools.0: invalid".into()))], 10);
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        s.agent.fallback = Some(offer(script(vec![Ok(text("never"))]).0, asked.clone()));
+        assert!(matches!(s.agent.run("go").outcome, Outcome::Failed(_)));
+        assert!(asked.borrow().is_empty(), "another model would not fix a request rak built wrongly");
+    }
+
+    #[test]
+    fn a_no_to_switching_stops_and_an_empty_chain_fails_as_before() {
+        let mut s = setup("fallback-no", vec![Err(ModelError::Fatal("the model server answered 402: pay up".into()))], 10);
+        s.agent.fallback = Some(Box::new(|_, _| Next::Declined));
+        let Outcome::Failed(why) = s.agent.run("go").outcome else { panic!() };
+        assert!(why.contains("402") && why.contains("chose not to switch"), "{why}");
+
+        let busy = || Err(ModelError::Retryable("could not reach the server".into()));
+        let mut s = setup("fallback-none", vec![busy(), busy(), busy()], 10);
+        s.agent.fallback = Some(Box::new(|_, _| Next::NoneLeft));
+        assert!(matches!(s.agent.run("go").outcome, Outcome::Failed(_)));
+        assert_eq!(s.seen.borrow().len(), 3);
     }
 
     fn earlier_chat() -> Vec<Value> {
