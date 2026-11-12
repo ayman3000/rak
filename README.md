@@ -4,7 +4,8 @@ A small coding agent for the terminal. One binary, no runtime to install, for Li
 
 rak is the cross-platform sibling of [sak](https://github.com/ayman3000/sak). sak is built on SwiftAgentKit and stays the Mac tool; rak carries the same prompt, the same tool designs and the same loop to everything else.
 
-> **Status: early alpha (0.1.0-alpha.3).** The core works and is tested. Much of what sak has is not here yet — see [What is missing](#what-is-missing).
+> **Status: early alpha.** The core works and is tested. Much of what sak has is not here yet — see [What is missing](#what-is-missing).
+> This README describes `main`. The newest release, 0.1.0-alpha.3, is older: it lacks named providers, `rak keys --update`, `/provider` and compaction. Until 0.1.0-alpha.4 is out, [install from `main`](#install).
 
 ## What it does
 
@@ -30,102 +31,157 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
 
 ## Install
 
-On Linux or macOS:
+On Linux or macOS. Pick one:
+
+**From `main`** — everything in this README. Needs Rust 1.88 or newer ([rustup.rs](https://rustup.rs)):
+
+```bash
+cargo install --git https://github.com/ayman3000/rak --locked
+```
+
+**The newest release** — no Rust needed, but for now that is 0.1.0-alpha.3, without what is listed in the status note above:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 ```
 
-The script downloads the build for your system from rak's GitHub releases, checks it against its published SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed. `RAK_VERSION=v0.1.0-alpha.3` picks a release (the default is the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
+The script downloads the build for your system from rak's GitHub releases, checks it against its published SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed. `RAK_VERSION=v0.1.0-alpha.3` picks a release (the default is the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Builds: Linux on x86-64 and ARM (static, so they run on any distribution), and macOS on Apple Silicon and Intel. Windows is not supported yet. The macOS builds are not notarized by Apple: installed with the script they run as they are; a build downloaded in a web browser is held back by macOS until you run `xattr -d com.apple.quarantine rak`.
 
-Builds: Linux on x86-64 and ARM (static, so they run on any distribution), and macOS on Apple Silicon and Intel. Windows is not supported yet.
+To update later, run the same command again.
 
-The macOS builds are not notarized by Apple. Installed with the script they run as they are; a build downloaded in a web browser is held back by macOS until you run `xattr -d com.apple.quarantine rak`.
+## Getting started
 
-With Rust 1.88 or newer, from source:
+New to rak? Three steps.
+
+**1. Create your key file.**
 
 ```bash
-cargo install --git https://github.com/ayman3000/rak
+rak keys
 ```
 
-Then set up your keys with `rak keys` (see [Keys](#keys)).
+This creates `~/.config/rak/.env` (readable by you only) and lists every provider rak knows, with whether its key is set.
 
-## Use
+**2. Fill it in.** Open it in any editor:
+
+```bash
+open -t ~/.config/rak/.env      # macOS; on Linux: nano ~/.config/rak/.env
+```
+
+Put each key right after its `=` (no quotes), and say which provider and model to use:
+
+```bash
+# 1. API keys: one per provider. Fill in the ones you have.
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=sk-ant-…
+ZAI_API_KEY=
+OLLAMA_API_KEY=
+OPENROUTER_API_KEY=
+…
+
+# 2. Selected provider and model
+RAK_PROVIDER=anthropic
+RAK_MODEL=claude-sonnet-5-5
+```
+
+Leave `RAK_MODEL` empty and rak lists the provider's models to pick from when a chat starts. With Ollama on your machine you need no key at all: leave `RAK_PROVIDER` empty (or set it to `ollama`) and name a model, such as `kimi-k2.6:cloud`.
+
+**3. Check, then start.**
+
+```bash
+rak keys
+```
+
+Each key you filled in should say `set`, and your provider should be marked `▸`. Then:
+
+```bash
+rak                                    # a chat
+rak "explain what this project does"   # one request
+```
+
+## Upgrading
+
+Already using rak? Update it with the command you installed it with (`cargo install --git https://github.com/ayman3000/rak --locked`), then:
+
+```bash
+rak keys
+```
+
+Your key file is never overwritten. If it was made from an older template, `rak keys` says so. Then:
+
+```bash
+rak keys --update
+```
+
+It rewrites the file from the current template with each of your values on its line, keeps any value the template has no line for in a section at the end, and saves your old file as `~/.config/rak/.env.bak`. It names what moved and what changed meaning, never a value, and running it again changes nothing. Open the file afterwards to fill in anything new.
+
+What changed meaning with named providers (`--update` warns about the second and third when your file has them):
+
+- **Each provider gets only its own key.** `OPENAI_API_KEY` goes only to OpenAI now, not to any server you name.
+- **`RAK_PROVIDER=openai`** means OpenAI itself. If you used it with `RAK_BASE_URL` for another server (OpenRouter, say), set `RAK_PROVIDER` to that server's name and empty `RAK_BASE_URL`.
+- **`RAK_API_KEY`** goes only to a server you name with `--base-url`. If it held a provider's key, move it to that provider's line.
+- **The last model you picked** is now remembered for each provider. Your earlier one carries over as Ollama's.
+
+## Providers and models
 
 rak knows these providers by name. Each gets its own address and its own key:
 
-| `--provider` | Who | Key |
+| `RAK_PROVIDER` / `--provider` | Who | Key |
 |---|---|---|
-| `ollama` (the default) | Ollama on this machine, its `:cloud` models included | none |
-| `ollama-cloud` | Ollama's cloud at ollama.com, without Ollama installed | `OLLAMA_API_KEY` |
-| `anthropic` | Claude through Anthropic's API, with prompt caching | `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI | `OPENAI_API_KEY` |
+| `gemini` | Google Gemini | `GEMINI_API_KEY` |
+| `anthropic` | Claude through Anthropic's API, with prompt caching | `ANTHROPIC_API_KEY` |
+| `zai`, `zai-coding` | Z.ai (GLM); `zai-coding` for GLM Coding Plan keys | `ZAI_API_KEY` |
+| `ollama-cloud` | Ollama's cloud at ollama.com, without Ollama installed | `OLLAMA_API_KEY` |
 | `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
 | `huggingface` | Hugging Face's router | `HF_TOKEN` |
 | `groq` | Groq | `GROQ_API_KEY` |
 | `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` |
 | `mistral` | Mistral | `MISTRAL_API_KEY` |
-| `gemini` | Google Gemini | `GEMINI_API_KEY` |
-| `zai`, `zai-coding` | Z.ai (GLM); `zai-coding` for GLM Coding Plan keys | `ZAI_API_KEY` |
+| `ollama` (the default) | Ollama on this machine, its `:cloud` models included | none |
 | `lmstudio`, `llamacpp`, `vllm` | those servers on this machine | none |
 
 The list is data, [`src/providers.json`](src/providers.json): adding a provider is one line there.
+
+**Three ways to choose:**
+
+| Where | How | Lasts |
+|---|---|---|
+| The key file | `RAK_PROVIDER=…` and `RAK_MODEL=…` | until you change it |
+| The command line | `rak --provider groq -m MODEL "…"` | that run |
+| In a chat | `/provider NAME`, `/model NAME` (`/provider` alone lists them, with whether each key is set) | that chat; the model is remembered |
+
+**Which model a chat starts with:** `-m` if you gave it; otherwise the model you last picked for that provider; otherwise `RAK_MODEL` (it belongs to the provider in `RAK_PROVIDER`, not to one chosen with `--provider`); otherwise rak lists the provider's models to pick from. A one-off run (`rak "…"`) uses `-m`, then `RAK_MODEL`, then your last pick, so scripts stay predictable.
 
 ```bash
 # Ollama on this machine: nothing to set
 rak -m kimi-k2.6:cloud "explain what this project does"
 
-# Any other provider: its key in ~/.config/rak/.env, then
+# Another provider, for one run
 rak --provider openrouter -m some/model "add a --verbose flag to the CLI"
-rak --provider anthropic -m claude-opus-5-5 "fix the failing test"
 
 # With ANTHROPIC_API_KEY set, a claude-* model goes to Anthropic on its own
 rak -m claude-haiku-5-5 "summarize the README"
 
 # A server rak doesn't know by name: its address, and RAK_API_KEY if it needs one
 rak --base-url https://example.com/v1 -m some-model "…"
-
-# No task: a chat
-rak -m kimi-k2.6:cloud
 ```
 
-### Keys
+### Keys and settings
 
-```bash
-rak keys
-```
-
-The first time, this creates `~/.config/rak/.env` from a template ([`.env.example`](.env.example)) with a line for every provider's key and a block for each provider to make it the default. Open it in any editor, fill in the keys you have, and uncomment one default block:
-
-```bash
-OPENROUTER_API_KEY=sk-or-…
-RAK_PROVIDER=openrouter
-RAK_MODEL=          # empty: rak lists the provider's models to pick from
-```
-
-After that, `rak keys` lists every provider with whether its key is set and where it comes from (never the key itself), marks the default, and shows the other settings.
-
-rak reads the environment first, then `./.env` in the project, then `~/.config/rak/.env`, the first one found winning. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them. The file is created readable by you only.
+rak reads the environment first, then `./.env` in the project, then `~/.config/rak/.env`; the first one that has a value wins. Values read from the files stay inside rak: commands the agent runs with `run_shell` don't see them. `rak keys` shows what is set and where it comes from, never a key itself; the chat's welcome panel lists the `.env` files it read.
 
 | Setting | For |
 |---|---|
 | a provider's key (table above) | that provider, and only that provider |
 | `TAVILY_API_KEY` | `web_search` |
-| `RAK_PROVIDER`, `RAK_MODEL` | the default provider and model (optional) |
-| `RAK_BASE_URL` | the default provider at another address, e.g. Ollama on another machine (optional) |
+| `RAK_PROVIDER`, `RAK_MODEL` | the selected provider and model |
+| `RAK_BASE_URL` | the selected provider at another address, e.g. Ollama on another machine (optional) |
 | `RAK_API_KEY` | the key for a server named only by `--base-url` |
 
-**A key never reaches another provider's server.** Each provider is sent its own key. Defaults from the file don't mix with flags: `--provider` on the command line uses that provider's own address even when `RAK_BASE_URL` is set, and `--base-url` on the command line drops the default provider and its key.
+**Set something twice?** The last value set in a file wins, so with two `RAK_PROVIDER` lines the later one is used, and the same for `RAK_MODEL` and the keys. An empty line (the template's own `RAK_PROVIDER=`, say) erases nothing, in the same file or another. `rak keys` and the chat's welcome panel say what was set more than once and which value is used (for a key, only that the last one is used).
 
-`rak keys` only creates the file when there is none, and says when yours is from an older template. Then:
-
-```bash
-rak keys --update
-```
-
-This rewrites the file from the current template with your values on their lines, keeps any value the template has no line for in a section at the end, and saves the old file next to it as `.env.bak`. It names what moved and what changed meaning (never a value), and running it again changes nothing.
-
-The chat's welcome panel lists the `.env` files it read.
+**A key never reaches another provider's server.** Each provider is sent only its own key, and defaults from the file never mix with flags: `--provider` on the command line uses that provider's own address even when `RAK_BASE_URL` is set, and `--base-url` on the command line drops the selected provider and its key.
 
 ### Claude and prompt caching
 
@@ -416,6 +472,7 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 | `delegate.rs` | The `delegate` tool: a helper agent run inside a tool call. |
 | `provider.rs` | The `Model` trait and the OpenAI-compatible client, streaming included. |
 | `anthropic.rs` | Claude through Anthropic's Messages API: caching, thinking blocks, refusal fallbacks. |
+| `providers.rs`, `providers.json` | The providers rak knows by name: address, key, API. |
 | `tools/` | The `Tool` trait and the built-in tools (`fs`, `shell`, `map`, `todo`, `image`, `web`); `Ctx` holds what they share; `verify` is the write check. |
 | `mcp/` | `config` (mcp.json), `client` (one server connection), and the bridge that turns a server's tools into `Tool`s. |
 | `skills/` | Reading skills, the index and `use_skill`; `save` writes and removes them (`save_skill`); `fetch` gets one from a web address. |
