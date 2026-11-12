@@ -203,7 +203,7 @@ impl Agent {
         let mut empty_replies = 0;
         // The tool descriptions go with every call, so they come out of the budget.
         let definitions_size: usize = definitions.iter().map(|d| d.to_string().len()).sum();
-        let budget = (self.config.context_window * CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
+        let budget = self.config.context_window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
 
         for turn in 1..=self.config.max_turns {
             self.fit(budget);
@@ -316,12 +316,13 @@ impl Agent {
             "You have reached the turn limit. Do not call any tools. Say briefly what you did and what is left to do." }));
         let turns = self.config.max_turns;
         let answer = match self.call_model(turns + 1, &[]) {
-            Ok(reply) => {
-                self.messages.push(json!({ "role": "assistant", "content": reply.content }));
-                reply.content
-            }
-            Err(_) => String::new(),
+            Ok(reply) => reply.content,
+            Err(_) if self.stop.requested() => return self.stopped(turns),
+            // Still the turn limit, but say why there is no summary rather
+            // than hand back an empty answer.
+            Err(e) => format!("The turn limit was reached, and the summary of where things stand could not be written: {e}"),
         };
+        self.messages.push(json!({ "role": "assistant", "content": answer }));
         RunResult { outcome: Outcome::MaxTurns, answer, turns }
     }
 
@@ -355,7 +356,7 @@ impl Agent {
         }
         (self.on_event)(&Event::Note(&format!("context is full: summarizing {} earlier messages", middle.len())));
         // Half the window for what the summary is written from: room for the reply.
-        let source = compact::transcript(&middle, (self.config.context_window * CHARS_PER_TOKEN / 2).max(4_000));
+        let source = compact::transcript(&middle, (self.config.context_window.saturating_mul(CHARS_PER_TOKEN) / 2).max(4_000));
         let request = [json!({ "role": "system", "content": compact::SUMMARY_PROMPT }), json!({ "role": "user", "content": source })];
         let mut summary = None;
         for attempt in 0..2 {
@@ -529,16 +530,25 @@ pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: us
             && !is_plan
             && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 3 && !c.starts_with("[output of "));
         let has_image = message["content"].as_array().is_some_and(|parts| parts.iter().any(|p| p["type"] == "image_url"));
-        if is_big_tool_output {
-            let before = size(message);
-            message["content"] = json!(dropped_stub(call.as_ref(), message["content"].as_str().unwrap_or("")));
-            total -= before - size(message);
-            dropped += 1;
+        let replacement = if is_big_tool_output {
+            Some(dropped_stub(call.as_ref(), message["content"].as_str().unwrap_or("")))
         } else if has_image {
+            Some(IMAGE_DROPPED.to_string())
+        } else {
+            None
+        };
+        // A stub can be longer than a short output (a long path, a long first
+        // line): replace only when it saves something.
+        if let Some(replacement) = replacement {
             let before = size(message);
-            message["content"] = json!(IMAGE_DROPPED);
-            total -= before - size(message);
-            dropped += 1;
+            let mut stubbed = message.clone();
+            stubbed["content"] = json!(replacement);
+            let after = size(&stubbed);
+            if after < before {
+                *message = stubbed;
+                total -= before - after;
+                dropped += 1;
+            }
         }
     }
     dropped
@@ -804,6 +814,44 @@ mod tests {
             "[output of read_file src/main.rs removed to save context. It began: fn main() {}. Run it again if you need it.]"
         );
         assert_eq!(dropped_stub(None, "x"), DROPPED);
+    }
+
+    #[test]
+    fn a_stub_never_replaces_an_output_smaller_than_itself() {
+        // An output just over the size limit, from a call whose stub (long path,
+        // long first line) would be bigger than the output itself.
+        let path = format!("src/{}/module.rs", "deeply/nested".repeat(6));
+        let output = format!("{}\n{}", "f".repeat(150), "x".repeat(120));
+        let mut messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "a", "type": "function",
+                "function": { "name": "read_file", "arguments": json!({ "path": path }).to_string() } }] }),
+            json!({ "role": "tool", "tool_call_id": "a", "content": output }),
+        ];
+        let before = conversation_size(&messages);
+        assert!(dropped_stub(Some(&("read_file".into(), crate::text::one_line(&path, 80))), &output).len() > output.len());
+        assert_eq!(trim_keeping(&mut messages, 10, 0), 0, "a bigger stub saves nothing");
+        assert_eq!(messages[2]["content"], output.as_str());
+        assert_eq!(conversation_size(&messages), before);
+    }
+
+    #[test]
+    fn a_huge_context_window_does_not_overflow() {
+        let mut s = setup("huge-window", vec![Ok(text("done"))], 5);
+        s.agent.set_context_window(usize::MAX);
+        assert_eq!(s.agent.run("go").answer, "done");
+        let _ = std::fs::remove_dir_all(&s.dir);
+    }
+
+    #[test]
+    fn a_failed_turn_limit_summary_says_why() {
+        let again = || Ok(call("list_dir", json!({ "path": "." })));
+        let mut s = setup("max-turns-fail", vec![again(), Err(ModelError::Fatal("401 bad key".into()))], 1);
+        let result = s.agent.run("go");
+        assert_eq!(result.outcome, Outcome::MaxTurns);
+        assert!(result.answer.contains("401 bad key"), "{}", result.answer);
+        assert_eq!(s.agent.messages.last().unwrap()["role"], "assistant", "the chat stays well formed");
+        let _ = std::fs::remove_dir_all(&s.dir);
     }
 
     fn earlier_chat() -> Vec<Value> {
