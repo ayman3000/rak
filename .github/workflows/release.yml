@@ -33,7 +33,7 @@ jobs:
       CC_x86_64_unknown_linux_musl: gcc
       CC_aarch64_unknown_linux_musl: gcc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: The tag matches Cargo.toml
         shell: bash
         run: |
