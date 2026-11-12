@@ -85,6 +85,55 @@ sleep 30"#,
     }
 
     #[test]
+    fn quitting_with_a_second_ctrl_c_stops_the_mcp_servers() {
+        let (dir, project, home, pid_file) = project_with_server("mcp-ctrl-c");
+        // A model server that takes the chat request and never answers, so rak
+        // waits mid-request. Anything else (Ollama's /api/show) gets a 404.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (chat_sender, chat_arrived) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            for mut stream in listener.incoming().map_while(Result::ok) {
+                let mut first = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut first);
+                if first.contains("/chat/completions") {
+                    let _ = chat_sender.send(stream); // held open, never answered
+                } else {
+                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                }
+            }
+        });
+        let mut child = rak(&home)
+            .args(["-m", "test-model", "--base-url", &url, "--context", "100000", "--no-skills", "-q", "-C"])
+            .arg(&project)
+            .arg("say hi")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _held = chat_arrived.recv_timeout(Duration::from_secs(10)).expect("rak sent its request");
+        assert!(pid_file.exists(), "the server started before the request");
+
+        let pid = child.id().to_string();
+        let interrupt = || Command::new("kill").args(["-INT", &pid]).status().unwrap();
+        interrupt(); // asks the request to stop; the silent model keeps it waiting
+        std::thread::sleep(Duration::from_millis(300));
+        interrupt(); // quits rak
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "rak did not quit");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(status.code(), Some(130));
+        assert_server_stopped(&pid_file);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn rak_mcp_list_stops_the_servers_it_tried() {
         let (dir, project, home, pid_file) = project_with_server("mcp-list");
         let output = rak(&home).args(["mcp", "list"]).current_dir(&project).output().unwrap();

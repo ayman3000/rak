@@ -239,6 +239,7 @@ fn start_program(command: &str, args: &[String], env: &BTreeMap<String, String>,
         program.process_group(0);
     }
     let mut child = program.spawn().map_err(|e| format!("couldn't start `{command}`: {e}"))?;
+    running::add(child.id());
     let stdin = child.stdin.take().ok_or("couldn't open the program's input")?;
     let stdout = child.stdout.take().ok_or("couldn't open the program's output")?;
     let stderr = child.stderr.take().ok_or("couldn't open the program's error output")?;
@@ -270,6 +271,7 @@ fn start_program(command: &str, args: &[String], env: &BTreeMap<String, String>,
 
 /// Asks the program's whole process group to end, then makes sure.
 fn stop_program(child: &mut Child) {
+    running::remove(child.id());
     #[cfg(unix)]
     unsafe {
         libc::killpg(child.id() as libc::pid_t, libc::SIGTERM);
@@ -288,6 +290,49 @@ fn stop_program(child: &mut Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// The process groups of the server programs running now, kept where a
+/// signal handler can read them: quitting from Ctrl-C skips every `Drop`, so
+/// the handler stops them itself with `stop_all_servers_now`.
+mod running {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// More servers than this at once are still stopped by `Drop`, just not
+    /// from a signal handler.
+    const SLOTS: usize = 64;
+    pub static GROUPS: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+
+    pub fn add(group: u32) {
+        let _ = GROUPS.iter().find(|slot| slot.compare_exchange(0, group, Ordering::SeqCst, Ordering::SeqCst).is_ok());
+    }
+
+    pub fn remove(group: u32) {
+        let _ = GROUPS.iter().find(|slot| slot.compare_exchange(group, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok());
+    }
+}
+
+/// Stops every MCP server program this process started, at once: for a
+/// signal handler about to `_exit`, where nothing gets dropped. Only does what
+/// is safe there (atomic reads, `killpg`, `nanosleep`): asks each group to
+/// end, gives them 300 ms as a normal stop does, then kills what is left.
+#[cfg(unix)]
+pub fn stop_all_servers_now() {
+    let signal_all = |signal| {
+        for slot in &running::GROUPS {
+            let group = slot.load(std::sync::atomic::Ordering::SeqCst);
+            if group != 0 {
+                unsafe { libc::killpg(group as libc::pid_t, signal) };
+            }
+        }
+    };
+    if running::GROUPS.iter().all(|slot| slot.load(std::sync::atomic::Ordering::SeqCst) == 0) {
+        return;
+    }
+    signal_all(libc::SIGTERM);
+    let pause = libc::timespec { tv_sec: 0, tv_nsec: 300_000_000 };
+    unsafe { libc::nanosleep(&pause, std::ptr::null_mut()) };
+    signal_all(libc::SIGKILL);
 }
 
 /// One message to a server at a web address. With an `id`, waits for the

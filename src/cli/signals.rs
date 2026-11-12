@@ -20,7 +20,12 @@ mod unix {
                 let note = "\n⏹ stopping… (Ctrl-C again quits rak)\n".as_bytes();
                 unsafe { libc::write(2, note.as_ptr() as *const libc::c_void, note.len()) };
             }
-            None => unsafe { libc::_exit(130) },
+            None => {
+                // _exit runs no destructors: the MCP servers' programs, in
+                // process groups of their own, would outlive rak.
+                rak::mcp::stop_all_servers_now();
+                unsafe { libc::_exit(130) }
+            }
         }
     }
 

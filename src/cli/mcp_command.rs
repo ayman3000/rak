@@ -32,6 +32,8 @@ across. A project's file wins over the one for all projects.
 
 /// `rak mcp add|list|remove`: edits the list of MCP servers. Never returns.
 pub fn run(args: &[String]) -> ! {
+    // Ctrl-C while servers are being tried quits, stopping them first.
+    super::signals::install(Stop::new());
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let files = mcp::config_files(&cwd, config_dir().as_deref());
     let project_file = files[0].clone();

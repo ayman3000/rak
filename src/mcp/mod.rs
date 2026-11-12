@@ -18,6 +18,8 @@
 mod client;
 mod config;
 
+#[cfg(unix)]
+pub use client::stop_all_servers_now;
 pub use client::{result_text, tool_info, Client, ToolInfo};
 pub use config::{add_to_file, config_files, entry_json, load, parse_config, remove_from_file, ServerConfig, Transport};
 
