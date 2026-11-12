@@ -244,8 +244,14 @@ mod tests {
         for (name, _) in KNOWN {
             assert!(TEMPLATE.contains(name), "{name} is missing from .env.example");
         }
+        // The settings have plain lines of their own, so they are filled in, not uncommented.
+        for setting in ["RAK_PROVIDER", "RAK_MODEL", "RAK_BASE_URL", "RAK_API_KEY"] {
+            assert!(parsed.contains_key(setting), "{setting} has no line in .env.example");
+        }
+        let provider_list = TEMPLATE.split("RAK_PROVIDER is one of:").nth(1).unwrap().split("RAK_PROVIDER=").next().unwrap();
         for provider in rak::providers::all() {
-            assert!(TEMPLATE.contains(&format!("RAK_PROVIDER={}\n", provider.name)), "no block for {} in .env.example", provider.name);
+            let named = provider_list.split(|c: char| c == ',' || c.is_whitespace()).any(|word| word == provider.name);
+            assert!(named, "{} is missing from the RAK_PROVIDER list in .env.example", provider.name);
             if let Some(key) = &provider.key {
                 assert!(parsed.contains_key(key), "{key} ({}) has no line in .env.example", provider.name);
             }

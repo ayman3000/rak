@@ -254,8 +254,8 @@ mod tests {
             ("SOMETHING_ELSE", "a value # with a hash"),
         ]);
         let updated = update(TEMPLATE, &old);
-        assert_eq!(updated.filled, ["ANTHROPIC_API_KEY", "TAVILY_API_KEY"]);
-        assert_eq!(updated.kept, ["RAK_MODEL", "SOMETHING_ELSE"]);
+        assert_eq!(updated.filled, ["ANTHROPIC_API_KEY", "TAVILY_API_KEY", "RAK_MODEL"], "the model has a line of its own");
+        assert_eq!(updated.kept, ["SOMETHING_ELSE"]);
         assert!(updated.text.contains("ANTHROPIC_API_KEY=sk-ant-1  # anthropic"), "the line keeps its comment");
 
         // Read back, the new file holds exactly what the old one set.
