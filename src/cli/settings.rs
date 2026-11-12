@@ -15,16 +15,53 @@ pub fn home() -> String {
     std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default()
 }
 
-pub fn saved_model() -> Option<String> {
-    let text = std::fs::read_to_string(config_dir()?.join("model")).ok()?;
-    Some(text.trim().to_string()).filter(|m| !m.is_empty())
+/// The last model picked for each provider, kept in ~/.config/rak/models as
+/// one `provider=model` line each (a server named only by its address is kept
+/// under that address).
+fn models_file() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join("models"))
 }
 
-pub fn save_model(model: &str) {
-    if let Some(dir) = config_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("model"), format!("{model}\n"));
+/// Pure — unit-tested.
+pub fn parse_models(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .filter(|(k, v)| !k.is_empty() && !v.is_empty())
+        .collect()
+}
+
+/// Pure — unit-tested. The list with this provider's pick replaced or added.
+pub fn with_model(mut list: Vec<(String, String)>, provider: &str, model: &str) -> Vec<(String, String)> {
+    match list.iter_mut().find(|(k, _)| k == provider) {
+        Some(entry) => entry.1 = model.to_string(),
+        None => list.push((provider.to_string(), model.to_string())),
     }
+    list
+}
+
+/// The model last picked for this provider.
+pub fn last_model(provider: &str) -> Option<String> {
+    let text = std::fs::read_to_string(models_file()?).unwrap_or_default();
+    parse_models(&text).into_iter().find(|(k, _)| k == provider).map(|(_, v)| v).or_else(|| {
+        // Before picks were kept per provider there was one, made on Ollama.
+        (provider == "ollama")
+            .then(|| std::fs::read_to_string(config_dir()?.join("model")).ok())
+            .flatten()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+    })
+}
+
+/// Remembers the model picked for this provider.
+pub fn remember_model(provider: &str, model: &str) {
+    let Some(file) = models_file() else { return };
+    let list = parse_models(&std::fs::read_to_string(&file).unwrap_or_default());
+    let text: String = with_model(list, provider, model).iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(file, text);
 }
 
 // MARK: - Keys and .env files
@@ -180,6 +217,17 @@ mod tests {
         assert_eq!(keys.get("RAK_TEST_SURELY_UNSET_KEY"), None);
         assert_eq!(keys.source("A").as_deref(), Some("p"));
         assert_eq!(keys.source("C"), None, "empty is not set");
+    }
+
+    #[test]
+    fn picks_are_kept_per_provider() {
+        let list = parse_models("ollama=kimi-k2.6:cloud\nopenrouter = x/y\nbroken\nempty=\n");
+        assert_eq!(list, [("ollama".to_string(), "kimi-k2.6:cloud".to_string()), ("openrouter".into(), "x/y".into())]);
+        let list = with_model(list, "openrouter", "x/z");
+        let list = with_model(list, "https://example.com/v1", "m");
+        assert_eq!(list[1].1, "x/z");
+        assert_eq!(list[2], ("https://example.com/v1".to_string(), "m".to_string()));
+        assert_eq!(parse_models("https://example.com/v1=m\n")[0].0, "https://example.com/v1", "an address keeps its colon");
     }
 
     #[test]

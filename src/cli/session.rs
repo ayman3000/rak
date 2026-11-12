@@ -5,9 +5,9 @@ use super::args::{usage_error, Options, VERSION};
 use super::editor::Editor;
 use super::log::Log;
 use super::output::{self, Ui};
-use super::settings::{config_dir, key, load_keys, save_model, saved_model};
+use super::settings::{config_dir, key, last_model, load_keys, remember_model};
 use super::style::{paint, Style};
-use super::{approval, chat, commands, markdown, menu, signals, welcome};
+use super::{approval, chat, commands, markdown, menu, signals};
 use rak::agent::{system_prompt, Agent, Config, Outcome, RunResult};
 use rak::anthropic::Anthropic;
 use rak::interrupt::Stop;
@@ -97,6 +97,39 @@ pub struct Backend {
     pub api_key: Option<String>,
 }
 
+impl Backend {
+    /// Where the last model picked here is remembered: the provider's name,
+    /// or the address of a server rak doesn't know by name.
+    pub fn memory_key(&self) -> String {
+        self.provider.clone().unwrap_or_else(|| self.base_url.clone())
+    }
+}
+
+/// Pure — unit-tested. The model to start with:
+/// 1. `-m` on the command line;
+/// 2. in a chat, the model last picked for this provider;
+/// 3. RAK_MODEL, when this is the default provider it was set for (not one
+///    chosen with --provider or --base-url);
+/// 4. outside a chat, the model last picked for this provider.
+///
+/// None: in a chat, list the provider's models to pick from.
+pub fn choose_model(o: &Options, chat: bool, last_pick: Option<String>) -> Option<String> {
+    let flag = o.model.clone().filter(|_| o.model_flag);
+    let default = o.model.clone().filter(|_| !o.model_flag && !o.provider_flag && !o.base_url_flag);
+    if chat {
+        flag.or(last_pick).or(default)
+    } else {
+        flag.or(default).or(last_pick)
+    }
+}
+
+/// Where the last pick is remembered for these options, before a model is
+/// chosen (a claude-* model can move a run to Anthropic, so the candidate counts).
+fn memory_key_for(o: &Options, candidate: Option<&str>) -> Option<String> {
+    let route = route(o, candidate, key("ANTHROPIC_API_KEY").is_some()).ok()?;
+    Some(route.provider.map(|p| p.name.clone()).unwrap_or(route.base_url))
+}
+
 /// Which variable the key comes from.
 #[derive(Debug, PartialEq)]
 pub enum KeySource {
@@ -154,6 +187,14 @@ pub fn route(o: &Options, model: Option<&str>, has_anthropic_key: bool) -> Resul
     Ok(Route { provider: named, base_url, key })
 }
 
+/// For people: "OpenRouter", or the address of a server rak doesn't know by name.
+pub fn provider_label(backend: &Backend) -> String {
+    match backend.provider.as_deref().and_then(providers::find) {
+        Some(p) => p.label.clone(),
+        None => backend.base_url.clone(),
+    }
+}
+
 /// The backend for the options and model, or why there can't be one.
 pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
     let route = route(o, model, key("ANTHROPIC_API_KEY").is_some())?;
@@ -189,10 +230,13 @@ pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -
 
 /// --context wins; then what the server says; then a guess.
 pub fn window_for(o: &Options, provider: &dyn Model) -> (usize, &'static str) {
-    match (o.context, provider.context_window()) {
-        (Some(n), _) => (n, "set with --context"),
-        (None, Some(n)) => (n, "reported by the server"),
-        (None, None) => (128_000, "assumed — the server didn't say; set it with --context"),
+    // Asking the server is a request: only when --context didn't say.
+    match o.context {
+        Some(n) => (n, "set with --context"),
+        None => match provider.context_window() {
+            Some(n) => (n, "reported by the server"),
+            None => (128_000, "assumed — the server didn't say; set it with --context"),
+        },
     }
 }
 
@@ -224,15 +268,18 @@ pub fn run(mut o: Options) -> i32 {
 
     let mut editor = Editor::new(config_dir().map(|d| d.join("history")), menu::commands(commands::HELP), out_color);
 
-    // The model: named, or in a chat the one picked last, or picked now.
-    let model_name = match o.model.clone().or_else(|| if chat { saved_model() } else { None }) {
+    // The model: named with -m, or the last one picked for this provider, or
+    // RAK_MODEL, or (in a chat) picked now from the provider's list.
+    let candidate = o.model.clone().filter(|_| o.model_flag || (!o.provider_flag && !o.base_url_flag));
+    let memory = memory_key_for(&o, candidate.as_deref());
+    let model_name = match choose_model(&o, chat, memory.as_deref().and_then(last_model)) {
         Some(name) => name,
         None if chat => {
             let backend = backend(&o, None).unwrap_or_else(|why| usage_error(&why));
-            println!("No model named yet. These are the models at {}:", welcome::server_name(&backend.base_url));
+            println!("No model picked yet for {}. These are its models:", provider_label(&backend));
             let picked = chat::pick_model(make_provider(&o, &backend, "", &stop).as_ref(), None, &mut editor, out_color);
             let Some(name) = picked else { usage_error("no model named. Pass --model NAME or set RAK_MODEL") };
-            save_model(&name);
+            remember_model(&backend.memory_key(), &name);
             name
         }
         None => usage_error("no model named. Pass --model NAME or set RAK_MODEL"),
@@ -537,6 +584,26 @@ mod tests {
     fn required(name: &str) -> KeySource {
         let label = providers::all().iter().find(|p| p.key.as_deref() == Some(name)).map(|p| p.label.clone()).unwrap();
         KeySource::Required(name.into(), format!("{label} needs it"))
+    }
+
+    #[test]
+    fn the_starting_model_follows_the_flag_then_the_last_pick_then_rak_model() {
+        let with = |model: Option<&str>, model_flag: bool, provider_flag: bool| {
+            let mut o = options(Some("openrouter"), provider_flag, None, false);
+            (o.model, o.model_flag) = (model.map(str::to_string), model_flag);
+            o
+        };
+        let last = || Some("last/pick".to_string());
+        // -m wins everywhere.
+        assert_eq!(choose_model(&with(Some("flag/m"), true, false), true, last()).as_deref(), Some("flag/m"));
+        // In a chat the last pick beats RAK_MODEL; in a one-off run RAK_MODEL wins.
+        assert_eq!(choose_model(&with(Some("env/m"), false, false), true, last()).as_deref(), Some("last/pick"));
+        assert_eq!(choose_model(&with(Some("env/m"), false, false), false, last()).as_deref(), Some("env/m"));
+        // RAK_MODEL belongs to the default provider, not one chosen with --provider.
+        assert_eq!(choose_model(&with(Some("env/m"), false, true), true, None), None);
+        assert_eq!(choose_model(&with(Some("env/m"), false, true), false, last()).as_deref(), Some("last/pick"));
+        // Nothing at all: a chat lists the models.
+        assert_eq!(choose_model(&with(None, false, false), true, None), None);
     }
 
     #[test]

@@ -80,6 +80,8 @@ pub struct Options {
     /// default, so one provider's key never reaches another's server.
     pub provider_flag: bool,
     pub base_url_flag: bool,
+    /// -m was on the command line: it wins over the last pick and RAK_MODEL.
+    pub model_flag: bool,
     pub api_key_env: Option<String>,
     pub effort: Option<String>,
     pub max_tokens: Option<u64>,
@@ -112,6 +114,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         base_url: env("RAK_BASE_URL"),
         provider_flag: false,
         base_url_flag: false,
+        model_flag: false,
         api_key_env: None,
         effort: None,
         max_tokens: None,
@@ -145,7 +148,10 @@ pub fn parse_args(args: Vec<String>) -> Options {
                 println!("rak {VERSION}");
                 std::process::exit(0);
             }
-            "-m" | "--model" => o.model = Some(value("--model")),
+            "-m" | "--model" => {
+                o.model = Some(value("--model"));
+                o.model_flag = true;
+            }
             "--base-url" => {
                 o.base_url = Some(value("--base-url"));
                 o.base_url_flag = true;

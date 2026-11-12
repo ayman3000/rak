@@ -135,7 +135,10 @@ mod tests {
         assert_eq!(names(&matches("/mo", &all())), ["/model", "/models"]);
         assert_eq!(names(&matches("/MO", &all())), ["/model", "/models"]);
         // Names that start with the text come before names that contain it.
-        assert_eq!(names(&matches("/e", &all())), ["/exit", "/model", "/models", "/resume", "/notes", "/yes", "/usage", "/clear", "/help"]);
+        assert_eq!(
+            names(&matches("/e", &all())),
+            ["/exit", "/model", "/models", "/provider", "/resume", "/notes", "/yes", "/usage", "/clear", "/help"]
+        );
     }
 
     #[test]

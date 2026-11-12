@@ -1,8 +1,9 @@
 //! The chat: the welcome panel, the prompt loop and the slash commands.
 
+use super::args::Options;
 use super::editor::Editor;
-use super::session::{backend, make_provider, run_one, window_for, Session};
-use super::settings::{home, key_files, save_model};
+use super::session::{backend, make_provider, provider_label, run_one, window_for, Backend, Session};
+use super::settings::{home, key, key_files, last_model, remember_model};
 use super::style::{cut, pad, paint, Style};
 use super::welcome::grouped;
 use super::{commands, menu, skills_command, term, welcome, VERSION};
@@ -146,17 +147,76 @@ pub fn switch_model(s: &mut Session, model: &str) {
             return;
         }
     };
-    let provider = make_provider(&s.o, &backend, model, &s.stop);
-    (s.window, s.window_source) = window_for(&s.o, provider.as_ref());
+    let moved = backend.base_url != s.backend.base_url;
+    let o = s.o.clone();
+    use_backend(s, o, backend, model, moved);
+}
+
+/// Lists the providers: which one is in use, and whether each one's key is set.
+fn list_providers(s: &Session, color: bool) {
+    for p in rak::providers::all() {
+        let current = s.backend.provider.as_deref() == Some(p.name.as_str());
+        let marker = if current { paint(color, Style::Green, "▸") } else { " ".to_string() };
+        let key_state = match &p.key {
+            None => paint(color, Style::Dim, "no key needed"),
+            Some(name) if key(name).is_some() => format!("{name} set"),
+            Some(name) => paint(color, Style::Dim, &format!("{name} not set")),
+        };
+        println!(" {marker} {} {} {}", paint(color, Style::Cyan, &pad(&p.name, 13)), pad(&p.label, 42), key_state);
+    }
+    println!("{}", paint(color, Style::Dim, "\n  /provider NAME switches; the chat so far comes along"));
+}
+
+/// Moves the chat to another provider: its own address and key, and the model
+/// last picked there (or RAK_MODEL for the default provider, or one picked now).
+pub fn switch_provider(s: &mut Session, editor: &mut Editor, name: &str) {
+    let color = s.ui.borrow().out_color;
+    let warn = |text: &str| println!("{}", paint(color, Style::Yellow, text));
+    let Some(provider) = rak::providers::find(name) else {
+        warn(&format!("No provider named `{name}`. They are: {}", rak::providers::names()));
+        return;
+    };
+    let mut o: Options = s.o.clone();
+    // The default provider keeps the address and model the key file gives it.
+    let is_default = key("RAK_PROVIDER").is_some_and(|d| d.eq_ignore_ascii_case(&provider.name));
+    o.provider = Some(provider.name.clone());
+    o.provider_flag = !is_default;
+    o.base_url = if is_default { key("RAK_BASE_URL") } else { None };
+    o.base_url_flag = false;
+    o.api_key_env = None;
+    let backend_now = match backend(&o, None) {
+        Ok(b) => b,
+        Err(why) => return warn(&format!("Can't switch: {why}")),
+    };
+    let remembered = last_model(&backend_now.memory_key()).or_else(|| if is_default { key("RAK_MODEL") } else { None });
+    let model = match remembered {
+        Some(model) => model,
+        None => {
+            println!("No model picked yet for {}. These are its models:", provider.label);
+            match pick_model(make_provider(&o, &backend_now, "", &s.stop).as_ref(), None, editor, color) {
+                Some(model) => model,
+                None => return println!("Staying with {} at {}.", s.model, provider_label(&s.backend)),
+            }
+        }
+    };
+    use_backend(s, o, backend_now, &model, true);
+}
+
+/// From here on the chat uses this model at this backend; remembered as the
+/// pick for that provider.
+fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_where: bool) {
+    let color = s.ui.borrow().out_color;
+    let provider = make_provider(&o, &backend, model, &s.stop);
+    (s.window, s.window_source) = window_for(&o, provider.as_ref());
     s.agent.set_context_window(s.window);
     s.agent.set_model(provider);
-    let moved = backend.anthropic != s.backend.anthropic;
+    s.o = o;
     s.backend = backend;
     s.model = model.to_string();
     *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
-    save_model(model);
-    s.log.write(json!({ "event": "model", "model": model, "provider": if s.backend.anthropic { "anthropic" } else { "openai" } }));
-    let via = if moved { format!(" at {}", welcome::server_name(&s.backend.base_url)) } else { String::new() };
+    remember_model(&s.backend.memory_key(), model);
+    s.log.write(json!({ "event": "model", "model": model, "provider": s.backend.provider.as_deref().unwrap_or("custom") }));
+    let via = if say_where { format!(" at {}", provider_label(&s.backend)) } else { String::new() };
     println!("Now using {}{via}.", paint(color, Style::Bold, model));
 }
 
@@ -174,8 +234,13 @@ pub fn run_command(s: &mut Session, editor: &mut Editor, line: &str) -> bool {
             println!("{}", dim("\n  Ctrl-C stops a running request · ↑/↓ history · Tab completes a command\n  Multi-line: end a line with \\ to continue it, or paste"));
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
+        "provider" if !args.is_empty() => switch_provider(s, editor, args),
+        "provider" => {
+            println!("Provider: {}", paint(color, Style::Bold, &provider_label(&s.backend)));
+            list_providers(s, color);
+        }
         "model" | "m" => {
-            println!("Model: {} at {}", paint(color, Style::Bold, &s.model), welcome::server_name(&s.backend.base_url));
+            println!("Model: {} at {}", paint(color, Style::Bold, &s.model), provider_label(&s.backend));
             let provider = make_provider(&s.o, &s.backend, &s.model, &s.stop);
             if let Some(model) = pick_model(provider.as_ref(), Some(&s.model), editor, color) {
                 switch_model(s, &model);

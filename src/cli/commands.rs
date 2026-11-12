@@ -4,7 +4,8 @@
 /// (usage, what it does) — the /help list and the "/" menu, in this order.
 pub const HELP: &[(&str, &str)] = &[
     ("/model [name]", "show or switch the model (no name: pick from a list)"),
-    ("/models", "list the models the server offers"),
+    ("/models", "list the models the provider offers"),
+    ("/provider [name]", "show or switch the provider (no name: list them)"),
     ("/tools", "list the tools the agent can use"),
     ("/mcp", "the MCP servers and their tools"),
     ("/resume", "this folder's saved chats; /resume N picks one up"),
@@ -20,8 +21,28 @@ pub const HELP: &[(&str, &str)] = &[
 /// Every name the chat accepts, aliases included — what the "/" menu must
 /// leave alone when Enter is pressed.
 pub const KNOWN: &[&str] = &[
-    "/help", "/?", "/model", "/m", "/models", "/tools", "/mcp", "/skills", "/resume", "/load", "/notes", "/yes", "/auto", "/usage",
-    "/cost", "/clear", "/reset", "/new", "/exit", "/quit", "/q",
+    "/help",
+    "/?",
+    "/model",
+    "/m",
+    "/models",
+    "/provider",
+    "/tools",
+    "/mcp",
+    "/skills",
+    "/resume",
+    "/load",
+    "/notes",
+    "/yes",
+    "/auto",
+    "/usage",
+    "/cost",
+    "/clear",
+    "/reset",
+    "/new",
+    "/exit",
+    "/quit",
+    "/q",
 ];
 
 #[cfg(test)]

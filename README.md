@@ -174,12 +174,14 @@ Started without a task, rak opens a chat with the same interface as sak:
 - **Answers appear as they are written**, with Markdown shown as headings, bullets and code rather than as symbols.
 - **Ctrl-C stops a request** — the answer being written, or a command that is running — and keeps the chat. A second Ctrl-C quits.
 - **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
-- **No model named?** rak uses the one you last picked with `/model`, or lists the server's models to pick from.
+- **No model named?** rak uses the one you last picked for that provider, then `RAK_MODEL`, or lists the provider's models to pick from.
+- **Switch provider mid-chat** with `/provider NAME`: its own address and key, and the model you last picked there. The conversation comes along.
 
 | Command | What it does |
 |---|---|
 | `/model [name]` | Show or switch the model. Without a name: pick from a list. |
-| `/models` | List the models the server offers. |
+| `/models` | List the models the provider offers. |
+| `/provider [name]` | Show or switch the provider. Without a name: list them, with whether each one's key is set. |
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
 | `/skills` | List the skills the agent can load. `/skills add URL` adds one (it shows it and asks first). |
@@ -190,11 +192,11 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/resume` | This folder's saved chats, newest first, with when and how long. `/resume N` picks one up. |
 | `/help`, `/exit` | The list of commands; quit. |
 
-The history and the last model picked are kept in `~/.config/rak/`.
+The history and the last model picked for each provider are kept in `~/.config/rak/`. In a chat, your last pick for a provider wins over `RAK_MODEL`; `RAK_MODEL` is where a provider you haven't picked a model on yet starts, and it applies only to the default provider. A one-off run (`rak "…"`) uses `-m`, then `RAK_MODEL`, then your last pick, so scripts stay predictable.
 
 | Option | What it does |
 |---|---|
-| `-m`, `--model NAME` | Model to use. Or set `RAK_MODEL`. A chat can start without one. |
+| `-m`, `--model NAME` | Model to use; wins over your last pick and `RAK_MODEL`. A chat can start without one. |
 | `--provider NAME` | Who runs the model (table above). Or set `RAK_PROVIDER`. Default: `ollama`, or `anthropic` for a `claude-*` model when `ANTHROPIC_API_KEY` is set. |
 | `--base-url URL` | Another address: a server rak doesn't know by name, or a provider somewhere else. Or set `RAK_BASE_URL`. |
 | `--api-key-env NAME` | The variable holding the key to send. Default: the provider's own key; `RAK_API_KEY` for a server named by `--base-url`. |
