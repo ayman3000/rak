@@ -94,7 +94,7 @@ In the order they are being built (value for a coding agent first):
       unified diff, several hunks in one approved step. ~300 lines.
 - [x] 2. `fetch_url` with an SSRF guard (SAK `FetchURLTool`, `SSRFGuard`):
       a public page as readable text; private addresses refused. ~300 lines.
-- [ ] 3. Repair-retry (SAK `RepairRetryPolicy`): a tool failed and the model
+- [x] 3. Repair-retry (SAK `RepairRetryPolicy`): a tool failed and the model
       ends the turn claiming success: one "fix it or say it failed" nudge.
 - [ ] 4. Deferred tool groups (SAK `DeferredToolGroup`, `load_tools`): an
       MCP server's tools cost one prompt line until the model loads them.

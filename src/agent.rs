@@ -217,6 +217,10 @@ impl Agent {
         let nudge_at = (self.config.max_turns >= 10).then(|| self.config.max_turns * 4 / 5);
         let mut repeated: (String, usize) = (String::new(), 0);
         let mut empty_replies = 0;
+        // Tool errors from the latest step, and how often the model was asked
+        // about them (SwiftAgentKit's repair retry).
+        let mut failed: Vec<(String, String)> = Vec::new();
+        let mut repairs = 0;
         // The tool descriptions go with every call, so they come out of the budget.
         let definitions_size: usize = definitions.iter().map(|d| d.to_string().len()).sum();
         let budget_for = |window: usize| window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
@@ -290,6 +294,16 @@ impl Agent {
                     message["native"] = native.clone();
                 }
                 self.messages.push(message);
+                // The step before this answer had a tool error: models often
+                // answer "done" right after an edit that did not apply. Asked
+                // once per failed step to fix it or say so.
+                if !failed.is_empty() && repairs < MAX_REPAIRS && turn < self.config.max_turns {
+                    repairs += 1;
+                    (self.on_event)(&Event::Note("a tool failed just before this answer: asked to fix it or say so"));
+                    self.messages.push(json!({ "role": "user", "content": repair_note(&failed) }));
+                    failed.clear();
+                    continue;
+                }
                 // Work left undone (an open task list): asked once to finish it.
                 if let Some(note) = self.finish_check.as_mut().and_then(|check| check()) {
                     (self.on_event)(&Event::Note("the task list has open steps: asked to finish them"));
@@ -306,6 +320,7 @@ impl Agent {
 
             let mut refused: Option<String> = None;
             let mut images: Vec<Image> = Vec::new();
+            failed.clear();
             for call in &reply.tool_calls {
                 let mut result = if refused.is_some() {
                     (false, self.refusal_note.clone())
@@ -326,6 +341,9 @@ impl Agent {
                          not change anything — try a different approach, or finish with what you have.]",
                         repeated.1
                     ));
+                }
+                if !result.0 && refused.is_none() && !self.stop.requested() && repairable(&result.1) {
+                    failed.push((call.name.clone(), result.1.clone()));
                 }
                 self.messages.push(json!({ "role": "tool", "tool_call_id": call.id, "content": result.1 }));
             }
@@ -614,6 +632,26 @@ pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: us
     dropped
 }
 
+/// Times one request may be asked to deal with a failed tool (SwiftAgentKit's
+/// RepairRetryPolicy: 3).
+const MAX_REPAIRS: usize = 3;
+
+/// Pure — unit-tested. Whether a tool error is one the model can act on: not
+/// a call to a tool that does not exist (SwiftAgentKit leaves those out too).
+fn repairable(error: &str) -> bool {
+    !error.starts_with("There is no tool named")
+}
+
+/// Pure — unit-tested. The note sent after an answer that followed a failed tool.
+fn repair_note(failed: &[(String, String)]) -> String {
+    let list: Vec<String> = failed.iter().map(|(tool, error)| format!("- {tool}: {}", crate::text::one_line(error, 300))).collect();
+    format!(
+        "[rak] The last step had tool errors:\n{}\nIf the task needs that step, fix the cause and try again. If it \
+         cannot be done, say plainly in your answer what failed. Don't call the task done while it isn't.",
+        list.join("\n")
+    )
+}
+
 /// The standing instructions. Follows sak's prompt.
 pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -> String {
     let os = match std::env::consts::OS {
@@ -776,6 +814,40 @@ mod tests {
         let mut s = setup("readonly-approval", vec![Ok(call("list_dir", json!({}))), Ok(text("empty"))], 10);
         s.agent.on_approval(|_, _| panic!("list_dir must not ask"));
         assert_eq!(s.agent.run("look").outcome, Outcome::Done);
+    }
+
+    #[test]
+    fn an_answer_right_after_a_failed_tool_is_asked_about_once() {
+        let mut s = setup(
+            "repair",
+            vec![
+                Ok(call("edit_file", json!({ "path": "missing.txt", "old_text": "a", "new_text": "b" }))),
+                Ok(text("Done, I changed it.")),
+                Ok(text("The edit failed: missing.txt does not exist.")),
+            ],
+            10,
+        );
+        let result = s.agent.run("change a to b");
+        assert_eq!((result.outcome, result.answer.as_str()), (Outcome::Done, "The edit failed: missing.txt does not exist."));
+        let seen = s.seen.borrow();
+        assert_eq!(seen.len(), 3, "one extra call, not more");
+        let note = seen[2].last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(note.contains("- edit_file: Cannot read") && note.contains("say plainly"), "{note}");
+
+        // Failed, then fixed in a later step: the answer is taken as it is.
+        let mut s = setup(
+            "repair-fixed",
+            vec![
+                Ok(call("edit_file", json!({ "path": "f.txt", "old_text": "a", "new_text": "b" }))),
+                Ok(call("write_file", json!({ "path": "f.txt", "content": "b" }))),
+                Ok(text("Wrote it.")),
+            ],
+            10,
+        );
+        s.agent.on_approval(|_, _| Approval::Yes);
+        assert_eq!(s.agent.run("go").answer, "Wrote it.");
+        assert_eq!(s.seen.borrow().len(), 3);
+        assert!(repairable("Cannot read file to edit: x") && !repairable("There is no tool named `fly`."));
     }
 
     #[test]

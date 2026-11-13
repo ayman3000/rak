@@ -317,6 +317,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 - **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch` and `run_shell` need a yes each time, unless you answer "always" or start with `-y`.
 - **A no stops the request.** The model does not get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
+- **A tool error is not passed off as done.** When the step just before the model's answer had a tool error (an edit that didn't apply, a rejected write), rak asks once: fix it, or say plainly what failed. From SwiftAgentKit's repair retry; at most three times a request. A command that exits with an error is a normal result, not a tool error.
 - **File tools stay in the project folder** unless you pass `--any-path`. Symlinks are resolved before the check.
 - **`run_shell` is not confined.** A command you approve can do anything your user can. The approval prompt shows the whole command, every line of it: read it before you say yes.
 - **An MCP server is a program you chose to run.** rak starts it with your user's rights, and trusts what it says about which of its tools are read-only.
