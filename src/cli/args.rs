@@ -59,6 +59,8 @@ BEHAVIOUR
 OUTPUT
       --json              print one JSON object with the answer and the numbers
       --log FILE          append every step to FILE as JSON lines
+      --record FILE       write the model's replies to FILE (for --replay)
+      --replay FILE       play recorded replies instead of asking a model
   -q, --quiet             no progress lines, only the answer
   -h, --help              this text
   -V, --version           the version
@@ -99,6 +101,8 @@ pub struct Options {
     pub max_turns: usize,
     pub json: bool,
     pub log: Option<PathBuf>,
+    pub record: Option<PathBuf>,
+    pub replay: Option<PathBuf>,
     pub quiet: bool,
 }
 
@@ -133,6 +137,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
         max_turns: 30,
         json: false,
         log: None,
+        record: None,
+        replay: None,
         quiet: false,
     };
     let mut words: Vec<String> = Vec::new();
@@ -185,6 +191,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
             "--json" => o.json = true,
             "--log" => o.log = Some(PathBuf::from(value("--log"))),
+            "--record" => o.record = Some(PathBuf::from(value("--record"))),
+            "--replay" => o.replay = Some(PathBuf::from(value("--replay"))),
             "-q" | "--quiet" => o.quiet = true,
             "--" => words.extend(args.by_ref()),
             flag if flag.starts_with('-') && flag.len() > 1 => usage_error(&format!("unknown option {flag}")),

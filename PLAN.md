@@ -107,7 +107,7 @@ In the order they are being built (value for a coding agent first):
       fact per project in a file, put in later system prompts.
 - [x] 8. Routines (SAK `Routine`, `run_routine`): saved fixed steps run with
       no model call between them.
-- [ ] 9. Record and replay (SAK `SwiftAgentKitReplay`): capture a live run's
+- [x] 9. Record and replay (SAK `SwiftAgentKitReplay`): capture a live run's
       replies to a file and replay it in tests.
 
 Lower value for rak, later or never: `PythonTool` (run_shell covers it),

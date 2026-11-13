@@ -293,6 +293,16 @@ pub fn run(mut o: Options) -> i32 {
 
     let backend = backend(&o, Some(&model_name)).unwrap_or_else(|why| usage_error(&why));
     let provider = make_provider(&o, &backend, &model_name, &stop);
+    // Developer runs (from SwiftAgentKit's replay harness): play a recording
+    // instead of a model, or record this one's replies.
+    let provider: Box<dyn rak::provider::Model> = match (&o.replay, &o.record) {
+        (Some(file), _) => match rak::replay::Replay::from_file(file) {
+            Ok(replay) => Box::new(replay),
+            Err(why) => usage_error(&why),
+        },
+        (None, Some(file)) => Box::new(rak::replay::Recording::new(provider, file)),
+        (None, None) => provider,
+    };
     let (window, window_source) = window_for(&o, provider.as_ref());
 
     let notes = std::fs::read_to_string(ctx.cwd.join("AGENTS.md")).ok().map(|n| n.chars().take(8_000).collect::<String>());

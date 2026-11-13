@@ -309,6 +309,8 @@ The history and the last model picked for each provider are kept in `~/.config/r
 | `--max-turns N` | Model calls allowed per request. Default 30. |
 | `--json` | Print one JSON object: answer, outcome, turns, tokens (cached ones too), seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |
+| `--record FILE` | Write the model's replies to FILE as they arrive (a developer flag). |
+| `--replay FILE` | Play recorded replies instead of asking a model: the same session again, offline, as often as needed while fixing rak around it. The token counts shown are the recorded ones. Same JSON shape as SwiftAgentKit's replay scenarios. |
 | `-q`, `--quiet` | Only the answer. |
 
 On a terminal the answer is shown as it arrives. Progress lines go to stderr, so `rak "…" > answer.txt` holds only the answer.
