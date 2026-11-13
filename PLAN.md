@@ -90,7 +90,7 @@ also runs one helper at a time by default), compaction, MCP.
 
 In the order they are being built (value for a coding agent first):
 
-- [ ] 1. `apply_patch` (SAK `UnifiedDiff` + `PatchFileTool`): edits as a
+- [x] 1. `apply_patch` (SAK `UnifiedDiff` + `PatchFileTool`): edits as a
       unified diff, several hunks in one approved step. ~300 lines.
 - [ ] 2. `fetch_url` with an SSRF guard (SAK `FetchURLTool`, `SSRFGuard`):
       a public page as readable text; private addresses refused. ~300 lines.

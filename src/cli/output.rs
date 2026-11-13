@@ -45,6 +45,13 @@ pub fn describe(name: &str, args: &Value) -> String {
     match name {
         "edit_file" => format!("edit_file {}  ({} → {} lines)", path_text("path"), lines("old_text"), lines("new_text")),
         "write_file" => format!("write_file {}  ({} bytes)", path_text("path"), text("content").len()),
+        "apply_patch" => match rak::tools::patch::parse(text("patch")) {
+            Some(hunks) => {
+                let (n, added, removed) = rak::tools::patch::counts(&hunks);
+                format!("apply_patch {}  ({n} hunk{}, +{added}/-{removed})", path_text("path"), if n == 1 { "" } else { "s" })
+            }
+            None => format!("apply_patch {}", path_text("path")),
+        },
         "run_shell" => format!("run_shell {}", one_line(text("command"), 110)),
         "delegate" => format!("delegate  {}", one_line(text("task"), 90)),
         "todo" => {
@@ -237,6 +244,10 @@ mod tests {
         let edit = json!({ "path": "a.rs", "old_text": "x\ny\nz", "new_text": "x" });
         assert_eq!(describe("edit_file", &edit), "edit_file a.rs  (3 → 1 lines)");
         assert_eq!(describe("write_file", &json!({ "path": "b", "content": "hello" })), "write_file b  (5 bytes)");
+        assert_eq!(
+            describe("apply_patch", &json!({ "path": "c", "patch": "@@ -1 +1,2 @@\n-a\n+b\n+c\n" })),
+            "apply_patch c  (1 hunk, +2/-1)"
+        );
         assert_eq!(describe("run_shell", &json!({ "command": "cargo  test\n--quiet" })), "run_shell cargo test --quiet");
         assert_eq!(describe("files__search", &json!({ "q": "x", "limit": 3 })), "files__search limit=3 q=x");
         assert_eq!(relative_to("/home/a/rak", "/home/a/rak/src/agent.rs"), "src/agent.rs");

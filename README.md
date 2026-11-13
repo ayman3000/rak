@@ -314,7 +314,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 
 ## Safety
 
-- **Edits and commands ask first.** `write_file`, `edit_file` and `run_shell` need a yes each time, unless you answer "always" or start with `-y`.
+- **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch` and `run_shell` need a yes each time, unless you answer "always" or start with `-y`.
 - **A no stops the request.** The model does not get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **File tools stay in the project folder** unless you pass `--any-path`. Symlinks are resolved before the check.
@@ -332,12 +332,13 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `view_image` | Shows the model an image file (PNG, JPEG, GIF, WebP), such as a screenshot it took, so it can check what a screen really shows. Offered only when the model can see: Claude always; on Ollama, models that list "vision" (gemma4 and kimi-k2.6 do, glm-5.2 does not); on other servers, offered and left to the server. Images count as about 1,600 tokens each against the context window, and old ones are dropped first when it fills. |
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak last read it. Checked before writing (below). |
 | `edit_file` | Replaces exact text. Tolerates trailing-whitespace differences; when the text is not found it shows the file's lines near the closest match. Checked before writing (below). |
+| `apply_patch` | Applies a unified diff to one file: several changes in one approved step. Hunks are placed by their lines, not their `@@` numbers; trailing whitespace and up to two edge context lines may drift, never a `-` or `+` line. All or nothing: a hunk that fails changes nothing and the error shows the file's real lines there. From SwiftAgentKit's `PatchFileTool`. |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
 | `todo` | The agent's task list for work with three or more steps, shown to you each time it changes. If the agent says it is done while steps it listed are still open, rak sends it back once to finish them or say why not. The list is never dropped when the context fills. |
 | `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 
-**The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file` or `edit_file` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
+**The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file`, `edit_file` or `apply_patch` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
 
 - **Damaged content:** many lines starting with a diff's `+` in a code file means patch text leaked into the file. The model is told to resend.
 - **Syntax:** JSON is parsed by rak itself; files that by convention allow comments (`tsconfig.json`, `.vscode/*.json`, `.jsonc`) may have them. Python, JavaScript, shell scripts, Swift and Dart go to their own parser (`python3`, `node --check`, `bash -n`, `swiftc -parse`, `dart format`). The model is told resending the same content will fail the same way, and which interpreter judged it.

@@ -4,6 +4,7 @@
 pub mod fs;
 pub mod image;
 pub mod map;
+pub mod patch;
 pub mod shell;
 pub mod todo;
 pub mod verify;
@@ -76,6 +77,7 @@ pub fn core_tools(ctx: &Arc<Ctx>, read_only: bool) -> Vec<Box<dyn Tool>> {
     if !read_only {
         tools.push(Box::new(fs::WriteFile(ctx.clone())));
         tools.push(Box::new(fs::EditFile(ctx.clone())));
+        tools.push(Box::new(patch::ApplyPatch(ctx.clone())));
         tools.push(Box::new(shell::RunShell::new(ctx.clone())));
     }
     tools
