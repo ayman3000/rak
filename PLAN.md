@@ -1,19 +1,24 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-13, after releasing v0.1.0-alpha.5. A working plan for picking the work up on another machine.
+Updated 2026-11-13, after releasing v0.1.0-alpha.6. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.5** (2026-11-13). `main` is ahead of
-  it with the SwiftAgentKit ports below (2026-11-13, not pushed until the
-  owner says so):
-  apply_patch, fetch_url, the repair nudge, deferred MCP servers, the stall
-  limit, kept tool outputs (artifact_read/search), remember, routines,
-  --record/--replay.
-- Cost of those per request, measured the same day on ollama-cloud with a
-  no-tool prompt: 2,211 input tokens against alpha.5's 1,824 (+387), after
-  trimming the four new descriptions (+725 before). The on-demand tools
+- The newest release is **v0.1.0-alpha.6** (2026-11-13). It has everything
+  below; `main` and the release match.
+
+### In v0.1.0-alpha.6
+
+- The SwiftAgentKit ports (gap list below): apply_patch, fetch_url, the
+  repair nudge, deferred MCP servers, the stall limit, kept tool outputs
+  (artifact_read/search), remember, routines, --record/--replay.
+- release.yml's artifact actions on v7/v8 (Node 24); this release's build
+  is their first real run.
+- Cost per request, measured on ollama-cloud with a no-tool prompt: 2,211
+  input tokens against alpha.5's 1,824 (+387). The on-demand tools
   (load_tools, artifact_*, run_routine) cost nothing until needed.
+- Not tried with a real model: the repair nudge; the stall limit against a
+  real stuck provider (a local stand-in only).
 
 ### In v0.1.0-alpha.5
 
