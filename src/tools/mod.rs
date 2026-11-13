@@ -1,6 +1,7 @@
 //! The tools the model can call, and what they share: where the project is,
 //! which paths are allowed, and which files this run has already seen.
 
+pub mod fetch;
 pub mod fs;
 pub mod image;
 pub mod map;
@@ -73,6 +74,7 @@ pub fn core_tools(ctx: &Arc<Ctx>, read_only: bool) -> Vec<Box<dyn Tool>> {
         Box::new(fs::SearchFiles(ctx.clone())),
         Box::new(map::CodeMap(ctx.clone())),
         Box::new(fs::ReadFile(ctx.clone())),
+        Box::new(fetch::FetchUrl::new()),
     ];
     if !read_only {
         tools.push(Box::new(fs::WriteFile(ctx.clone())));

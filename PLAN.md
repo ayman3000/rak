@@ -92,7 +92,7 @@ In the order they are being built (value for a coding agent first):
 
 - [x] 1. `apply_patch` (SAK `UnifiedDiff` + `PatchFileTool`): edits as a
       unified diff, several hunks in one approved step. ~300 lines.
-- [ ] 2. `fetch_url` with an SSRF guard (SAK `FetchURLTool`, `SSRFGuard`):
+- [x] 2. `fetch_url` with an SSRF guard (SAK `FetchURLTool`, `SSRFGuard`):
       a public page as readable text; private addresses refused. ~300 lines.
 - [ ] 3. Repair-retry (SAK `RepairRetryPolicy`): a tool failed and the model
       ends the turn claiming success: one "fix it or say it failed" nudge.

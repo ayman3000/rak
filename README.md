@@ -335,8 +335,9 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `apply_patch` | Applies a unified diff to one file: several changes in one approved step. Hunks are placed by their lines, not their `@@` numbers; trailing whitespace and up to two edge context lines may drift, never a `-` or `+` line. All or nothing: a hunk that fails changes nothing and the error shows the file's real lines there. From SwiftAgentKit's `PatchFileTool`. |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. |
 | `todo` | The agent's task list for work with three or more steps, shown to you each time it changes. If the agent says it is done while steps it listed are still open, rak sends it back once to finish them or say why not. The list is never dropped when the context fills. |
-| `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
+| `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
+| `fetch_url` | Reads one public http(s) page as Markdown (headings, lists and links kept; scripts, styles and chrome dropped), as text, or as raw HTML; capped at 40,000 characters unless `max_chars` says otherwise. Only reads, so no approval. Addresses on this machine or a private network are refused, checked in the resolver the connection itself uses, so a redirect or a changed DNS answer cannot reach them either. From SwiftAgentKit's `FetchURLTool` and `SSRFGuard`. |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file`, `edit_file` or `apply_patch` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
 
@@ -480,7 +481,6 @@ Not tried yet: a real codebase of thousands of files, a real session long enough
 Compared with sak, rak does not yet have:
 
 - Ctrl-R to search the history, and the "still running" note during a long tool call
-- fetching a whole web page (an MCP server can supply it)
 - Gemini's own API (`--provider gemini` uses its OpenAI-compatible endpoint)
 - Naseem's notes and skills (rak reads its own skills, in the same format)
 
