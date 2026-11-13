@@ -1,11 +1,19 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking the work up on another machine.
+Updated 2026-11-13: v0.1.0-alpha.4 is the newest release; `main` has more (below). A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.4** (2026-11-12). It has everything
-  below; `main` and the release match.
+- The newest release is **v0.1.0-alpha.4** (2026-11-12). `main` is ahead of
+  it: see "On main, not released yet".
+
+### On main, not released yet
+
+- Falling back to another provider when the one in use fails (design below):
+  `471c25d`, its messages made short and clear in `9d19ea3`.
+- A warning when rak starts in the home folder or at the top of the disk
+  (`60f1a20`): its tools can reach every file there. A warning only.
+- Release these as alpha.5 when the owner says so.
 
 ### In v0.1.0-alpha.4
 
@@ -72,7 +80,7 @@ Updated 2026-11-12, after releasing v0.1.0-alpha.4. A working plan for picking t
       v4 (Node 20, deprecated); move to v7 / v8 and check with a release.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
-## Design: falling back to another provider (built 2026-11-12, unreleased)
+## Design: falling back to another provider (built 2026-11-12, on main, unreleased)
 
 Discussed with the owner on 2026-11-12; build only after his go-ahead. Hermes (~/.hermes/hermes-agent) was read for this: its api_max_retries, FailoverReason, restore_primary_runtime.
 
@@ -128,8 +136,11 @@ and `Agent::switches`, `src/cli/chain.rs` (the chain, the question). Differences
 from the design above: the retry wait is a fixed 1 s then 2 s (`Retry-After`
 is not read); no duplicate check, since no two providers share an address; an
 overflow that compaction can't fix falls back too. Tried with stand-in servers
-only (busy, bad key, yes, no, back on the chosen one, staying after a bad key);
-not yet with real providers failing.
+(busy, bad key, yes, no, back on the chosen one, staying after a bad key), then
+with real providers on 2026-11-13: ollama-cloud with a model it doesn't have
+(404) fell back to anthropic · claude-haiku-5-5, in a chat (y, n) and in a
+one-off run; the owner saw the same in his own terminal. A busy or
+rate-limited real provider has not been seen yet.
 
 **Not now** (Hermes has them; add only if needed): waiting out a rate limit
 that lifts within N seconds instead of switching; repeated wait-and-retry
