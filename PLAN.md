@@ -1,11 +1,20 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-13, after releasing v0.1.0-alpha.6. A working plan for picking the work up on another machine.
+Updated 2026-11-13, after releasing v0.1.0-alpha.7. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.6** (2026-11-13). It has everything
+- The newest release is **v0.1.0-alpha.7** (2026-11-13). It has everything
   below; `main` and the release match.
+
+### In v0.1.0-alpha.7
+
+- Project notes in a visible `rak/` folder, from Naseem (section below):
+  project.md, roadmap.md, journal.md, rules.md with `## Gate`, memory.md;
+  loaded at the start, journal and roadmap updated after a request that
+  changed something; `--no-notes`.
+- Seen in a real run (owner, Opus 5.5, a SQLite explorer): Markdown tables
+  in answers show as raw pipes — the terminal renderer has no tables yet.
 
 ### In v0.1.0-alpha.6
 
@@ -92,7 +101,7 @@ Updated 2026-11-13, after releasing v0.1.0-alpha.6. A working plan for picking t
       2026-11-13; to be confirmed by the next release's build.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
-## Project notes in rak/ (from Naseem, built 2026-11-13, unreleased)
+## Project notes in rak/ (from Naseem, built 2026-11-13, released in alpha.7)
 
 The owner asked to learn from Naseem's `naseem/` folder. Built in
 `src/notes.rs`: a visible `rak/` folder with project.md, roadmap.md,
