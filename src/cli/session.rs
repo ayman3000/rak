@@ -19,7 +19,7 @@ use rak::tools::{core_tools, Ctx};
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -501,9 +501,32 @@ pub fn run(mut o: Options) -> i32 {
         for problem in &session.mcp_problems {
             ui.progress(Some(Style::Yellow), problem);
         }
+        if let Some(warning) = broad_folder_warning(&session.cwd, &super::settings::home(), false) {
+            ui.progress(Some(Style::Yellow), &warning);
+        }
     }
     exit_code(&run_one(&mut session, &task))
     // Dropping the session stops the MCP servers' programs.
+}
+
+/// Pure — unit-tested. A warning when rak was started in a folder far wider
+/// than a project — the home folder or the top of the disk — where its tools
+/// can reach everything the person owns.
+pub fn broad_folder_warning(cwd: &Path, home: &str, chat: bool) -> Option<String> {
+    let same = |a: &Path, b: &Path| a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y);
+    let what = if !home.is_empty() && same(cwd, Path::new(home)) {
+        "your home folder"
+    } else if cwd.parent().is_none() {
+        "the top of the disk"
+    } else {
+        return None;
+    };
+    let instead = if chat {
+        "For a project, quit (Ctrl-D) and start rak inside that project's folder."
+    } else {
+        "For a project, run rak inside that project's folder, or name it with -C."
+    };
+    Some(format!("⚠ rak started in {what}: its tools can reach every file in it. {instead}"))
 }
 
 /// Runs one request and prints what came of it.
@@ -662,6 +685,17 @@ pub fn outcome_name(outcome: &Outcome) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_home_or_disk_top_start_is_warned_about() {
+        let home = std::env::temp_dir();
+        let warning = super::broad_folder_warning(&home, &home.to_string_lossy(), true).unwrap();
+        assert!(warning.contains("your home folder") && warning.contains("Ctrl-D"), "{warning}");
+        let project = home.join("project");
+        assert_eq!(super::broad_folder_warning(&project, &home.to_string_lossy(), true), None);
+        assert!(super::broad_folder_warning(std::path::Path::new("/"), "", false).unwrap().contains("-C"));
+        assert_eq!(super::broad_folder_warning(&project, "", false), None, "no home known");
+    }
+
     use super::*;
 
     fn options(provider: Option<&str>, provider_flag: bool, base_url: Option<&str>, base_url_flag: bool) -> Options {

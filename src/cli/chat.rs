@@ -52,6 +52,9 @@ pub fn banner(s: &Session) {
 
 pub fn run(s: &mut Session, editor: &mut Editor) {
     banner(s);
+    if let Some(warning) = super::session::broad_folder_warning(&s.cwd, &home(), true) {
+        println!("{}", paint(s.ui.borrow().out_color, Style::Yellow, &warning));
+    }
     let slash_commands = menu::commands(commands::HELP);
     let color = s.ui.borrow().out_color;
     loop {
