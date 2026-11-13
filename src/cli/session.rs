@@ -343,6 +343,12 @@ pub fn run(mut o: Options) -> i32 {
             tools.push(Box::new(rak::skills::save::SaveSkill::new(skills.clone(), skill_folders[0].clone(), user)));
         }
     }
+    // Routines: saved steps that run with no model between them. Saving one
+    // changes what later sessions can do, so read-only leaves them out.
+    let routine_folders = rak::routines::folders(&ctx.cwd, config_dir().as_deref());
+    if !o.read_only {
+        tools.push(Box::new(rak::routines::SaveRoutine { project: routine_folders.0.clone(), user: routine_folders.1.clone() }));
+    }
     // Keeping a note changes what later sessions do, so read-only leaves it out.
     if !o.no_memory && !o.read_only {
         tools.push(Box::new(rak::memory::Remember { project_file: memory_file.clone(), user_file: user_memory_file.clone() }));
@@ -423,6 +429,9 @@ pub fn run(mut o: Options) -> i32 {
     let learns = tools.iter().any(|t| t.name() == "save_skill");
     let mut agent = Agent::new(provider, tools, config);
     agent.defer(deferred);
+    if !o.read_only {
+        agent.enable_routines(std::iter::once(routine_folders.0.clone()).chain(routine_folders.1.clone()).collect());
+    }
     agent.stop = stop.clone();
     if learns {
         agent.refusal_note.push_str(rak::skills::save::AFTER_REFUSAL);

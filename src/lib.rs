@@ -17,6 +17,7 @@ pub mod memory;
 pub mod provider;
 pub mod providers;
 pub mod read_slice;
+pub mod routines;
 pub mod sessions;
 pub mod skills;
 pub mod stall;

@@ -55,6 +55,18 @@ pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
             let body: Vec<String> = text("instructions").lines().map(|l| format!("    │ {l}")).collect();
             format!("save_skill \"{}\" for {scope}:\n    {}\n{}", text("name"), text("description"), body.join("\n"))
         }
+        // Steps a later session can run in one go: shown whole.
+        ("save_routine", _) => {
+            let name = args.get("name").and_then(Value::as_str).unwrap_or("");
+            let steps: Vec<String> = args["steps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, s)| format!("    {}. {} {}", i + 1, s["tool"].as_str().unwrap_or("?"), s["arguments"]))
+                .collect();
+            format!("save_routine \"{name}\":\n{}", steps.join("\n"))
+        }
         // A note every later session gets: shown whole.
         ("remember", _) => {
             let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").trim();

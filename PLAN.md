@@ -105,7 +105,7 @@ In the order they are being built (value for a coding agent first):
       trimmed tool output stays readable by id instead of being lost.
 - [x] 7. Memory (SAK `RememberTool`, `AgentMemoryStore`): `remember` keeps a
       fact per project in a file, put in later system prompts.
-- [ ] 8. Routines (SAK `Routine`, `run_routine`): saved fixed steps run with
+- [x] 8. Routines (SAK `Routine`, `run_routine`): saved fixed steps run with
       no model call between them.
 - [ ] 9. Record and replay (SAK `SwiftAgentKitReplay`): capture a live run's
       replies to a file and replay it in tests.

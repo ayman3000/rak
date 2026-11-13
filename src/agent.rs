@@ -182,6 +182,8 @@ pub struct Agent {
     loaded: Vec<String>,
     /// Tool outputs removed to save context, readable again by id.
     artifacts: crate::artifacts::Artifacts,
+    /// Where saved routines are (the first wins a name); empty: no routines.
+    routine_folders: Vec<std::path::PathBuf>,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -207,6 +209,7 @@ impl Agent {
             groups: Vec::new(),
             loaded: Vec::new(),
             artifacts: Default::default(),
+            routine_folders: Vec::new(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -239,6 +242,11 @@ impl Agent {
         self.loaded.clear();
     }
 
+    /// Offer the routines saved in these folders through `run_routine`.
+    pub fn enable_routines(&mut self, folders: Vec<std::path::PathBuf>) {
+        self.routine_folders = folders;
+    }
+
     /// The groups loaded in this conversation.
     pub fn loaded_groups(&self) -> &[String] {
         &self.loaded
@@ -250,6 +258,12 @@ impl Agent {
     fn definitions(&self) -> Vec<Value> {
         let hidden: Vec<&str> = self.groups.iter().flat_map(|g| g.tools.iter().map(String::as_str)).collect();
         let mut out: Vec<Value> = self.tools.iter().filter(|t| !hidden.contains(&t.name())).map(|t| definition(t.as_ref())).collect();
+        if !self.routine_folders.is_empty() {
+            let saved = crate::routines::all(&self.routine_folders);
+            if !saved.is_empty() {
+                out.push(crate::routines::run_definition(&saved));
+            }
+        }
         if !self.groups.is_empty() {
             out.push(load_tools_definition());
         }
@@ -261,6 +275,65 @@ impl Agent {
             out.extend(crate::artifacts::definitions());
         }
         out
+    }
+
+    /// `run_routine`: its steps one after another through `run_tool`, so each
+    /// is approved like the model's own call; the first failure stops it.
+    fn run_routine(&mut self, args: &Value, refused: &mut Option<String>) -> (bool, String) {
+        let wanted = args["name"].as_str().unwrap_or("");
+        let saved = crate::routines::all(&self.routine_folders);
+        let Some(routine) = saved
+            .iter()
+            .find(|r| r["name"] == wanted)
+            .or_else(|| saved.iter().find(|r| r["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(wanted))))
+            .cloned()
+        else {
+            let known: Vec<&str> = saved.iter().filter_map(|r| r["name"].as_str()).collect();
+            return (
+                false,
+                format!("No routine named '{wanted}'. Saved: {}.", if known.is_empty() { "none".to_string() } else { known.join(", ") }),
+            );
+        };
+        let name = routine["name"].as_str().unwrap_or(wanted).to_string();
+        let values = match crate::routines::inputs_for(&routine, &args["inputs"]) {
+            Ok(values) => values,
+            Err(missing) => {
+                return (
+                    false,
+                    format!("Routine '{name}' needs: {}. Ask for the missing value, or take it from the conversation.", missing.join("; ")),
+                )
+            }
+        };
+        let steps = routine["steps"].as_array().cloned().unwrap_or_default();
+        let mut report = Vec::new();
+        for (index, step) in steps.iter().enumerate() {
+            let tool = step["tool"].as_str().unwrap_or("");
+            let label = step["note"]
+                .as_str()
+                .map(|n| crate::routines::fill(&json!(n), &values))
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| tool.to_string());
+            let (ok, text) = if tool == crate::routines::RUN {
+                (false, "a routine cannot run another routine".to_string())
+            } else if self.stop.requested() {
+                (false, STOP_NOTE.to_string())
+            } else {
+                let filled = crate::routines::fill(&step["arguments"], &values);
+                let (ok, text, _) = self.run_tool(tool, &filled.to_string(), refused);
+                (ok, text)
+            };
+            if !ok || refused.is_some() {
+                report.push(format!("{}. {label} → FAILED: {}", index + 1, crate::text::one_line(&text, 400)));
+                let rest = steps.len() - index - 1;
+                if rest > 0 {
+                    report.push(format!("Stopped; {rest} step{} not run.", if rest == 1 { "" } else { "s" }));
+                }
+                return (false, format!("Routine '{name}':\n{}", report.join("\n")));
+            }
+            report.push(format!("{}. {label} → {}", index + 1, crate::text::one_line(&text, 160)));
+        }
+        crate::routines::mark_succeeded(&self.routine_folders, &name);
+        (true, format!("Routine '{name}' completed.\n{}", report.join("\n")))
     }
 
     /// `load_tools`: what was loaded, already loaded, or unknown.
@@ -628,6 +701,14 @@ impl Agent {
             self.tool_calls += 1;
             (self.on_event)(&Event::ToolStarted { name, args: &args });
             let (ok, text) = self.artifacts.run(name, &args);
+            (self.on_event)(&Event::ToolFinished { name, ok, denied: false, text: &text, millis: 0 });
+            return (ok, text, None);
+        }
+        if name == crate::routines::RUN && !self.routine_folders.is_empty() {
+            let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+            self.tool_calls += 1;
+            (self.on_event)(&Event::ToolStarted { name, args: &args });
+            let (ok, text) = self.run_routine(&args, refused);
             (self.on_event)(&Event::ToolFinished { name, ok, denied: false, text: &text, millis: 0 });
             return (ok, text, None);
         }
@@ -1056,6 +1137,46 @@ mod tests {
         drop(seen);
         s.agent.clear();
         assert!(!s.agent.definitions().iter().any(|d| d["function"]["name"] == "artifact_read"), "cleared with the chat");
+    }
+
+    #[test]
+    fn a_routine_runs_its_steps_without_the_model_and_stops_at_a_failure() {
+        let mut s = setup(
+            "routine",
+            vec![
+                Ok(call("run_routine", json!({ "name": "greet", "inputs": { "who": "Ayman" } }))),
+                Ok(call("run_routine", json!({ "name": "greet" }))),
+                Ok(call("run_routine", json!({ "name": "broken" }))),
+                Ok(text("done")),
+            ],
+            10,
+        );
+        let folder = s.dir.join(".rak/routines");
+        std::fs::create_dir_all(&folder).unwrap();
+        let greet = json!({ "name": "greet", "description": "Write a greeting", "inputs": [{ "name": "who", "description": "whom", "required": true }],
+            "steps": [{ "tool": "write_file", "arguments": { "path": "hi.txt", "content": "hello {who}" } }, { "tool": "read_file", "note": "check it", "arguments": { "path": "hi.txt" } }] });
+        let broken = json!({ "name": "broken", "description": "x",
+            "steps": [{ "tool": "read_file", "arguments": { "path": "missing.txt" } }, { "tool": "list_dir", "arguments": {} }] });
+        std::fs::write(folder.join("greet.json"), greet.to_string()).unwrap();
+        std::fs::write(folder.join("broken.json"), broken.to_string()).unwrap();
+        s.agent.enable_routines(vec![folder.clone()]);
+        assert!(s
+            .agent
+            .definitions()
+            .iter()
+            .any(|d| d["function"]["description"].as_str().unwrap_or("").contains("• greet — Write a greeting [who]")));
+        s.agent.on_approval(|_, _| Approval::Yes);
+        assert_eq!(s.agent.run("greet").outcome, Outcome::Done);
+        assert_eq!(std::fs::read_to_string(s.dir.join("hi.txt")).unwrap(), "hello Ayman");
+        let seen = s.seen.borrow();
+        let ran = seen[1].last().unwrap()["content"].as_str().unwrap();
+        assert!(ran.starts_with("Routine 'greet' completed.\n1. write_file") && ran.contains("2. check it → "), "{ran}");
+        let missing = seen[2].last().unwrap()["content"].as_str().unwrap();
+        assert!(missing.contains("needs: who (whom)"), "{missing}");
+        let failed = seen[3].last().unwrap()["content"].as_str().unwrap();
+        assert!(failed.contains("1. read_file → FAILED") && failed.contains("Stopped; 1 step not run."), "{failed}");
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(folder.join("greet.json")).unwrap()).unwrap();
+        assert!(saved["lastSucceededAt"].is_string(), "marked as proven");
     }
 
     #[test]

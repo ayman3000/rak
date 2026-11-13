@@ -317,7 +317,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 
 ## Safety
 
-- **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch`, `run_shell`, `save_skill` and `remember` need a yes each time, unless you answer "always" or start with `-y`.
+- **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch`, `run_shell`, `save_skill`, `remember` and `save_routine` need a yes each time, unless you answer "always" or start with `-y`.
 - **A no stops the request.** The model does not get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **A tool error is not passed off as done.** When the step just before the model's answer had a tool error (an edit that didn't apply, a rejected write), rak asks once: fix it, or say plainly what failed. From SwiftAgentKit's repair retry; at most three times a request. A command that exits with an error is a normal result, not a tool error.
@@ -343,6 +343,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 | `fetch_url` | Reads one public http(s) page as Markdown (headings, lists and links kept; scripts, styles and chrome dropped), as text, or as raw HTML; capped at 40,000 characters unless `max_chars` says otherwise. Only reads, so no approval. Addresses on this machine or a private network are refused, checked in the resolver the connection itself uses, so a redirect or a changed DNS answer cannot reach them either. From SwiftAgentKit's `FetchURLTool` and `SSRFGuard`. |
 | `remember` | Keeps a note for later sessions — how you like things done, a lasting decision or convention — in `.rak/memory.md` (this project) or `~/.config/rak/memory.md` (every project), one line each. Asks first and shows the note whole: a note steers every later session. A session reads both files when it starts and puts the notes in its instructions, marked as possibly out of date; the welcome box counts them. Edit or delete the files freely. From SwiftAgentKit's `remember`, without its separate filing step. |
+| `save_routine`, `run_routine` | A routine is steps that just worked, saved so they run back to back with no model call between them: a task that took a dozen model steps takes one. `save_routine` keeps them, with `{placeholders}` for what varies, in `.rak/routines/` (this project) or `~/.config/rak/routines/` (every project); it asks first and shows every step. `run_routine` appears once a routine exists and lists them; each step still asks for approval like the model's own call, and the first failure stops the routine and says which step. Same JSON shape as SwiftAgentKit's, so sak and Naseem read them too. |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file`, `edit_file` or `apply_patch` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
 
