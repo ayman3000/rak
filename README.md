@@ -4,7 +4,7 @@ A small coding agent for the terminal. One binary, no runtime to install, for Li
 
 rak is the cross-platform sibling of [sak](https://github.com/ayman3000/sak). sak is built on SwiftAgentKit and stays the Mac tool; rak carries the same prompt, the same tool designs and the same loop to everything else.
 
-> **Status: early alpha (0.1.0-alpha.7).** The core works and is tested. Much of what sak has is not here yet — see [What is missing](#what-is-missing).
+> **Status: early alpha (0.1.0-alpha.8).** The core works and is tested. Much of what sak has is not here yet — see [What is missing](#what-is-missing).
 
 ## What it does
 
@@ -36,7 +36,7 @@ On Linux or macOS:
 curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 ```
 
-The script downloads the newest release for your system from rak's GitHub releases, checks it against its published SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed. `RAK_VERSION=v0.1.0-alpha.7` picks a release (the default is the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
+The script downloads the newest release for your system from rak's GitHub releases, checks it against its published SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed. `RAK_VERSION=v0.1.0-alpha.8` picks a release (the default is the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
 
 Builds: Linux on x86-64 and ARM (static, so they run on any distribution), and macOS on Apple Silicon and Intel. Windows is not supported yet. The macOS builds are not notarized by Apple: installed with the script they run as they are; a build downloaded in a web browser is held back by macOS until you run `xattr -d com.apple.quarantine rak`.
 
@@ -238,7 +238,7 @@ After each request rak shows how much of the input came from the cache (`6220 to
 Started without a task, rak opens a chat with the same interface as sak:
 
 ```
-╭─ rak 0.1.0-alpha.7 ───────────────────────────────────────────────────────────────────────╮
+╭─ rak 0.1.0-alpha.8 ───────────────────────────────────────────────────────────────────────╮
 │ ██████   █████  ██   ██            │ Tools                                                │
 │ ██   ██ ██   ██ ██  ██             │ files  list_dir, search_files, read_file,            │
 │ ██████  ███████ █████              │        edit_file, write_file                         │
@@ -563,7 +563,7 @@ The code is in two layers. The library knows nothing about terminals; the `rak` 
 **Checks and releases.** Every push to `main` and every pull request runs the tests on Linux and macOS, the formatting and lint checks, and a build with the oldest Rust rak supports (`.github/workflows/ci.yml`). A version tag that matches `Cargo.toml` builds the four release archives and publishes them (`.github/workflows/release.yml`):
 
 ```bash
-git tag v0.1.0-alpha.7 && git push origin v0.1.0-alpha.7
+git tag v0.1.0-alpha.8 && git push origin v0.1.0-alpha.8
 ```
 
 A tag with a `-` makes a pre-release.

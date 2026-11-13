@@ -1,11 +1,18 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-13, after releasing v0.1.0-alpha.7. A working plan for picking the work up on another machine.
+Updated 2026-11-13, after releasing v0.1.0-alpha.8. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.7** (2026-11-13). It has everything
+- The newest release is **v0.1.0-alpha.8** (2026-11-13). It has everything
   below; `main` and the release match.
+
+### In v0.1.0-alpha.8
+
+- `/init`: the agent writes rak/project.md and rak/roadmap.md from what is in
+  the project, or brings them up to date; the no-notes prompt line suggests
+  it; the notes update is told which files a request changed.
+- Still open: Markdown tables show as raw pipes in the terminal.
 
 ### In v0.1.0-alpha.7
 

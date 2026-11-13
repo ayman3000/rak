@@ -1,6 +1,6 @@
 [package]
 name = "rak"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 edition = "2021"
 license = "MIT"
 description = "Rust Agent Kit: a small coding agent for the terminal, for Linux and macOS."
