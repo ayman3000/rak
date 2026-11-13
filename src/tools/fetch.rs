@@ -143,19 +143,16 @@ impl Tool for FetchUrl {
         "fetch_url"
     }
     fn description(&self) -> &str {
-        "Fetch a public http(s) page and return its readable text as Markdown (headings, links and lists kept; \
-         scripts, styles and navigation chrome dropped). Use `format: \"html\"` only when you need the raw markup. \
-         Output is capped — narrow with `max_chars` rather than fetching the same page twice. Pages built entirely \
-         by JavaScript return almost nothing here; that is the page, not a failure. Addresses on this machine or a \
-         private network are refused."
+        "Read a public http(s) page as Markdown (scripts and chrome dropped). Capped; `max_chars` changes the cap. \
+         A page built by JavaScript returns little. Private addresses are refused."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "url": { "type": "string", "description": "Absolute http(s) URL." },
-                "format": { "type": "string", "description": "markdown (default), \"text\", or \"html\" for the raw markup." },
-                "max_chars": { "type": "integer", "description": "Cap on the characters returned (default 40000)." }
+                "url": { "type": "string" },
+                "format": { "type": "string", "enum": ["markdown", "text", "html"] },
+                "max_chars": { "type": "integer", "description": "Default 40000." }
             },
             "required": ["url"]
         })

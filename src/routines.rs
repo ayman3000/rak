@@ -201,19 +201,18 @@ impl Tool for SaveRoutine {
         "save_routine"
     }
     fn description(&self) -> &str {
-        "Save steps you have just run successfully as a routine, so next time they run with no model call between \
-         them (run_routine). Only steps that actually ran and worked. Replace what varies (a version, a path, a \
-         name) with a {placeholder} and declare it in `inputs`. Asks the person first."
+        "Save steps that just ran and worked as a routine, to run later with no model call between them. What \
+         varies becomes a {placeholder} declared in `inputs`. Asks first."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "name": { "type": "string", "description": "Short kebab-case name, e.g. \"release-check\"." },
-                "description": { "type": "string", "description": "One line: what it does, to pick it later." },
-                "inputs": { "type": "array", "description": "[{name, description, required?, default?}]: the blanks the caller fills.", "items": { "type": "object" } },
-                "steps": { "type": "array", "description": "[{tool, arguments, note?}] in order; strings may hold {placeholders}.", "items": { "type": "object" } },
-                "scope": { "type": "string", "enum": ["project", "user"], "description": "project (default) or user: every project." }
+                "name": { "type": "string", "description": "kebab-case" },
+                "description": { "type": "string" },
+                "inputs": { "type": "array", "description": "[{name, description, required?, default?}]", "items": { "type": "object" } },
+                "steps": { "type": "array", "description": "[{tool, arguments, note?}]", "items": { "type": "object" } },
+                "scope": { "type": "string", "enum": ["project", "user"], "description": "Default project; user: every project." }
             },
             "required": ["name", "description", "steps"]
         })

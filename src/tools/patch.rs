@@ -298,22 +298,18 @@ impl Tool for ApplyPatch {
         "apply_patch"
     }
     fn description(&self) -> &'static str {
-        "Edit an existing file by applying a unified diff (git / `diff -u` format). One file per call: `path` is \
-         that file; to change two files, call it twice. Provide the smallest diff that makes the change — one or \
-         more `@@` hunks with a few lines of surrounding context; `-` lines are removed, `+` lines added. Line \
-         numbers in `@@` headers may be approximate (matched by context, tolerant of whitespace drift). Use it for \
-         changes in several places of one file; for one small change, and for Markdown lists, `edit_file` is \
-         simpler. Every hunk line starts with its marker, even when the file's own line starts with `-` or `+`: \
-         remove the bullet `- item` with `-- item`, keep it as context with ` - item`. If a hunk fails, the error \
-         shows the file's current lines near the spot — regenerate the diff from those; don't rewrite the whole \
-         file. Requires approval."
+        "Edit one existing file with a unified diff (`diff -u`): `@@` hunks with a few context lines, `-` removed, \
+         `+` added; `@@` numbers may be approximate. For changes in several places of a file; for one small change \
+         or a Markdown list, edit_file is simpler. A file line starting with `-`/`+` still needs its own marker \
+         (`-- item` removes `- item`). On a failed hunk, redo the diff from the lines the error shows. Requires \
+         approval."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "File to patch (a leading ~ is expanded)." },
-                "patch": { "type": "string", "description": "A unified diff (git / diff -u). Text hunks only; no binary or rename." }
+                "path": { "type": "string" },
+                "patch": { "type": "string", "description": "The unified diff." }
             },
             "required": ["path", "patch"]
         })

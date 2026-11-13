@@ -267,3 +267,18 @@ mod tests {
         assert_eq!(int_arg(&args, "missing"), None);
     }
 }
+
+#[cfg(test)]
+mod sizes {
+    #[test]
+    #[ignore]
+    fn print_definition_sizes() {
+        let ctx = super::Ctx::new(&super::testing::temp_dir("sizes"), false);
+        let mut tools = super::core_tools(&ctx, false);
+        tools.push(Box::new(crate::memory::Remember { project_file: "a".into(), user_file: None }));
+        tools.push(Box::new(crate::routines::SaveRoutine { project: "a".into(), user: None }));
+        for t in &tools {
+            println!("{:>6} {}", super::definition(t.as_ref()).to_string().len(), t.name());
+        }
+    }
+}

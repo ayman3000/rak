@@ -110,17 +110,15 @@ impl Tool for Remember {
         "remember"
     }
     fn description(&self) -> &str {
-        "Keep a note for later sessions: how the person likes things done, or a lasting decision, convention or \
-         path in this project. One or two plain sentences. Not for one-off details of this task (files just made, \
-         results of this run). `scope`: \"project\" (default) or \"everywhere\" for something about the person \
-         that holds in every project. Asks the person first."
+        "Keep a note for later sessions: how the person likes things done, or a lasting decision or convention \
+         here. One or two sentences; not details of this task. Asks first."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "note": { "type": "string", "description": "The note, in plain words." },
-                "scope": { "type": "string", "enum": ["project", "everywhere"], "description": "project (default) or everywhere." }
+                "note": { "type": "string" },
+                "scope": { "type": "string", "enum": ["project", "everywhere"], "description": "Default project." }
             },
             "required": ["note"]
         })
