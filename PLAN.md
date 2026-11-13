@@ -75,9 +75,45 @@ Updated 2026-11-13, after releasing v0.1.0-alpha.5. A working plan for picking t
 - [ ] RAK_PROVIDER and RAK_MODEL from different files (a project's .env and
       the global one) can still pair a model with the wrong provider: take
       the model from the same place as the provider.
-- [ ] release.yml: actions/upload-artifact and download-artifact are still
-      v4 (Node 20, deprecated); move to v7 / v8 and check with a release.
+- [x] release.yml: upload-artifact v7, download-artifact v8 (Node 24), done
+      2026-11-13; to be confirmed by the next release's build.
 - [ ] Announce rak once the providers people will try first are confirmed.
+
+## Porting what SwiftAgentKit has (gap list, 2026-11-13)
+
+The owner's order: port what SwiftAgentKit already has before new ideas
+(`/undo` is parked: SAK has no undo). Each SAK module was compared with
+rak's source. Already ported: WriteVerifier (`tools/verify.rs`), ReadSlice,
+the loop guard, FileStateRegistry (`Ctx::stale_reason`), skills
+(`use_skill`, `save_skill`, import), saved chats, `delegate` (SAK's spawner
+also runs one helper at a time by default), compaction, MCP.
+
+In the order they are being built (value for a coding agent first):
+
+- [ ] 1. `apply_patch` (SAK `UnifiedDiff` + `PatchFileTool`): edits as a
+      unified diff, several hunks in one approved step. ~300 lines.
+- [ ] 2. `fetch_url` with an SSRF guard (SAK `FetchURLTool`, `SSRFGuard`):
+      a public page as readable text; private addresses refused. ~300 lines.
+- [ ] 3. Repair-retry (SAK `RepairRetryPolicy`): a tool failed and the model
+      ends the turn claiming success: one "fix it or say it failed" nudge.
+- [ ] 4. Deferred tool groups (SAK `DeferredToolGroup`, `load_tools`): an
+      MCP server's tools cost one prompt line until the model loads them.
+- [ ] 5. Stream stall limit (SAK `StreamStallPolicy`): a streamed answer that
+      makes no progress for too long fails as retryable, instead of waiting
+      out a 15-minute read timeout.
+- [ ] 6. Tool-output artifacts (SAK `ArtifactStore`, `artifact_read`): a
+      trimmed tool output stays readable by id instead of being lost.
+- [ ] 7. Memory (SAK `RememberTool`, `AgentMemoryStore`): `remember` keeps a
+      fact per project in a file, put in later system prompts.
+- [ ] 8. Routines (SAK `Routine`, `run_routine`): saved fixed steps run with
+      no model call between them.
+- [ ] 9. Record and replay (SAK `SwiftAgentKitReplay`): capture a live run's
+      replies to a file and replay it in tests.
+
+Lower value for rak, later or never: `PythonTool` (run_shell covers it),
+Office/PDF text, `ToolTrace`, `StructuredOutput`, goals (`AgentGoal`; rak
+has `todo`). Not for rak: SwiftAgentKitMac, SwiftAgentKitSimulator, Slack,
+the `@Tool` macro.
 
 ## Design: falling back to another provider (built 2026-11-12, released in alpha.5)
 
