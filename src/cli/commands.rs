@@ -10,7 +10,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/mcp", "the MCP servers and their tools"),
     ("/resume", "this folder's saved chats; /resume N picks one up"),
     ("/skills", "the skills the agent can load; /skills add URL adds one"),
-    ("/notes", "show the project notes rak loaded (AGENTS.md)"),
+    ("/notes", "the project's rules and its notes in rak/ (project, roadmap, journal)"),
     ("/yes", "toggle auto-approve for edits and shell commands"),
     ("/usage", "tokens and tool calls so far"),
     ("/clear", "start a fresh conversation"),

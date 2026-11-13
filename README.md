@@ -279,7 +279,7 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
 | `/skills` | List the skills the agent can load. `/skills add URL` adds one (it shows it and asks first). |
-| `/notes` | Show the project notes rak loaded (`AGENTS.md`). |
+| `/notes` | Show the project's rules and its notes in `rak/` (project, roadmap without Done, the latest journal lines). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
 | `/clear` | Start a fresh conversation. The last one stays saved. |
@@ -304,6 +304,7 @@ The history and the last model picked for each provider are kept in `~/.config/r
 | `--no-mcp` | Don't connect the MCP servers for this run. |
 | `--no-skills` | No skills for this run, built-in ones included. |
 | `--no-memory` | No notes from earlier sessions, and no `remember`. |
+| `--no-notes` | Don't update `rak/journal.md` and `rak/roadmap.md` after a request. |
 | `-c`, `--continue` | Continue this folder's last chat, in a chat or with one request (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
@@ -344,7 +345,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 | `fetch_url` | Reads one public http(s) page as Markdown (headings, lists and links kept; scripts, styles and chrome dropped), as text, or as raw HTML; capped at 40,000 characters unless `max_chars` says otherwise. Only reads, so no approval. Addresses on this machine or a private network are refused, checked in the resolver the connection itself uses, so a redirect or a changed DNS answer cannot reach them either. From SwiftAgentKit's `FetchURLTool` and `SSRFGuard`. |
-| `remember` | Keeps a note for later sessions — how you like things done, a lasting decision or convention — in `.rak/memory.md` (this project) or `~/.config/rak/memory.md` (every project), one line each. Asks first and shows the note whole: a note steers every later session. A session reads both files when it starts and puts the notes in its instructions, marked as possibly out of date; the welcome box counts them. Edit or delete the files freely. From SwiftAgentKit's `remember`, without its separate filing step. |
+| `remember` | Keeps a note for later sessions — how you like things done, a lasting decision or convention — in `rak/memory.md` (this project; alpha.6's `.rak/memory.md` is still read) or `~/.config/rak/memory.md` (every project), one line each. Asks first and shows the note whole: a note steers every later session. A session reads both files when it starts and puts the notes in its instructions, marked as possibly out of date; the welcome box counts them. Edit or delete the files freely. From SwiftAgentKit's `remember`, without its separate filing step. |
 | `save_routine`, `run_routine` | A routine is steps that just worked, saved so they run back to back with no model call between them: a task that took a dozen model steps takes one. `save_routine` keeps them, with `{placeholders}` for what varies, in `.rak/routines/` (this project) or `~/.config/rak/routines/` (every project); it asks first and shows every step. `run_routine` appears once a routine exists and lists them; each step still asks for approval like the model's own call, and the first failure stops the routine and says which step. Same JSON shape as SwiftAgentKit's, so sak and Naseem read them too. |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file`, `edit_file` or `apply_patch` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
@@ -459,6 +460,32 @@ println!("{}", result.answer);
 
 A runnable version is in [examples/minimal.rs](examples/minimal.rs). Add your own tool by implementing `rak::tools::Tool`; plug in another model API by implementing `rak::provider::Model`.
 
+## Project notes: the `rak/` folder
+
+As Naseem does with its `naseem/` folder, rak keeps a project's notes in a visible `rak/` folder inside the project — plain Markdown to read, edit and commit:
+
+| File | What it holds |
+|---|---|
+| `rak/project.md` | What the project is, who it is for, the stack, how to build and test. |
+| `rak/roadmap.md` | `## Done`, `## In progress`, `## Next`, `## Known issues`. |
+| `rak/journal.md` | One dated line per request that changed something: `- 2026-11-13 20:51 [fix] — asked → what changed`. Past 30 lines the oldest move to `journal-archive.md`; nothing is deleted. |
+| `rak/rules.md` | Your instructions for this project (read with `AGENTS.md` and `CLAUDE.md`), with an optional `## Gate`. |
+| `rak/memory.md` | Notes kept with `remember`. |
+
+- **Ask to start them.** "Set up the rak notes for this project" writes `project.md` and `roadmap.md`. Without them, rak keeps no journal.
+- **Loaded, not read.** Every session starts with the rules, `project.md` and the roadmap's working sections (Done left out) in its instructions, so it starts oriented instead of spending its first steps reading. The welcome box shows `rules` and `notes`.
+- **Kept current.** After a request that changed a file or ran a command, one small model call writes the journal line and names roadmap edits — move a card, add a card. rak applies them to the file as it is: a card it can't find is skipped and said so, and nothing is ever deleted (Naseem's lesson: a model asked to rewrite a roadmap dropped 8 known issues). Cards moved to In progress or Done get `started:` / `done:` dates. A question costs nothing extra; `--no-notes` turns the update off, and read-only mode never writes.
+- **The gate.** A `## Gate` section in `rak/rules.md` (or `AGENTS.md`) with a fenced command:
+
+  ````markdown
+  ## Gate
+  ```
+  cargo test && cargo clippy -- -D warnings
+  ```
+  ````
+
+  A request that edited files is not done until every part of that command has run after the last edit: if the agent says "done" without running it, rak sends it back (twice at most) to run it and report the real output.
+
 ## Large projects
 
 What helps the agent on a project too big to read whole:
@@ -467,7 +494,7 @@ What helps the agent on a project too big to read whole:
 - **A map first.** `code_map` shows where everything is, and `read_file` with `start_line`/`end_line` reads only those lines.
 - **A plan it keeps.** `todo` holds the steps; rak checks them when the agent says it is done.
 - **A helper for searching.** `delegate` reads many files in its own context and returns only the answer.
-- **Memory across sessions.** `AGENTS.md` notes and project skills (`.rak/skills`) carry conventions and lessons into every chat.
+- **Memory across sessions.** The project's rules, its notes in `rak/` (below), `remember` notes and project skills (`.rak/skills`) carry conventions and lessons into every chat.
 - **When the context fills,** old tool outputs are replaced by a note saying which call they came from (`read_file src/main.rs`) and how they began, so the agent knows what it no longer has. The output itself is kept aside for the chat: the note names it (`out-3`), and the agent reads it back with `artifact_read` or finds lines in it with `artifact_search` instead of running the tool again (from SwiftAgentKit's artifact store; those two tools join the list only once something is kept, and a resumed chat doesn't have them). The tool descriptions count toward the window too.
 - **When that is not enough,** the older part of the conversation is replaced by a summary the model writes, and the newest turns stay word for word, the latest request always among them (as SwiftAgentKit's compaction does). The task list is copied into the summary unchanged. If the summary call fails, a plain list of the user's messages and the calls made stands in. Only after that are recent tool outputs replaced by notes too.
 - **When the server says the request is too long** (its token count can differ from rak's estimate), rak summarizes once more and asks again. If there is nothing older to summarize and nothing to trim, the request fails and says the latest message or output alone is too big.

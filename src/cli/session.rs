@@ -37,7 +37,10 @@ pub struct Session {
     pub window: usize,
     /// Where the window's number came from, for /usage.
     pub window_source: &'static str,
-    pub notes: Option<String>,
+    /// The instruction files loaded (rak/rules.md, AGENTS.md, CLAUDE.md).
+    pub instruction_files: Vec<String>,
+    /// rak/project.md or rak/roadmap.md was there when the session started.
+    pub has_notes: bool,
     /// Notes from earlier sessions put in this session's prompt.
     pub memory_notes: usize,
     pub skills: rak::skills::Shared,
@@ -305,14 +308,20 @@ pub fn run(mut o: Options) -> i32 {
     };
     let (window, window_source) = window_for(&o, provider.as_ref());
 
-    let notes = std::fs::read_to_string(ctx.cwd.join("AGENTS.md")).ok().map(|n| n.chars().take(8_000).collect::<String>());
-    let config =
+    // The project's instructions (rak/rules.md, AGENTS.md, CLAUDE.md) and its
+    // notes in rak/ (project.md, roadmap.md): loaded, so a session starts
+    // oriented instead of spending its first steps reading them.
+    let project_notes = rak::notes::read(&ctx.cwd);
+    let notes = project_notes.instructions_text();
+    let mut config =
         Config { system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()), max_turns: o.max_turns, context_window: window };
+    config.system_prompt.push_str(&rak::notes::prompt_block(&project_notes));
+    let instruction_files: Vec<String> = project_notes.instructions.iter().map(|(name, _)| name.clone()).collect();
+    let has_notes = project_notes.exists();
     // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
     let skill_folders = rak::skills::folders(&ctx.cwd, config_dir().as_deref());
     // Plus the ones built into rak for this system; --no-skills leaves all of them out.
     let loaded = if o.no_skills { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
-    let mut config = config;
     // The index is fixed for the session, so the prompt stays cacheable; a skill
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
@@ -440,6 +449,9 @@ pub fn run(mut o: Options) -> i32 {
     let mut agent = Agent::new(provider, tools, config);
     agent.defer(deferred);
     if !o.read_only {
+        agent.gate = rak::notes::Gate::from_instructions(&project_notes.instructions);
+    }
+    if !o.read_only {
         agent.enable_routines(std::iter::once(routine_folders.0.clone()).chain(routine_folders.1.clone()).collect());
     }
     agent.stop = stop.clone();
@@ -480,7 +492,8 @@ pub fn run(mut o: Options) -> i32 {
         backend,
         window,
         window_source,
-        notes,
+        instruction_files,
+        has_notes,
         memory_notes,
         skill_folder: skill_folders.last().cloned().unwrap_or_default(),
         skills,
@@ -566,6 +579,37 @@ pub fn broad_folder_warning(cwd: &Path, home: &str, chat: bool) -> Option<String
     Some(format!("⚠ rak started in {what}: its tools can reach every file in it. {instead}"))
 }
 
+/// After a request that changed something in a project with notes: one small
+/// call writes the journal line and names roadmap edits (Naseem's after-run
+/// update). Never for a question, in read-only mode, or with --no-notes.
+fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
+    if s.o.no_notes || s.o.read_only || !s.agent.acted() || matches!(outcome, Outcome::Stopped) {
+        return;
+    }
+    // Read now: the request may have just written the notes.
+    let snapshot = rak::notes::read(&s.cwd);
+    if !snapshot.exists() {
+        return;
+    }
+    let ended = match outcome {
+        Outcome::Done => answer.to_string(),
+        other => format!("(the request stopped early: {}) {answer}", outcome_name(other)),
+    };
+    let now = rak::notes::now_local();
+    let prompt = rak::notes::update_prompt(&snapshot, task, &ended, &now);
+    let Some(update) = s.agent.aside(&prompt).as_deref().and_then(rak::notes::parse_update) else {
+        s.ui.borrow_mut().progress(Some(Style::Dim), "  notes: no update written (the reply could not be used)");
+        return;
+    };
+    match rak::notes::apply(&update, &s.cwd, &now[..10]) {
+        Ok(applied) => {
+            s.log.write(json!({ "event": "notes", "journal": update.journal_line, "edits": update.edits.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>(), "moved": applied.moved, "added": applied.added }));
+            s.ui.borrow_mut().progress(Some(Style::Dim), &format!("  {}", rak::notes::summary(&update, applied)));
+        }
+        Err(e) => s.ui.borrow_mut().progress(Some(Style::Yellow), &format!("  notes: could not write rak/: {e}")),
+    }
+}
+
 /// Runs one request and prints what came of it.
 /// The providers to fall back to from this backend (see chain.rs).
 pub fn fallback_chain(from: &Backend) -> Vec<chain::Link> {
@@ -628,6 +672,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let RunResult { outcome, answer, turns } = s.agent.run(task);
     let fell_back_to: Vec<String> = s.agent.switches[switches_before..].to_vec();
     settle_fallback(s);
+    update_notes(s, task, &answer, &outcome);
     // What delegate's helpers spent counts as this request's too.
     let helpers = s.helper_usage.take();
     s.agent.usage.add(helpers);

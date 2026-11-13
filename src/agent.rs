@@ -184,6 +184,10 @@ pub struct Agent {
     artifacts: crate::artifacts::Artifacts,
     /// Where saved routines are (the first wins a name); empty: no routines.
     routine_folders: Vec<std::path::PathBuf>,
+    /// The project's hand-over check (`## Gate` in its rules), when it has one.
+    pub gate: Option<crate::notes::Gate>,
+    /// The latest request changed a file or ran a command.
+    acted: bool,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -210,6 +214,8 @@ impl Agent {
             loaded: Vec::new(),
             artifacts: Default::default(),
             routine_folders: Vec::new(),
+            gate: None,
+            acted: false,
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -245,6 +251,20 @@ impl Agent {
     /// Offer the routines saved in these folders through `run_routine`.
     pub fn enable_routines(&mut self, folders: Vec<std::path::PathBuf>) {
         self.routine_folders = folders;
+    }
+
+    /// Whether the latest request changed a file or ran a command.
+    pub fn acted(&self) -> bool {
+        self.acted
+    }
+
+    /// One question to the model on the side, outside the conversation (the
+    /// notes update). Its tokens count in `usage`. None when it fails.
+    pub fn aside(&mut self, prompt: &str) -> Option<String> {
+        let request = [json!({ "role": "user", "content": prompt })];
+        let reply = self.model.chat(&request, &[]).ok()?;
+        self.usage.add(reply.usage);
+        Some(reply.content)
     }
 
     /// The groups loaded in this conversation.
@@ -413,6 +433,11 @@ impl Agent {
         // about them (SwiftAgentKit's repair retry).
         let mut failed: Vec<(String, String)> = Vec::new();
         let mut repairs = 0;
+        let mut gate_asks = 0;
+        self.acted = false;
+        if let Some(gate) = self.gate.as_mut() {
+            gate.reset();
+        }
         // The tool descriptions go with every call, so they come out of the budget.
         let size_of = |definitions: &[Value]| definitions.iter().map(|d| d.to_string().len()).sum::<usize>();
         let mut definitions_size = size_of(&definitions);
@@ -503,6 +528,16 @@ impl Agent {
                     self.messages.push(json!({ "role": "user", "content": repair_note(&failed) }));
                     failed.clear();
                     continue;
+                }
+                // The project's gate has not run since the last edit (Naseem's
+                // rule): sent back to run it, twice at most.
+                if let Some(note) = self.gate.as_ref().filter(|g| !g.missing().is_empty()).map(|g| g.note()) {
+                    if gate_asks < 2 && turn < self.config.max_turns {
+                        gate_asks += 1;
+                        (self.on_event)(&Event::Note("the project's gate has not run since the last edit: asked to run it"));
+                        self.messages.push(json!({ "role": "user", "content": note }));
+                        continue;
+                    }
                 }
                 // Work left undone (an open task list): asked once to finish it.
                 if let Some(note) = self.finish_check.as_mut().and_then(|check| check()) {
@@ -743,6 +778,18 @@ impl Agent {
         }
         let started = Instant::now();
         let result = tool.run(&args);
+        let changes = matches!(name, "write_file" | "edit_file" | "apply_patch");
+        if (changes && result.ok) || name == "run_shell" {
+            self.acted = true;
+        }
+        if let Some(gate) = self.gate.as_mut() {
+            if changes && result.ok {
+                gate.note_edit();
+            }
+            if let (true, Some(command)) = (name == "run_shell", args["command"].as_str()) {
+                gate.note_shell(command);
+            }
+        }
         (self.on_event)(&Event::ToolFinished {
             name,
             ok: result.ok,
@@ -939,7 +986,7 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
         );
     }
     if let Some(notes) = project_notes.map(str::trim).filter(|n| !n.is_empty()) {
-        prompt.push_str("\n\nThe project's own notes for agents (AGENTS.md):\n\n");
+        prompt.push_str("\n\nProject instructions — follow them; they come before general defaults:\n\n");
         prompt.push_str(notes);
     }
     prompt
@@ -1177,6 +1224,35 @@ mod tests {
         assert!(failed.contains("1. read_file → FAILED") && failed.contains("Stopped; 1 step not run."), "{failed}");
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(folder.join("greet.json")).unwrap()).unwrap();
         assert!(saved["lastSucceededAt"].is_string(), "marked as proven");
+    }
+
+    #[test]
+    fn an_edit_is_not_done_until_the_gate_ran_after_it() {
+        let mut s = setup(
+            "gate",
+            vec![
+                Ok(call("write_file", json!({ "path": "a.txt", "content": "x" }))),
+                Ok(text("Done.")),
+                Ok(call("run_shell", json!({ "command": "echo gate-ok" }))),
+                Ok(text("Done, and the gate passed.")),
+            ],
+            10,
+        );
+        let rules = "## Gate\n```\necho gate-ok\n```";
+        s.agent.gate = crate::notes::Gate::from_instructions(&[("rak/rules.md".into(), rules.into())]);
+        s.agent.on_approval(|_, _| Approval::Yes);
+        let result = s.agent.run("write a.txt");
+        assert_eq!(result.answer, "Done, and the gate passed.");
+        assert!(s.agent.acted());
+        let seen = s.seen.borrow();
+        let note = seen[2].last().unwrap()["content"].as_str().unwrap();
+        assert!(note.contains("run `echo gate-ok` before handing over"), "{note}");
+        drop(seen);
+        // A question with no edit: no gate, nothing acted.
+        let mut s = setup("gate-question", vec![Ok(text("It is a text file."))], 10);
+        s.agent.gate = crate::notes::Gate::from_instructions(&[("x".into(), rules.into())]);
+        assert_eq!(s.agent.run("what is a.txt?").answer, "It is a text file.");
+        assert!(!s.agent.acted());
     }
 
     #[test]

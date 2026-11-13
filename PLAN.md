@@ -92,6 +92,21 @@ Updated 2026-11-13, after releasing v0.1.0-alpha.6. A working plan for picking t
       2026-11-13; to be confirmed by the next release's build.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
+## Project notes in rak/ (from Naseem, built 2026-11-13, unreleased)
+
+The owner asked to learn from Naseem's `naseem/` folder. Built in
+`src/notes.rs`: a visible `rak/` folder with project.md, roadmap.md,
+journal.md (+ journal-archive.md), rules.md and memory.md (moved from
+`.rak/`, the old file still read). Rules (rak/rules.md, AGENTS.md, CLAUDE.md)
+and the notes are loaded into the prompt at the start; after a request that
+changed something, one side call writes the journal line and MOVE/ADD
+roadmap edits, applied without deleting; a `## Gate` command must run after
+the last edit before "done" (sent back twice at most). Two differences from
+Naseem: card matching ignores backticks and quotes (a live run dropped
+them), and the on-screen summary counts only edits applied. Live-checked
+with ollama-cloud: notes set up, gate sent the model back to run the
+command, the Known issues card moved to Done with its date.
+
 ## Porting what SwiftAgentKit has (gap list, 2026-11-13)
 
 The owner's order: port what SwiftAgentKit already has before new ideas

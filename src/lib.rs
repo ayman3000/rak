@@ -14,6 +14,7 @@ pub mod fallback;
 pub mod interrupt;
 pub mod mcp;
 pub mod memory;
+pub mod notes;
 pub mod provider;
 pub mod providers;
 pub mod read_slice;

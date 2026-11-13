@@ -51,6 +51,7 @@ BEHAVIOUR
       --no-mcp            don't connect the MCP servers for this run
       --no-skills         no skills for this run, built-in ones included
       --no-memory         no notes from earlier sessions, and no `remember`
+      --no-notes          don't update rak/journal.md and rak/roadmap.md after a request
   -c, --continue          continue this folder's last chat (chats are saved
                           after every request; /resume lists them)
   -C, --cwd DIR           the project folder (default: where rak was started)
@@ -96,6 +97,7 @@ pub struct Options {
     pub no_mcp: bool,
     pub no_skills: bool,
     pub no_memory: bool,
+    pub no_notes: bool,
     pub continue_last: bool,
     pub cwd: Option<PathBuf>,
     pub max_turns: usize,
@@ -132,6 +134,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         no_mcp: false,
         no_skills: false,
         no_memory: false,
+        no_notes: false,
         continue_last: false,
         cwd: None,
         max_turns: 30,
@@ -186,6 +189,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--no-mcp" => o.no_mcp = true,
             "--no-skills" => o.no_skills = true,
             "--no-memory" => o.no_memory = true,
+            "--no-notes" => o.no_notes = true,
             "-c" | "--continue" => o.continue_last = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),

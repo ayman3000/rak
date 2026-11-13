@@ -2,9 +2,10 @@
 //! likes things done, a lasting decision, a convention or path in the project.
 //! From SwiftAgentKit's `remember` and `FileAgentMemoryStore`, made smaller:
 //!
-//! - two plain Markdown files, one note per line: `.rak/memory.md` for this
-//!   project and `~/.config/rak/memory.md` for every project. Edit or delete
-//!   them freely;
+//! - two plain Markdown files, one note per line: `rak/memory.md` for this
+//!   project (beside its other notes, see notes.rs; `.rak/memory.md` from
+//!   alpha.6 is still read) and `~/.config/rak/memory.md` for every project.
+//!   Edit or delete them freely;
 //! - the notes are put in the system prompt when a session starts (not
 //!   during it, so the prompt stays the same from call to call);
 //! - `remember` asks first, like `save_skill`: a note steers every later
@@ -24,7 +25,12 @@ const MAX_FILE: usize = 6_000;
 
 /// The project's memory file and the one for every project.
 pub fn files(project: &Path, config_dir: Option<&Path>) -> (PathBuf, Option<PathBuf>) {
-    (project.join(".rak").join(FILE), config_dir.map(|d| d.join(FILE)))
+    (project.join(crate::notes::FOLDER).join(FILE), config_dir.map(|d| d.join(FILE)))
+}
+
+/// Where alpha.6 kept a project's notes: still read, never written.
+pub fn legacy_file(project: &Path) -> PathBuf {
+    project.join(".rak").join(FILE)
 }
 
 /// Pure — unit-tested. The notes in a memory file: its `- ` lines.
@@ -67,7 +73,15 @@ pub fn prompt_block(project: &[String], everywhere: &[String]) -> String {
 /// Reads both files' notes: (project, everywhere).
 pub fn load(project_file: &Path, user_file: Option<&Path>) -> (Vec<String>, Vec<String>) {
     let read = |p: &Path| std::fs::read_to_string(p).map(|t| notes(&t)).unwrap_or_default();
-    (read(project_file), user_file.map(read).unwrap_or_default())
+    let mut project = read(project_file);
+    // Notes from the old place come first (they are older), without repeats.
+    if let Some(dir) = project_file.parent().and_then(Path::parent) {
+        let mut old = read(&legacy_file(dir));
+        old.retain(|n| !project.iter().any(|p| p.eq_ignore_ascii_case(n)));
+        old.append(&mut project);
+        project = old;
+    }
+    (project, user_file.map(read).unwrap_or_default())
 }
 
 /// Adds one note to a memory file. Ok(false): it was there already.
@@ -176,13 +190,16 @@ mod tests {
     #[test]
     fn remember_adds_once_and_stops_when_full() {
         let dir = temp_dir("memory");
-        let tool = Remember { project_file: dir.join(".rak").join(FILE), user_file: None };
+        let tool = Remember { project_file: dir.join("rak").join(FILE), user_file: None };
         let first = tool.run(&json!({ "note": "Use  pnpm,\nnot npm." }));
         assert!(first.ok, "{}", first.text);
         assert!(tool.run(&json!({ "note": "use pnpm, not npm." })).text.contains("already has"));
-        let text = std::fs::read_to_string(dir.join(".rak/memory.md")).unwrap();
+        let text = std::fs::read_to_string(dir.join("rak/memory.md")).unwrap();
         assert!(text.starts_with("# rak memory") && text.ends_with("- Use pnpm, not npm.\n"), "{text}");
-        assert_eq!(load(&dir.join(".rak/memory.md"), None).0, ["Use pnpm, not npm."]);
+        assert_eq!(load(&dir.join("rak/memory.md"), None).0, ["Use pnpm, not npm."]);
+        std::fs::create_dir_all(dir.join(".rak")).unwrap();
+        std::fs::write(dir.join(".rak/memory.md"), "- An old note.\n- use pnpm, not npm.\n").unwrap();
+        assert_eq!(load(&dir.join("rak/memory.md"), None).0, ["An old note.", "Use pnpm, not npm."], "alpha.6's file still read");
         assert!(!tool.run(&json!({ "note": "x", "scope": "everywhere" })).ok, "no config folder");
         assert!(!tool.run(&json!({ "note": "y".repeat(MAX_NOTE + 1) })).ok);
         for i in 0..200 {

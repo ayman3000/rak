@@ -31,10 +31,10 @@ pub fn banner(s: &Session) {
         branch: welcome::git_branch(&s.cwd),
         mode: mode_label(s).to_string(),
         window: s.window,
-        notes: s
-            .notes
-            .iter()
-            .map(|_| ("notes".to_string(), "AGENTS.md".to_string()))
+        notes: (!s.instruction_files.is_empty())
+            .then(|| ("rules".to_string(), s.instruction_files.join(", ")))
+            .into_iter()
+            .chain(s.has_notes.then(|| ("notes".to_string(), "rak/ (/notes)".to_string())))
             .chain(key_files().iter().map(|f| ("config".to_string(), welcome::short_path(&f.to_string_lossy(), &home(), 26))))
             .chain(
                 (s.memory_notes > 0)
@@ -335,10 +335,28 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             ("add", _) => println!("{}", dim("usage: /skills add URL-or-FILE")),
             _ => skills_command::print_list(&s.skills.read().unwrap(), color),
         },
-        "notes" => match &s.notes {
-            Some(notes) => println!("{}", notes.trim()),
-            None => println!("{}", dim("No project notes (no AGENTS.md in this folder).")),
-        },
+        "notes" => {
+            let snapshot = rak::notes::read(&s.cwd);
+            if let Some(rules) = snapshot.instructions_text() {
+                println!("{}", rules.trim());
+            }
+            if let Some(project) = &snapshot.project {
+                println!("\n### rak/project.md\n{}", project.trim());
+            }
+            if let Some(roadmap) = &snapshot.roadmap {
+                println!("\n### rak/roadmap.md (without Done)\n{}", rak::notes::working_sections(roadmap, 5_000));
+            }
+            if let Some(journal) = &snapshot.journal {
+                let lines: Vec<&str> = journal.lines().filter(|l| l.starts_with("- ")).collect();
+                println!("\n### rak/journal.md (latest)\n{}", lines[lines.len().saturating_sub(5)..].join("\n"));
+            }
+            if snapshot.instructions.is_empty() && !snapshot.exists() {
+                println!(
+                    "{}",
+                    dim("No project rules or notes here. Rules: rak/rules.md, AGENTS.md or CLAUDE.md. Notes: ask rak to set up rak/project.md and rak/roadmap.md.")
+                );
+            }
+        }
         "yes" | "auto" => {
             s.auto.set(!s.auto.get());
             if s.auto.get() {
