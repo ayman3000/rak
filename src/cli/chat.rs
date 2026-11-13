@@ -253,6 +253,19 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
     let (name, args) = line[1..].split_once(' ').unwrap_or((&line[1..], ""));
     let args = args.trim();
     match name.to_lowercase().as_str() {
+        "init" if s.o.read_only => {
+            println!("{}", dim("Read-only mode: /init writes rak/project.md and rak/roadmap.md, so it can't run here."))
+        }
+        "init" => {
+            let snapshot = rak::notes::read(&s.cwd);
+            let doing = if snapshot.exists() { "Bringing the notes in rak/ up to date" } else { "Setting up the notes in rak/" };
+            println!("{}", dim(&format!("{doing}: rak/project.md and rak/roadmap.md.")));
+            run_one(s, &rak::notes::init_request(&snapshot));
+            if rak::notes::read(&s.cwd).exists() && !s.has_notes {
+                s.has_notes = true;
+                println!("{}", dim("Every session here now starts with these notes, and the journal is kept after each change."));
+            }
+        }
         "help" | "?" => {
             for (usage, about) in commands::HELP {
                 println!("  {} {about}", paint(color, Style::Cyan, &pad(usage, 16)));

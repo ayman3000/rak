@@ -596,7 +596,7 @@ fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
         other => format!("(the request stopped early: {}) {answer}", outcome_name(other)),
     };
     let now = rak::notes::now_local();
-    let prompt = rak::notes::update_prompt(&snapshot, task, &ended, &now);
+    let prompt = rak::notes::update_prompt(&snapshot, task, &ended, s.agent.changed_files(), &now);
     let Some(update) = s.agent.aside(&prompt).as_deref().and_then(rak::notes::parse_update) else {
         s.ui.borrow_mut().progress(Some(Style::Dim), "  notes: no update written (the reply could not be used)");
         return;

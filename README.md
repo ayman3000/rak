@@ -279,6 +279,7 @@ Started without a task, rak opens a chat with the same interface as sak:
 | `/tools` | List the tools the agent can use. |
 | `/mcp` | List the MCP servers and their tools. |
 | `/skills` | List the skills the agent can load. `/skills add URL` adds one (it shows it and asks first). |
+| `/init` | Set up this project's notes in `rak/`: the agent looks at the project (map, README, build and test files, git log) and writes `rak/project.md` and `rak/roadmap.md`, each write approved. In a project that has them, it brings them up to date instead. |
 | `/notes` | Show the project's rules and its notes in `rak/` (project, roadmap without Done, the latest journal lines). |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens and tool calls so far, and the context window. |
@@ -472,9 +473,9 @@ As Naseem does with its `naseem/` folder, rak keeps a project's notes in a visib
 | `rak/rules.md` | Your instructions for this project (read with `AGENTS.md` and `CLAUDE.md`), with an optional `## Gate`. |
 | `rak/memory.md` | Notes kept with `remember`. |
 
-- **Ask to start them.** "Set up the rak notes for this project" writes `project.md` and `roadmap.md`. Without them, rak keeps no journal.
+- **Start them with `/init`** in a chat (or ask "set up the rak notes"). It writes `project.md` and `roadmap.md` from what is actually in the project. Without them rak keeps no journal and never creates the folder on its own; after explaining or checking a project, the agent may suggest `/init`.
 - **Loaded, not read.** Every session starts with the rules, `project.md` and the roadmap's working sections (Done left out) in its instructions, so it starts oriented instead of spending its first steps reading. The welcome box shows `rules` and `notes`.
-- **Kept current.** After a request that changed a file or ran a command, one small model call writes the journal line and names roadmap edits — move a card, add a card. rak applies them to the file as it is: a card it can't find is skipped and said so, and nothing is ever deleted (Naseem's lesson: a model asked to rewrite a roadmap dropped 8 known issues). Cards moved to In progress or Done get `started:` / `done:` dates. A question costs nothing extra; `--no-notes` turns the update off, and read-only mode never writes.
+- **Kept current.** After a request that changed a file or ran a command, one small model call writes the journal line and names roadmap edits, told by rak which files the request wrote or edited — move a card, add a card. rak applies them to the file as it is: a card it can't find is skipped and said so, and nothing is ever deleted (Naseem's lesson: a model asked to rewrite a roadmap dropped 8 known issues). Cards moved to In progress or Done get `started:` / `done:` dates. A question costs nothing extra; `--no-notes` turns the update off, and read-only mode never writes.
 - **The gate.** A `## Gate` section in `rak/rules.md` (or `AGENTS.md`) with a fenced command:
 
   ````markdown

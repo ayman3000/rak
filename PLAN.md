@@ -116,6 +116,11 @@ them), and the on-screen summary counts only edits applied. Live-checked
 with ollama-cloud: notes set up, gate sent the model back to run the
 command, the Known issues card moved to Done with its date.
 
+Added after alpha.7 (owner: a codebase check did not create rak/): `/init`
+writes the notes from the project (or updates them), the no-notes prompt
+line suggests it, and the update call is told which files the request
+changed (a refused run's journal had said "no files created").
+
 ## Porting what SwiftAgentKit has (gap list, 2026-11-13)
 
 The owner's order: port what SwiftAgentKit already has before new ideas

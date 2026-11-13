@@ -188,6 +188,8 @@ pub struct Agent {
     pub gate: Option<crate::notes::Gate>,
     /// The latest request changed a file or ran a command.
     acted: bool,
+    /// The files the latest request wrote or edited, in order, each once.
+    changed: Vec<String>,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -216,6 +218,7 @@ impl Agent {
             routine_folders: Vec::new(),
             gate: None,
             acted: false,
+            changed: Vec::new(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -256,6 +259,11 @@ impl Agent {
     /// Whether the latest request changed a file or ran a command.
     pub fn acted(&self) -> bool {
         self.acted
+    }
+
+    /// The files the latest request wrote or edited (as the model named them).
+    pub fn changed_files(&self) -> &[String] {
+        &self.changed
     }
 
     /// One question to the model on the side, outside the conversation (the
@@ -435,6 +443,7 @@ impl Agent {
         let mut repairs = 0;
         let mut gate_asks = 0;
         self.acted = false;
+        self.changed.clear();
         if let Some(gate) = self.gate.as_mut() {
             gate.reset();
         }
@@ -781,6 +790,11 @@ impl Agent {
         let changes = matches!(name, "write_file" | "edit_file" | "apply_patch");
         if (changes && result.ok) || name == "run_shell" {
             self.acted = true;
+        }
+        if let (true, Some(path)) = (changes && result.ok, args["path"].as_str()) {
+            if !self.changed.iter().any(|p| p == path) {
+                self.changed.push(path.to_string());
+            }
         }
         if let Some(gate) = self.gate.as_mut() {
             if changes && result.ok {
@@ -1244,6 +1258,7 @@ mod tests {
         let result = s.agent.run("write a.txt");
         assert_eq!(result.answer, "Done, and the gate passed.");
         assert!(s.agent.acted());
+        assert_eq!(s.agent.changed_files(), ["a.txt"]);
         let seen = s.seen.borrow();
         let note = seen[2].last().unwrap()["content"].as_str().unwrap();
         assert!(note.contains("run `echo gate-ok` before handing over"), "{note}");

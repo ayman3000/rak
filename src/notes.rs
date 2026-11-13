@@ -128,9 +128,9 @@ pub fn working_sections(roadmap: &str, cap: usize) -> String {
 /// to keep them current, or how to start them.
 pub fn prompt_block(snapshot: &Snapshot) -> String {
     if !snapshot.exists() {
-        return "\n\nThis project has no rak notes yet. If the person asks you to set up or explain the project, \
-            create rak/project.md (what it is, who it is for, stack, how to build and test) and rak/roadmap.md with \
-            sections ## Done, ## In progress, ## Next, ## Known issues; later sessions start from them."
+        return "\n\nThis project has no rak notes yet (rak/project.md, rak/roadmap.md). If the person asks you to set \
+            them up, create them; when you have just explained or checked the project, suggest they type /init to keep \
+            what you found for later sessions."
             .to_string();
     }
     let mut block = "\n\nProject notes live in rak/: project.md, roadmap.md (Done / In progress / Next / Known issues) \
@@ -145,6 +145,32 @@ pub fn prompt_block(snapshot: &Snapshot) -> String {
         block.push_str(&format!("\n\n## rak/roadmap.md — working sections\n{}", working_sections(r, 5_000)));
     }
     block
+}
+
+/// Pure — unit-tested. What `/init` asks the agent: look at the project, then
+/// write the notes — or, when they exist, bring them up to date without
+/// throwing away what is there.
+pub fn init_request(snapshot: &Snapshot) -> String {
+    let sections = "## Done, ## In progress, ## Next, ## Known issues";
+    if snapshot.exists() {
+        return format!(
+            "Bring this project's rak notes up to date. Look at the project as it is now (code_map, README, build and \
+             test files, recent git log), then edit rak/project.md and rak/roadmap.md where they are out of date — \
+             with edit_file or apply_patch, keeping what is still true; never rewrite them whole. The roadmap keeps \
+             its sections ({sections}). Finish with a short list of what you changed."
+        );
+    }
+    format!(
+        "Set up this project's rak notes. First look at the project: code_map, the README, build and test files, \
+         and `git log --oneline -15` if it is a git repository. Then write two short files:\n\
+         1. rak/project.md — what it is and who it is for, the stack, the main parts (a few lines each), and the exact \
+         commands to build, test and run it.\n\
+         2. rak/roadmap.md — `# Roadmap` with the sections {sections}: Done lists what already exists; Next lists \
+         clear next steps you can see (missing tests, TODOs, rough edges); Known issues lists only problems you \
+         actually saw. Write `- None` in an empty section.\n\
+         Only facts from the files and commands you ran; no guesses. If the build or test command is unclear, say so \
+         in project.md instead of inventing one. Finish with a two-line summary."
+    )
 }
 
 // MARK: - After a request: the journal line and roadmap edits
@@ -199,12 +225,13 @@ const KINDS: [(&str, &str); 6] = [
 ];
 
 /// Pure — unit-tested. The prompt for the small after-request call.
-pub fn update_prompt(snapshot: &Snapshot, request: &str, reply: &str, now: &str) -> String {
+pub fn update_prompt(snapshot: &Snapshot, request: &str, reply: &str, changed: &[String], now: &str) -> String {
     let brief = snapshot.brief();
     let kinds: Vec<String> = KINDS.iter().map(|(k, m)| format!("{k} ({m})")).collect();
     format!(
         "You keep a software project's notes current. Below are the current notes, then what the person asked in the \
          last request and what the agent replied.\n\n{}\n\n## Last request\n{}\n\n## Final reply\n{}\n\n\
+         ## Files this request wrote or edited (recorded by rak, not by the agent)\n{}\n\n\
          Reply with EXACTLY two fenced blocks and nothing else. You do not rewrite the roadmap; you list edits and rak \
          applies them. Nothing can be deleted.\n\
          First block, tagged ```edits — one edit per line, or the single word NONE:\n  \
@@ -220,6 +247,7 @@ pub fn update_prompt(snapshot: &Snapshot, request: &str, reply: &str, now: &str)
         if brief.is_empty() { "(no notes yet)".to_string() } else { brief },
         request.chars().take(1_500).collect::<String>(),
         reply.chars().take(3_000).collect::<String>(),
+        if changed.is_empty() { "(none)".to_string() } else { changed.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n") },
         kinds.join(", ")
     )
 }
@@ -598,8 +626,12 @@ mod tests {
 
     #[test]
     fn the_prompt_has_the_notes_without_done_or_says_how_to_start() {
-        assert!(prompt_block(&Snapshot::default()).contains("create rak/project.md"));
+        assert!(prompt_block(&Snapshot::default()).contains("/init"));
+        assert!(init_request(&Snapshot::default()).starts_with("Set up this project's rak notes"));
+        let asked = update_prompt(&Snapshot::default(), "set up", "", &["rak/project.md".into()], "2026-11-13 21:47");
+        assert!(asked.contains("(recorded by rak, not by the agent)\n- rak/project.md") && asked.contains("(no notes yet)"), "{asked}");
         let snapshot = Snapshot { project: Some("A todo app.".into()), roadmap: Some(ROADMAP_TEXT.into()), ..Default::default() };
+        assert!(init_request(&snapshot).starts_with("Bring this project's rak notes up to date"));
         let block = prompt_block(&snapshot);
         assert!(
             block.contains("## rak/project.md\nA todo app.") && block.contains("- Export to CSV") && !block.contains("Login page"),
