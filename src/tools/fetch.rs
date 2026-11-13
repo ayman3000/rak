@@ -208,7 +208,7 @@ impl Tool for FetchUrl {
         if let Some(title) = html_like.then(|| title(&body)).flatten().filter(|t| !t.is_empty()) {
             head.push_str(&format!("\nTitle: {title}"));
         }
-        if final_url != url {
+        if final_url.trim_end_matches('/') != url.trim_end_matches('/') {
             head.push_str(&format!("\n(redirected from {url})"));
         }
         if truncated {
