@@ -315,6 +315,7 @@ pub fn run(mut o: Options) -> i32 {
         live,
         renderer: (out_color && !o.json).then(markdown::Renderer::default),
         line_open: false,
+        asked: false,
     }));
 
     let mut tools = core_tools(&ctx, o.read_only);
@@ -370,7 +371,12 @@ pub fn run(mut o: Options) -> i32 {
                     ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {}", output::describe(name, args)));
                 }
                 rak::agent::Event::FellBack { to, why, failure } => {
-                    ui.borrow_mut().progress(Some(Style::Yellow), &format!("    ↪ {}", output::fallback_note(to, why, *failure)));
+                    let mut ui = ui.borrow_mut();
+                    let asked = std::mem::take(&mut ui.asked);
+                    for (i, line) in output::fallback_note(to, why, *failure, asked).iter().enumerate() {
+                        let (style, mark) = if i == 0 { (Style::Yellow, "    ↪ ") } else { (Style::Dim, "      ") };
+                        ui.progress(Some(style), &output::fit(&format!("{mark}{line}")));
+                    }
                 }
                 _ => {}
             });
@@ -540,8 +546,13 @@ fn settle_fallback(s: &mut Session) {
     s.window_source = "reported by the server";
     *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
     st.for_good = false;
-    let note = format!("Staying with {} for this chat: {chosen} needs its key or model fixed (rak keys).", st.current_label);
-    s.ui.borrow_mut().progress(Some(Style::Yellow), &note);
+    let mut ui = s.ui.borrow_mut();
+    let note = if ui.chat {
+        format!("Staying with {} for this chat: {chosen} needs its key or model fixed (rak keys).", st.current_label)
+    } else {
+        format!("{chosen} needs its key or model fixed (rak keys).")
+    };
+    ui.progress(Some(Style::Yellow), &note);
 }
 
 pub fn run_one(s: &mut Session, task: &str) -> Outcome {
@@ -600,7 +611,14 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     if let Some(problem) = &problem {
         if ui.chat {
             let failed = matches!(outcome, Outcome::Failed(_));
-            let text = if failed { format!("error: {problem}") } else { format!("({problem})") };
+            let text = if problem.ends_with(rak::fallback::DECLINED) {
+                // The question just above showed the error.
+                rak::fallback::DECLINED.to_string()
+            } else if failed {
+                format!("error: {problem}")
+            } else {
+                format!("({problem})")
+            };
             println!("{}", paint(ui.out_color, if failed { Style::Red } else { Style::Yellow }, &text));
         } else {
             eprintln!("rak: {problem}");
@@ -609,7 +627,9 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     ui.progress(
         Some(Style::Dim),
         &format!(
-            "  {turns} turns · {tool_calls} tool calls · {input} tokens in{} · {output} out · {seconds} s",
+            "  {} · {} · {input} tokens in{} · {output} out · {seconds} s",
+            output::plural(turns, "turn"),
+            output::plural(tool_calls, "tool call"),
             if cached > 0 { format!(" ({cached} cached)") } else { String::new() }
         ),
     );

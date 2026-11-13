@@ -257,7 +257,7 @@ impl Agent {
                             continue;
                         }
                         Some(false) => {
-                            let why = format!("{text}\nStopped: you chose not to switch to another model.");
+                            let why = format!("{text}\n{}", fallback::DECLINED);
                             return RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: turn };
                         }
                         None => {}

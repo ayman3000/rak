@@ -114,10 +114,12 @@ pub fn hook(asker: Asker, state: Rc<RefCell<State>>) -> Hook {
                 asker.ui.borrow_mut().end_line();
                 let question = format!("{} failed: {}\n  Continue with {to}? [y/n] › ", st.current_label, one_line(why, 120));
                 eprint!("{}", paint(asker.color, Style::Yellow, &question));
+                asker.ui.borrow_mut().asked = true;
                 let _ = std::io::stderr().flush();
                 let mut typed = String::new();
                 let _ = std::io::stdin().lock().read_line(&mut typed);
                 if asker.stop.requested() || !is_yes(&typed) {
+                    asker.ui.borrow_mut().asked = false;
                     return Next::Declined;
                 }
             }

@@ -66,15 +66,28 @@ pub fn describe(name: &str, args: &Value) -> String {
     }
 }
 
-/// Pure — unit-tested. The line shown when rak moves to another model.
-pub fn fallback_note(to: &str, why: &str, failure: rak::fallback::Failure) -> String {
+/// Pure — unit-tested. The lines shown when rak moves to another model:
+/// what happens now, short enough not to be cut, then the error on its own
+/// line, unless the person was just asked with that error in the question.
+pub fn fallback_note(to: &str, why: &str, failure: rak::fallback::Failure, asked: bool) -> Vec<String> {
     use rak::fallback::Failure;
-    let why = one_line(why, 100);
-    // What happens now comes first: a long error is what gets cut.
-    match failure {
-        Failure::Midway => format!("doing this step again with {to}: the answer stopped part way ({why})"),
-        Failure::Config => format!("now using {to}: the last provider won't work until its key or model is fixed ({why})"),
-        _ => format!("now using {to} ({why})"),
+    let now = match failure {
+        Failure::Midway => format!("doing this step again with {to}"),
+        _ => format!("now using {to}"),
+    };
+    let mut lines = vec![now];
+    if !asked {
+        lines.push(one_line(why, 200));
+    }
+    lines
+}
+
+/// Pure — unit-tested. "1 turn", "2 turns".
+pub fn plural(n: usize, word: &str) -> String {
+    if n == 1 {
+        format!("1 {word}")
+    } else {
+        format!("{n} {word}s")
     }
 }
 
@@ -92,6 +105,8 @@ pub struct Ui {
     pub renderer: Option<markdown::Renderer>,
     /// The last text printed did not end its line.
     pub line_open: bool,
+    /// The fallback question was just shown, with the error in it.
+    pub asked: bool,
 }
 
 impl Ui {
@@ -203,7 +218,11 @@ pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>)
             Event::FellBack { to, why, failure } => {
                 log.write(json!({ "event": "fallback", "to": to, "error": why, "reason": format!("{failure:?}") }));
                 ui.end_line();
-                ui.progress(Some(Style::Yellow), &fit(&format!("↪ {}", fallback_note(to, why, *failure))));
+                let asked = std::mem::take(&mut ui.asked);
+                for (i, line) in fallback_note(to, why, *failure, asked).iter().enumerate() {
+                    let (style, mark) = if i == 0 { (Style::Yellow, "↪ ") } else { (Style::Dim, "  ") };
+                    ui.progress(Some(style), &fit(&format!("{mark}{line}")));
+                }
             }
         }
     }
@@ -226,10 +245,19 @@ mod tests {
         assert_eq!(relative_to("/home/a/rak", "/etc/hosts"), "/etc/hosts");
         use rak::fallback::Failure;
         assert_eq!(
-            fallback_note("anthropic · claude-haiku-5-5", "the model server answered 503: busy", Failure::Transient),
-            "now using anthropic · claude-haiku-5-5 (the model server answered 503: busy)"
+            fallback_note("anthropic · claude-haiku-5-5", "the model server answered 503: busy", Failure::Transient, false),
+            ["now using anthropic · claude-haiku-5-5", "the model server answered 503: busy"],
+            "what happens now on its own line, so a long error never cuts it"
         );
-        assert!(fallback_note("x · y", "connection reset", Failure::Midway).starts_with("doing this step again with x · y"));
-        assert!(fallback_note("x · y", "answered 401: bad key", Failure::Config).contains("won't work until its key or model is fixed"));
+        assert_eq!(fallback_note("x · y", "connection reset", Failure::Midway, false)[0], "doing this step again with x · y");
+        assert_eq!(
+            fallback_note("x · y", "answered 401: bad key", Failure::Config, true),
+            ["now using x · y"],
+            "the question showed the error"
+        );
+        assert_eq!(
+            (plural(1, "turn"), plural(2, "turn"), plural(0, "tool call")),
+            ("1 turn".into(), "2 turns".into(), "0 tool calls".into())
+        );
     }
 }

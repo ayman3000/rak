@@ -95,6 +95,9 @@ pub enum Next {
 /// Asked for the next model: what failed (its error, as text) and why.
 pub type Hook = Box<dyn FnMut(&str, Failure) -> Next>;
 
+/// The last line of the error when the person said no to switching.
+pub const DECLINED: &str = "Stopped: you chose not to switch to another model.";
+
 /// Same-model retries before moving on, when there is somewhere to move on to.
 pub const RETRIES_BEFORE_FALLBACK: usize = 2;
 

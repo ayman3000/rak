@@ -58,7 +58,13 @@ impl Tool for Delegate {
         let mut spent = self.usage.get();
         spent.add(helper.usage);
         self.usage.set(spent);
-        let footer = format!("[helper: {} turns, {} tool calls]", result.turns, helper.tool_calls);
+        let footer = format!(
+            "[helper: {} turn{}, {} tool call{}]",
+            result.turns,
+            if result.turns == 1 { "" } else { "s" },
+            helper.tool_calls,
+            if helper.tool_calls == 1 { "" } else { "s" }
+        );
         match result.outcome {
             Outcome::Done => ToolResult::ok(format!("{}\n{footer}", result.answer.trim())),
             Outcome::Stopped => ToolResult::err("The helper was stopped (Ctrl-C)."),
@@ -98,7 +104,7 @@ mod tests {
         }));
         assert!(!tool.needs_approval());
         let answer = tool.run(&json!({ "task": "Where is the login check?" }));
-        assert!(answer.ok && answer.text.starts_with("Found it in src/a.rs:12.\n[helper: 1 turns, 0 tool calls]"), "{}", answer.text);
+        assert!(answer.ok && answer.text.starts_with("Found it in src/a.rs:12.\n[helper: 1 turn, 0 tool calls]"), "{}", answer.text);
         tool.run(&json!({ "task": "again" }));
         assert_eq!((tool.usage.get().input, tool.usage.get().output), (14, 6));
         assert!(!tool.run(&json!({})).ok);
