@@ -107,13 +107,19 @@ pub struct OpenAICompatible {
     pub max_tokens: Option<u64>,
     /// Checked between pieces of a streamed answer.
     pub stop: Stop,
+    /// How long a streamed answer may send nothing (see stall.rs).
+    pub stall_base: Duration,
+    /// For short requests (model lists, Ollama's model details).
     http: ureq::Agent,
+    clients: crate::stall::Clients,
 }
 
 impl OpenAICompatible {
     pub fn new(base_url: &str, api_key: Option<String>, model: &str) -> Self {
-        let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(900)).build();
+        let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(60)).build();
         OpenAICompatible {
+            stall_base: crate::stall::base_for(base_url, false),
+            clients: Default::default(),
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
             model: model.to_string(),
@@ -153,9 +159,10 @@ impl OpenAICompatible {
 }
 
 impl OpenAICompatible {
-    fn post(&self, body: Value) -> Result<ureq::Response, ModelError> {
+    /// `read`: how long the server may send nothing.
+    fn post(&self, body: Value, read: Duration) -> Result<ureq::Response, ModelError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = self.http.post(&url);
+        let mut request = self.clients.with_read_limit(read).post(&url);
         if let Some(key) = &self.api_key {
             request = request.set("Authorization", &format!("Bearer {key}"));
         }
@@ -227,8 +234,10 @@ impl Model for OpenAICompatible {
     }
 
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {
+        let body = self.request_body(messages, tools);
+        let read = crate::stall::limit(crate::stall::WHOLE_ANSWER, body.to_string().len());
         let body: Value = self
-            .post(self.request_body(messages, tools))?
+            .post(body, read)?
             .into_json()
             .map_err(|e| ModelError::Retryable(format!("unreadable reply from the model server: {e}")))?;
         parse_reply(&body)
@@ -238,7 +247,8 @@ impl Model for OpenAICompatible {
         let mut body = self.request_body(messages, tools);
         body["stream"] = json!(true);
         body["stream_options"] = json!({ "include_usage": true });
-        let mut lines = std::io::BufReader::new(self.post(body)?.into_reader());
+        let read = crate::stall::limit(self.stall_base, body.to_string().len());
+        let mut lines = std::io::BufReader::new(self.post(body, read)?.into_reader());
         let mut streamed = StreamedReply::default();
         let mut line = String::new();
         loop {
@@ -255,8 +265,15 @@ impl Model for OpenAICompatible {
                 }
                 // Text already on screen cannot be taken back, so a second try
                 // would show the answer twice.
-                Err(e) if streamed.content.is_empty() => return Err(ModelError::Retryable(format!("the answer stopped arriving: {e}"))),
-                Err(e) => return Err(ModelError::Fatal(format!("the answer stopped arriving part way: {e}"))),
+                Err(e) if streamed.content.is_empty() => {
+                    return Err(ModelError::Retryable(format!("the answer stopped arriving: {}", crate::stall::stopped_arriving(&e, read))))
+                }
+                Err(e) => {
+                    return Err(ModelError::Fatal(format!(
+                        "the answer stopped arriving part way: {}",
+                        crate::stall::stopped_arriving(&e, read)
+                    )))
+                }
             }
         }
         Ok(streamed.finish())

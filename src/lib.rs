@@ -17,5 +17,6 @@ pub mod providers;
 pub mod read_slice;
 pub mod sessions;
 pub mod skills;
+pub mod stall;
 pub mod text;
 pub mod tools;

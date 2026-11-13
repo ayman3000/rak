@@ -41,15 +41,26 @@ pub struct Anthropic {
     pub effort: Option<String>,
     pub max_tokens: Option<u64>,
     pub stop: Stop,
-    http: ureq::Agent,
+    /// How long the stream may send nothing (see stall.rs).
+    pub stall_base: Duration,
+    clients: crate::stall::Clients,
 }
 
 impl Anthropic {
     pub fn new(base_url: &str, api_key: String, model: &str) -> Self {
-        let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(900)).build();
         // "https://api.anthropic.com/v1" and "https://api.anthropic.com" both work.
         let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
-        Anthropic { base_url, api_key, model: model.to_string(), effort: None, max_tokens: None, stop: Stop::new(), http }
+        let stall_base = crate::stall::base_for(&base_url, true);
+        Anthropic {
+            base_url,
+            api_key,
+            model: model.to_string(),
+            effort: None,
+            max_tokens: None,
+            stop: Stop::new(),
+            stall_base,
+            clients: Default::default(),
+        }
     }
 
     /// Whether this model can decline a request and has a server-side fallback.
@@ -86,7 +97,8 @@ impl Anthropic {
     fn get(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{path}", self.base_url);
         let response = self
-            .http
+            .clients
+            .with_read_limit(Duration::from_secs(60))
             .get(&url)
             .timeout(Duration::from_secs(20))
             .set("x-api-key", &self.api_key)
@@ -107,12 +119,19 @@ impl Model for Anthropic {
 
     fn chat_stream(&mut self, messages: &[Value], tools: &[Value], on_text: &mut dyn FnMut(&str)) -> Result<Reply, ModelError> {
         let url = format!("{}/v1/messages", self.base_url);
-        let mut request =
-            self.http.post(&url).set("x-api-key", &self.api_key).set("anthropic-version", VERSION).set("content-type", "application/json");
+        let body = self.request_body(messages, tools);
+        let read = crate::stall::limit(self.stall_base, body.to_string().len());
+        let mut request = self
+            .clients
+            .with_read_limit(read)
+            .post(&url)
+            .set("x-api-key", &self.api_key)
+            .set("anthropic-version", VERSION)
+            .set("content-type", "application/json");
         if self.has_fallback() {
             request = request.set("anthropic-beta", FALLBACK_BETA);
         }
-        let response = match request.send_json(self.request_body(messages, tools)) {
+        let response = match request.send_json(body) {
             Ok(response) => response,
             Err(ureq::Error::Status(code, response)) => {
                 let message = format!("the Anthropic API answered {code}: {}", error_text(response));
@@ -144,8 +163,15 @@ impl Model for Anthropic {
                     }
                 }
                 // Text already shown cannot be taken back: a retry would show it twice.
-                Err(e) if !stream.shown_text => return Err(ModelError::Retryable(format!("the answer stopped arriving: {e}"))),
-                Err(e) => return Err(ModelError::Fatal(format!("the answer stopped arriving part way: {e}"))),
+                Err(e) if !stream.shown_text => {
+                    return Err(ModelError::Retryable(format!("the answer stopped arriving: {}", crate::stall::stopped_arriving(&e, read))))
+                }
+                Err(e) => {
+                    return Err(ModelError::Fatal(format!(
+                        "the answer stopped arriving part way: {}",
+                        crate::stall::stopped_arriving(&e, read)
+                    )))
+                }
             }
         }
         stream.finish()

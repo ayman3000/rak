@@ -200,6 +200,8 @@ rak carries on with another provider instead of stopping, with nothing to set up
 4. **The step is done again** on the new model, with the conversation so far; an answer cut off part way is redone, not stitched together.
 5. **Your next message goes back** to the provider you chose. If that one can't work at all (a bad key, a missing model), the chat stays on the fallback and says why.
 
+**A silent server counts as a failure.** A streamed answer that sends nothing for too long stops and is retried like a network error, instead of waiting out one long limit: 5 minutes for Anthropic (its stream carries pings), 10 for other cloud servers (some think silently), 15 for a server on this machine (it reads a long prompt slowly), each a minute or two longer for a very long prompt. From SwiftAgentKit's `StreamStallPolicy`.
+
 Every switch is shown (`↪ now using …`), logged with `--log`, listed in `--json` (`fell_back_to`) and counted in `/usage`. A helper started by `delegate` falls back the same way. A request rak itself built wrongly, a refusal or a stop does not fall back: another model would not do better.
 
 ### Keys and settings
