@@ -103,7 +103,7 @@ In the order they are being built (value for a coding agent first):
       out a 15-minute read timeout.
 - [x] 6. Tool-output artifacts (SAK `ArtifactStore`, `artifact_read`): a
       trimmed tool output stays readable by id instead of being lost.
-- [ ] 7. Memory (SAK `RememberTool`, `AgentMemoryStore`): `remember` keeps a
+- [x] 7. Memory (SAK `RememberTool`, `AgentMemoryStore`): `remember` keeps a
       fact per project in a file, put in later system prompts.
 - [ ] 8. Routines (SAK `Routine`, `run_routine`): saved fixed steps run with
       no model call between them.

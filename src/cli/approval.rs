@@ -55,6 +55,12 @@ pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
             let body: Vec<String> = text("instructions").lines().map(|l| format!("    │ {l}")).collect();
             format!("save_skill \"{}\" for {scope}:\n    {}\n{}", text("name"), text("description"), body.join("\n"))
         }
+        // A note every later session gets: shown whole.
+        ("remember", _) => {
+            let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").trim();
+            let scope = if text("scope") == "everywhere" { "every project" } else { "this project" };
+            format!("remember, for {scope}:\n    │ {}", text("note"))
+        }
         _ => describe(name, args),
     };
     format!("? allow {what}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ")
@@ -133,6 +139,8 @@ mod tests {
         assert!(!question("run_shell", &args, None).contains("[s]"));
         assert!(question("files__write", &args, Some("files")).contains("[s] all files tools"));
         assert!(question("run_shell", &args, None).starts_with("? allow run_shell:\n    ls\n"));
+        let note = json!({ "note": "Prefers tabs.", "scope": "everywhere" });
+        assert!(question("remember", &note, None).starts_with("? allow remember, for every project:\n    │ Prefers tabs.\n"));
     }
 
     #[test]

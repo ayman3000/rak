@@ -38,6 +38,8 @@ pub struct Session {
     /// Where the window's number came from, for /usage.
     pub window_source: &'static str,
     pub notes: Option<String>,
+    /// Notes from earlier sessions put in this session's prompt.
+    pub memory_notes: usize,
     pub skills: rak::skills::Shared,
     /// Where `/skills add` saves: the user's skills folder, else the project's.
     pub skill_folder: PathBuf,
@@ -304,6 +306,15 @@ pub fn run(mut o: Options) -> i32 {
     // The index is fixed for the session, so the prompt stays cacheable; a skill
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
+    // Notes from earlier sessions, read once: the prompt stays the same all session.
+    let (memory_file, user_memory_file) = rak::memory::files(&ctx.cwd, config_dir().as_deref());
+    let memory_notes = if o.no_memory {
+        0
+    } else {
+        let (project_notes, user_notes) = rak::memory::load(&memory_file, user_memory_file.as_deref());
+        config.system_prompt.push_str(&rak::memory::prompt_block(&project_notes, &user_notes));
+        project_notes.len() + user_notes.len()
+    };
     let skills: rak::skills::Shared = std::sync::Arc::new(std::sync::RwLock::new(loaded));
     let log = Log::open(o.log.as_ref());
     let live = stdout_tty && !o.json && !o.no_stream;
@@ -331,6 +342,10 @@ pub fn run(mut o: Options) -> i32 {
             let user = skill_folders.get(1).cloned();
             tools.push(Box::new(rak::skills::save::SaveSkill::new(skills.clone(), skill_folders[0].clone(), user)));
         }
+    }
+    // Keeping a note changes what later sessions do, so read-only leaves it out.
+    if !o.no_memory && !o.read_only {
+        tools.push(Box::new(rak::memory::Remember { project_file: memory_file.clone(), user_file: user_memory_file.clone() }));
     }
     // view_image, unless the server says the model can't see.
     if provider.sees_images() != Some(false) {
@@ -447,6 +462,7 @@ pub fn run(mut o: Options) -> i32 {
         window,
         window_source,
         notes,
+        memory_notes,
         skill_folder: skill_folders.last().cloned().unwrap_or_default(),
         skills,
         requests: 0,

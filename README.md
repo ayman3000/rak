@@ -303,6 +303,7 @@ The history and the last model picked for each provider are kept in `~/.config/r
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp` | Don't connect the MCP servers for this run. |
 | `--no-skills` | No skills for this run, built-in ones included. |
+| `--no-memory` | No notes from earlier sessions, and no `remember`. |
 | `-c`, `--continue` | Continue this folder's last chat, in a chat or with one request (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
@@ -316,7 +317,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 
 ## Safety
 
-- **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch` and `run_shell` need a yes each time, unless you answer "always" or start with `-y`.
+- **Edits and commands ask first.** `write_file`, `edit_file`, `apply_patch`, `run_shell`, `save_skill` and `remember` need a yes each time, unless you answer "always" or start with `-y`.
 - **A no stops the request.** The model does not get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **A tool error is not passed off as done.** When the step just before the model's answer had a tool error (an edit that didn't apply, a rejected write), rak asks once: fix it, or say plainly what failed. From SwiftAgentKit's repair retry; at most three times a request. A command that exits with an error is a normal result, not a tool error.
@@ -341,6 +342,7 @@ Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4
 | `delegate` | Hands a question to a helper agent with a fresh context and read-only tools (`list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url`, and `web_search` when there is a key); only its answer comes back. The helper's steps are shown indented, it uses the chat's current model, its tokens count in the request's totals, and it cannot delegate further. |
 | `web_search` | Searches the web through [Tavily](https://tavily.com): the most relevant pages with a short extract of each, and a direct answer when there is one. Only there when `TAVILY_API_KEY` is set; it only reads, so it needs no approval and stays in read-only mode. Each search spends a Tavily credit (`deep` spends two). |
 | `fetch_url` | Reads one public http(s) page as Markdown (headings, lists and links kept; scripts, styles and chrome dropped), as text, or as raw HTML; capped at 40,000 characters unless `max_chars` says otherwise. Only reads, so no approval. Addresses on this machine or a private network are refused, checked in the resolver the connection itself uses, so a redirect or a changed DNS answer cannot reach them either. From SwiftAgentKit's `FetchURLTool` and `SSRFGuard`. |
+| `remember` | Keeps a note for later sessions — how you like things done, a lasting decision or convention — in `.rak/memory.md` (this project) or `~/.config/rak/memory.md` (every project), one line each. Asks first and shows the note whole: a note steers every later session. A session reads both files when it starts and puts the notes in its instructions, marked as possibly out of date; the welcome box counts them. Edit or delete the files freely. From SwiftAgentKit's `remember`, without its separate filing step. |
 
 **The write check** (from SwiftAgentKit's `WriteVerifier`). Before `write_file`, `edit_file` or `apply_patch` changes a file, the file as it would be afterwards is checked; if the check fails, the file is left as it was and the model is told why.
 

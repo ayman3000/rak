@@ -36,6 +36,10 @@ pub fn banner(s: &Session) {
             .iter()
             .map(|_| ("notes".to_string(), "AGENTS.md".to_string()))
             .chain(key_files().iter().map(|f| ("config".to_string(), welcome::short_path(&f.to_string_lossy(), &home(), 26))))
+            .chain(
+                (s.memory_notes > 0)
+                    .then(|| ("memory".to_string(), format!("{} note{}", s.memory_notes, if s.memory_notes == 1 { "" } else { "s" }))),
+            )
             .chain({
                 let count = s.skills.read().unwrap().len();
                 (count > 0).then(|| ("skills".to_string(), format!("{count} (/skills)")))
