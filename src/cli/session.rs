@@ -402,10 +402,12 @@ pub fn run(mut o: Options) -> i32 {
     // Settings set twice in a .env file: shown with the MCP warnings.
     mcp_problems.extend(super::settings::key_notes());
     let mcp_summary = connected.summary();
+    let deferred = connected.to_defer();
     tools.append(&mut connected.tools);
 
     let learns = tools.iter().any(|t| t.name() == "save_skill");
     let mut agent = Agent::new(provider, tools, config);
+    agent.defer(deferred);
     agent.stop = stop.clone();
     if learns {
         agent.refusal_note.push_str(rak::skills::save::AFTER_REFUSAL);

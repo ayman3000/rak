@@ -9,7 +9,9 @@
 //!
 //! A tool the server marks read-only runs like read_file; any other asks
 //! first, like edit_file. Read-only mode keeps only the read-only ones. Every
-//! server adds its tool descriptions to every request — a cost worth knowing.
+//! server adds its tool descriptions to every request — a cost worth knowing —
+//! except a large one, whose tools are sent only after the model loads them
+//! with `load_tools` (see `Connected::to_defer`).
 //!
 //!   config   the mcp.json files: read, added to, removed from
 //!   client   one connection: the handshake, tools/list, tools/call
@@ -23,6 +25,7 @@ pub use client::stop_all_servers_now;
 pub use client::{result_text, tool_info, Client, ToolInfo};
 pub use config::{add_to_file, config_files, entry_json, load, parse_config, remove_from_file, ServerConfig, Transport};
 
+use crate::agent::ToolGroup;
 use crate::interrupt::Stop;
 use crate::text::one_line;
 use crate::tools::{Tool, ToolResult};
@@ -83,6 +86,31 @@ pub struct Connected {
     pub server_of: HashMap<String, String>,
     /// Tools left out because the run is read-only and they aren't.
     pub left_out: usize,
+    /// Each connected server's tools as a group, with the size of their
+    /// definitions in characters (what they add to every request).
+    pub groups: Vec<(ToolGroup, usize)>,
+}
+
+/// A server whose tool definitions are longer than this (about 1,000 tokens)
+/// is deferred: its tools are sent only after the model loads them.
+pub const DEFER_OVER_CHARS: usize = 3_000;
+
+impl Connected {
+    /// Pure — unit-tested. The groups to hide until loaded: the large ones.
+    pub fn to_defer(&self) -> Vec<ToolGroup> {
+        self.groups.iter().filter(|(_, size)| *size > DEFER_OVER_CHARS).map(|(g, _)| g.clone()).collect()
+    }
+}
+
+/// Pure — unit-tested. A group's one line: the server's own first sentence
+/// when it gives one, else its tools' names.
+pub fn group_description(instructions: Option<&str>, tool_names: &[String]) -> String {
+    if let Some(first) = instructions.map(|t| one_line(t.split(". ").next().unwrap_or(t), 140)).filter(|t| !t.is_empty()) {
+        return first.trim_end_matches('.').to_string();
+    }
+    let shown: Vec<&str> = tool_names.iter().take(8).map(String::as_str).collect();
+    let more = if tool_names.len() > shown.len() { ", …" } else { "" };
+    format!("tools {}{more}", shown.join(", "))
 }
 
 impl Connected {
@@ -94,7 +122,9 @@ impl Connected {
         let names: Vec<&str> = self.servers.iter().map(|(name, _)| name.as_str()).collect();
         let count = self.tools.len();
         let note = if self.left_out > 0 { format!(" (read-only ones; {} left out)", self.left_out) } else { String::new() };
-        Some(format!("{count} MCP tool{} from {}{note}", if count == 1 { "" } else { "s" }, names.join(", ")))
+        let deferred: Vec<String> = self.to_defer().into_iter().map(|g| g.id).collect();
+        let later = if deferred.is_empty() { String::new() } else { format!("; {} loaded when needed", deferred.join(", ")) };
+        Some(format!("{count} MCP tool{} from {}{note}{later}", if count == 1 { "" } else { "s" }, names.join(", ")))
     }
 }
 
@@ -125,6 +155,7 @@ pub fn connect_all(servers: &[ServerConfig], project: &Path, read_only: bool, st
         };
         let client = Arc::new(client);
         let mut joined = 0;
+        let (mut exposed_names, mut plain_names, mut size) = (Vec::new(), Vec::new(), 0);
         for info in tools {
             if read_only && !info.read_only {
                 out.left_out += 1;
@@ -136,8 +167,16 @@ pub fn connect_all(servers: &[ServerConfig], project: &Path, read_only: bool, st
                 continue;
             }
             out.server_of.insert(exposed.clone(), server.name.clone());
-            out.tools.push(Box::new(McpTool { client: client.clone(), exposed, info }));
+            exposed_names.push(exposed.clone());
+            plain_names.push(info.name.clone());
+            let tool: Box<dyn Tool> = Box::new(McpTool { client: client.clone(), exposed, info });
+            size += crate::tools::definition(tool.as_ref()).to_string().len();
+            out.tools.push(tool);
             joined += 1;
+        }
+        if joined > 0 {
+            let description = group_description(client.instructions.as_deref(), &plain_names);
+            out.groups.push((ToolGroup { id: server.name.clone(), description, tools: exposed_names }, size));
         }
         out.servers.push((server.name.clone(), joined));
     }
@@ -158,6 +197,17 @@ mod tests {
         let transport =
             Transport::Stdio { command: command.into(), args: args.iter().map(|a| a.to_string()).collect(), env: BTreeMap::new() };
         ServerConfig { name: name.into(), transport, timeout: None }
+    }
+
+    #[test]
+    fn large_servers_are_deferred_with_a_one_line_description() {
+        let names = |n: usize| (0..n).map(|i| format!("t{i}")).collect::<Vec<_>>();
+        assert_eq!(group_description(Some("Read and write GitHub issues. Needs a token."), &names(3)), "Read and write GitHub issues");
+        assert_eq!(group_description(None, &names(3)), "tools t0, t1, t2");
+        assert_eq!(group_description(Some("  "), &names(9)), "tools t0, t1, t2, t3, t4, t5, t6, t7, …");
+        let group = |id: &str| ToolGroup { id: id.into(), description: String::new(), tools: vec![] };
+        let connected = Connected { groups: vec![(group("small"), 900), (group("big"), DEFER_OVER_CHARS + 1)], ..Default::default() };
+        assert_eq!(connected.to_defer(), [group("big")]);
     }
 
     #[test]
@@ -203,6 +253,9 @@ done
         let connected = connect_all(&[fake("fake")], &dir, false, &Stop::new());
         assert!(connected.problems.is_empty(), "{:?}", connected.problems);
         assert_eq!(connected.summary().unwrap(), "2 MCP tools from fake");
+        let (group, size) = &connected.groups[0];
+        assert_eq!((group.id.as_str(), group.tools.clone()), ("fake", vec!["fake__look".to_string(), "fake__change".to_string()]));
+        assert!(*size > 100 && connected.to_defer().is_empty(), "two small tools stay loaded");
         let names: Vec<&str> = connected.tools.iter().map(|t| t.name()).collect();
         assert_eq!(names, ["fake__look", "fake__change"]);
         assert_eq!(connected.server_of["fake__look"], "fake");

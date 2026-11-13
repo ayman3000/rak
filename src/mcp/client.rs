@@ -61,6 +61,8 @@ pub struct Client {
     project: PathBuf,
     stop: Stop,
     call_timeout: Duration,
+    /// What the server says about itself in the handshake (`instructions`).
+    pub instructions: Option<String>,
 }
 
 impl Client {
@@ -76,19 +78,21 @@ impl Client {
                 ready: false,
             },
         };
-        let client = Client {
+        let mut client = Client {
             name: config.name.clone(),
             state: Mutex::new(State { conn, next_id: 0 }),
             project: project.to_path_buf(),
             stop: stop.clone(),
             call_timeout: config.timeout.map(Duration::from_secs).unwrap_or(CALL_TIMEOUT),
+            instructions: None,
         };
         let hello = json!({
             "protocolVersion": PROTOCOL,
             "capabilities": { "roots": { "listChanged": false } },
             "clientInfo": { "name": "rak", "version": env!("CARGO_PKG_VERSION") },
         });
-        client.request("initialize", hello, CONNECT_TIMEOUT)?;
+        let welcome = client.request("initialize", hello, CONNECT_TIMEOUT)?;
+        client.instructions = welcome["instructions"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
         if let Conn::Http { ready, .. } = &mut client.state.lock().unwrap().conn {
             *ready = true;
         }

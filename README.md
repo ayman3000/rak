@@ -428,7 +428,7 @@ How the tools behave:
 - **A tool the server marks read-only runs freely; any other asks first.** At the prompt, `s` allows all of that server's tools for the session.
 - **`--read-only` keeps only the read-only tools.** `--no-mcp` leaves the servers out of a run.
 - **Results over 20,000 characters are cut**, and Ctrl-C stops a call that is taking long.
-- **Every server costs tokens on every request**, because its tool descriptions are sent each time. The reference filesystem server's 14 tools added 1,165 tokens to each model call when measured (2,187 against 1,022). Add the servers you use.
+- **A server costs tokens on every request**, because its tool descriptions are sent each time. The reference filesystem server's 14 tools added 1,165 tokens to each model call when measured (2,187 against 1,022). So a large server — tool descriptions over 3,000 characters, about 1,000 tokens — is **loaded when needed**, as in SwiftAgentKit: the system prompt names it in one line, and its tools are sent only after the model calls `load_tools` for it, for the rest of that chat. Loading changes the tool list, so a provider's prompt cache starts again from that call. Smaller servers are always sent. Add the servers you use.
 
 In a chat, `/mcp` lists the servers and their tools.
 

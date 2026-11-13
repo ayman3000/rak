@@ -102,6 +102,51 @@ const KEEP_RECENT: usize = 8;
 const CHARS_PER_TOKEN: usize = 3;
 const DROPPED: &str = "[earlier output removed to save context; run the tool again if you need it]";
 
+/// Tools the model doesn't see until it loads them with `load_tools` — an
+/// MCP server's, say. From SwiftAgentKit's DeferredToolGroup: the prompt
+/// carries one line per group, and a group's definitions are sent only once
+/// it is loaded. Its tools stay runnable all along.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolGroup {
+    /// What the model passes to `load_tools` (the MCP server's name).
+    pub id: String,
+    /// One line: what the group lets the agent do.
+    pub description: String,
+    /// The tools in the group, by the names the model sees.
+    pub tools: Vec<String>,
+}
+
+const LOAD_TOOLS: &str = "load_tools";
+
+fn load_tools_definition() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": LOAD_TOOLS,
+            "description": "Load the tools of one or more tool groups listed under \"Tool groups you can load\" in your \
+                instructions. Their tools become available from your next step and stay available for the rest of \
+                the conversation. Load a group before using its tools; load several at once when a task needs them.",
+            "parameters": {
+                "type": "object",
+                "properties": { "groups": { "type": "array", "items": { "type": "string" }, "description": "Group ids to load, e.g. [\"github\"]." } },
+                "required": ["groups"]
+            }
+        }
+    })
+}
+
+/// Pure — unit-tested. The system prompt's list of groups, sorted, the same
+/// whatever is loaded, so the prompt stays the same from call to call.
+pub fn group_index(groups: &[ToolGroup]) -> String {
+    if groups.is_empty() {
+        return String::new();
+    }
+    let mut sorted: Vec<&ToolGroup> = groups.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let lines: Vec<String> = sorted.iter().map(|g| format!("- {}: {} ({} tools)", g.id, g.description, g.tools.len())).collect();
+    format!("\n\nTool groups you can load (call load_tools with their ids before using them):\n{}", lines.join("\n"))
+}
+
 /// Asked before a tool that changes something runs.
 type ApproveFn = Box<dyn FnMut(&str, &Value) -> Approval>;
 
@@ -132,6 +177,9 @@ pub struct Agent {
     pub fallback: Option<fallback::Hook>,
     /// Every model fallen back to, in order, since the agent was made.
     pub switches: Vec<String>,
+    /// Groups hidden until loaded, and the ids loaded so far in this conversation.
+    groups: Vec<ToolGroup>,
+    loaded: Vec<String>,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -154,6 +202,8 @@ impl Agent {
             finish_check: None,
             fallback: None,
             switches: Vec::new(),
+            groups: Vec::new(),
+            loaded: Vec::new(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -176,6 +226,67 @@ impl Agent {
         &self.tools
     }
 
+    /// Hide these groups' tools until the model loads them; the system prompt
+    /// gets their index. Call before the first request.
+    pub fn defer(&mut self, groups: Vec<ToolGroup>) {
+        let index = group_index(&groups);
+        self.config.system_prompt.push_str(&index);
+        self.messages[0] = json!({ "role": "system", "content": self.config.system_prompt });
+        self.groups = groups;
+        self.loaded.clear();
+    }
+
+    /// The groups loaded in this conversation.
+    pub fn loaded_groups(&self) -> &[String] {
+        &self.loaded
+    }
+
+    /// The tool definitions sent now: every tool not in an unloaded group,
+    /// then `load_tools` while groups exist, then each loaded group's tools in
+    /// load order, so loading never moves what came before.
+    fn definitions(&self) -> Vec<Value> {
+        let hidden: Vec<&str> = self.groups.iter().flat_map(|g| g.tools.iter().map(String::as_str)).collect();
+        let mut out: Vec<Value> = self.tools.iter().filter(|t| !hidden.contains(&t.name())).map(|t| definition(t.as_ref())).collect();
+        if !self.groups.is_empty() {
+            out.push(load_tools_definition());
+        }
+        for id in &self.loaded {
+            let Some(group) = self.groups.iter().find(|g| &g.id == id) else { continue };
+            out.extend(group.tools.iter().filter_map(|name| self.tools.iter().find(|t| t.name() == name)).map(|t| definition(t.as_ref())));
+        }
+        out
+    }
+
+    /// `load_tools`: what was loaded, already loaded, or unknown.
+    fn load_groups(&mut self, args: &Value) -> (bool, String) {
+        let ids: Vec<String> = match &args["groups"] {
+            Value::Array(list) => list.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+            Value::String(one) => vec![one.clone()],
+            _ => return (false, "Pass `groups`: a list of group ids.".to_string()),
+        };
+        let mut lines = Vec::new();
+        let (mut already, mut unknown) = (Vec::new(), Vec::new());
+        for id in ids {
+            match self.groups.iter().find(|g| g.id == id) {
+                None => unknown.push(id),
+                Some(_) if self.loaded.contains(&id) => already.push(id),
+                Some(group) => {
+                    lines.push(format!("Loaded {id}: {}. Available from your next step.", group.tools.join(", ")));
+                    self.loaded.push(id);
+                }
+            }
+        }
+        if !already.is_empty() {
+            lines.push(format!("Already loaded: {}.", already.join(", ")));
+        }
+        if !unknown.is_empty() {
+            let mut available: Vec<&str> = self.groups.iter().map(|g| g.id.as_str()).collect();
+            available.sort();
+            lines.push(format!("No tool group named {}. Groups you can load: {}.", unknown.join(", "), available.join(", ")));
+        }
+        (unknown.is_empty() || lines.len() > 1, lines.join("\n"))
+    }
+
     /// Another model from here on; the conversation so far comes along.
     pub fn set_model(&mut self, model: Box<dyn Model>) {
         self.model = model;
@@ -189,6 +300,7 @@ impl Agent {
     /// Forget the conversation; the standing instructions stay.
     pub fn clear(&mut self) {
         self.messages.truncate(1);
+        self.loaded.clear();
         self.last_prompt_tokens = 0;
     }
 
@@ -213,7 +325,7 @@ impl Agent {
 
     pub fn run(&mut self, task: &str) -> RunResult {
         self.messages.push(json!({ "role": "user", "content": task }));
-        let definitions: Vec<Value> = self.tools.iter().map(|t| definition(t.as_ref())).collect();
+        let mut definitions = self.definitions();
         let nudge_at = (self.config.max_turns >= 10).then(|| self.config.max_turns * 4 / 5);
         let mut repeated: (String, usize) = (String::new(), 0);
         let mut empty_replies = 0;
@@ -222,9 +334,11 @@ impl Agent {
         let mut failed: Vec<(String, String)> = Vec::new();
         let mut repairs = 0;
         // The tool descriptions go with every call, so they come out of the budget.
-        let definitions_size: usize = definitions.iter().map(|d| d.to_string().len()).sum();
-        let budget_for = |window: usize| window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
-        let mut budget = budget_for(self.config.context_window);
+        let size_of = |definitions: &[Value]| definitions.iter().map(|d| d.to_string().len()).sum::<usize>();
+        let mut definitions_size = size_of(&definitions);
+        let budget_for =
+            |window: usize, definitions_size: usize| window.saturating_mul(CHARS_PER_TOKEN).saturating_sub(definitions_size).max(1);
+        let mut budget = budget_for(self.config.context_window, definitions_size);
 
         for turn in 1..=self.config.max_turns {
             self.fit(budget);
@@ -255,7 +369,7 @@ impl Agent {
                 if failure.falls_back() {
                     match self.fall_back(&text, failure) {
                         Some(true) => {
-                            budget = budget_for(self.config.context_window);
+                            budget = budget_for(self.config.context_window, definitions_size);
                             self.fit(budget);
                             overflow_handled = false;
                             continue;
@@ -321,6 +435,7 @@ impl Agent {
             let mut refused: Option<String> = None;
             let mut images: Vec<Image> = Vec::new();
             failed.clear();
+            let loaded_before = self.loaded.len();
             for call in &reply.tool_calls {
                 let mut result = if refused.is_some() {
                     (false, self.refusal_note.clone())
@@ -351,6 +466,12 @@ impl Agent {
             // turn's results, in one message the model reads with them.
             if !images.is_empty() {
                 self.messages.push(image_message(&images));
+            }
+            // A group loaded in this step: its tools go with the next call.
+            if self.loaded.len() != loaded_before {
+                definitions = self.definitions();
+                definitions_size = size_of(&definitions);
+                budget = budget_for(self.config.context_window, definitions_size);
             }
             if let Some(tool) = refused {
                 return RunResult { outcome: Outcome::Refused { tool }, answer: String::new(), turns: turn };
@@ -489,6 +610,19 @@ impl Agent {
     /// Runs one tool call and returns (ok, text for the model, an image if it
     /// brought one). Sets `refused` when the person said no.
     fn run_tool(&mut self, name: &str, arguments: &str, refused: &mut Option<String>) -> (bool, String, Option<Image>) {
+        if name == LOAD_TOOLS && !self.groups.is_empty() {
+            let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+            self.tool_calls += 1;
+            (self.on_event)(&Event::ToolStarted { name, args: &args });
+            let (ok, text) = self.load_groups(&args);
+            (self.on_event)(&Event::ToolFinished { name, ok, denied: false, text: &text, millis: 0 });
+            return (ok, text, None);
+        }
+        // A tool of a group not loaded yet (a resumed chat, a model that
+        // skipped the step): it runs, and its group is loaded from here on.
+        if let Some(group) = self.groups.iter().find(|g| g.tools.iter().any(|t| t == name) && !self.loaded.contains(&g.id)) {
+            self.loaded.push(group.id.clone());
+        }
         let Some(tool) = self.tools.iter().find(|t| t.name() == name) else {
             return (false, format!("There is no tool named `{name}`. The tools are: {}.", self.tool_names().join(", ")), None);
         };
@@ -814,6 +948,41 @@ mod tests {
         let mut s = setup("readonly-approval", vec![Ok(call("list_dir", json!({}))), Ok(text("empty"))], 10);
         s.agent.on_approval(|_, _| panic!("list_dir must not ask"));
         assert_eq!(s.agent.run("look").outcome, Outcome::Done);
+    }
+
+    #[test]
+    fn a_deferred_group_is_sent_only_once_loaded() {
+        let mut s = setup("groups", vec![], 10);
+        let names = |agent: &Agent| -> Vec<String> {
+            agent.definitions().iter().map(|d| d["function"]["name"].as_str().unwrap().to_string()).collect()
+        };
+        s.agent.defer(vec![ToolGroup {
+            id: "look".into(),
+            description: "listing and searching".into(),
+            tools: vec!["list_dir".into(), "search_files".into()],
+        }]);
+        assert!(s.agent.messages[0]["content"].as_str().unwrap().ends_with("using them):\n- look: listing and searching (2 tools)"));
+        let before = names(&s.agent);
+        assert!(!before.contains(&"list_dir".to_string()) && before.last().unwrap() == "load_tools", "{before:?}");
+        let (ok, text) = s.agent.load_groups(&json!({ "groups": ["look", "nope"] }));
+        assert!(ok && text.contains("Loaded look: list_dir, search_files") && text.contains("No tool group named nope"), "{text}");
+        let after = names(&s.agent);
+        assert_eq!(&after[after.len() - 3..], ["load_tools", "list_dir", "search_files"], "loaded tools go last");
+        assert_eq!(&after[..before.len()], &before[..], "what came before does not move");
+        assert!(s.agent.load_groups(&json!({ "groups": ["look"] })).1.contains("Already loaded"));
+        assert!(!s.agent.load_groups(&json!({ "groups": ["nope"] })).0);
+        s.agent.clear();
+        assert!(s.agent.loaded_groups().is_empty());
+    }
+
+    #[test]
+    fn a_deferred_tool_called_anyway_runs_and_loads_its_group() {
+        let mut s = setup("groups-run", vec![Ok(call("list_dir", json!({ "path": "." }))), Ok(text("ok"))], 10);
+        s.agent.defer(vec![ToolGroup { id: "look".into(), description: "x".into(), tools: vec!["list_dir".into()] }]);
+        assert_eq!(s.agent.run("list").outcome, Outcome::Done);
+        assert_eq!(s.agent.loaded_groups(), ["look"]);
+        let seen = s.seen.borrow();
+        assert!(!seen[1][3]["content"].as_str().unwrap().starts_with("There is no tool"), "it ran");
     }
 
     #[test]

@@ -96,7 +96,7 @@ In the order they are being built (value for a coding agent first):
       a public page as readable text; private addresses refused. ~300 lines.
 - [x] 3. Repair-retry (SAK `RepairRetryPolicy`): a tool failed and the model
       ends the turn claiming success: one "fix it or say it failed" nudge.
-- [ ] 4. Deferred tool groups (SAK `DeferredToolGroup`, `load_tools`): an
+- [x] 4. Deferred tool groups (SAK `DeferredToolGroup`, `load_tools`): an
       MCP server's tools cost one prompt line until the model loads them.
 - [ ] 5. Stream stall limit (SAK `StreamStallPolicy`): a streamed answer that
       makes no progress for too long fails as retryable, instead of waiting
