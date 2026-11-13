@@ -1,19 +1,18 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-13: v0.1.0-alpha.4 is the newest release; `main` has more (below). A working plan for picking the work up on another machine.
+Updated 2026-11-13, after releasing v0.1.0-alpha.5. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.4** (2026-11-12). `main` is ahead of
-  it: see "On main, not released yet".
+- The newest release is **v0.1.0-alpha.5** (2026-11-13). It has everything
+  below; `main` and the release match.
 
-### On main, not released yet
+### In v0.1.0-alpha.5
 
 - Falling back to another provider when the one in use fails (design below):
   `471c25d`, its messages made short and clear in `9d19ea3`.
 - A warning when rak starts in the home folder or at the top of the disk
   (`60f1a20`): its tools can reach every file there. A warning only.
-- Release these as alpha.5 when the owner says so.
 
 ### In v0.1.0-alpha.4
 
@@ -80,7 +79,7 @@ Updated 2026-11-13: v0.1.0-alpha.4 is the newest release; `main` has more (below
       v4 (Node 20, deprecated); move to v7 / v8 and check with a release.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
-## Design: falling back to another provider (built 2026-11-12, on main, unreleased)
+## Design: falling back to another provider (built 2026-11-12, released in alpha.5)
 
 Discussed with the owner on 2026-11-12; build only after his go-ahead. Hermes (~/.hermes/hermes-agent) was read for this: its api_max_retries, FailoverReason, restore_primary_runtime.
 
