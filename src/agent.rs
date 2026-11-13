@@ -180,6 +180,8 @@ pub struct Agent {
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,
     loaded: Vec<String>,
+    /// Tool outputs removed to save context, readable again by id.
+    artifacts: crate::artifacts::Artifacts,
     approve: ApproveFn,
     on_event: Box<dyn for<'a> FnMut(&Event<'a>)>,
 }
@@ -204,6 +206,7 @@ impl Agent {
             switches: Vec::new(),
             groups: Vec::new(),
             loaded: Vec::new(),
+            artifacts: Default::default(),
             approve: Box::new(|_, _| Approval::Yes),
             on_event: Box::new(|_| {}),
         }
@@ -254,6 +257,9 @@ impl Agent {
             let Some(group) = self.groups.iter().find(|g| &g.id == id) else { continue };
             out.extend(group.tools.iter().filter_map(|name| self.tools.iter().find(|t| t.name() == name)).map(|t| definition(t.as_ref())));
         }
+        if !self.artifacts.is_empty() {
+            out.extend(crate::artifacts::definitions());
+        }
         out
     }
 
@@ -301,6 +307,7 @@ impl Agent {
     pub fn clear(&mut self) {
         self.messages.truncate(1);
         self.loaded.clear();
+        self.artifacts.clear();
         self.last_prompt_tokens = 0;
     }
 
@@ -342,6 +349,12 @@ impl Agent {
 
         for turn in 1..=self.config.max_turns {
             self.fit(budget);
+            // The first output kept aside brings the tools that read it back.
+            if !self.artifacts.is_empty() && !definitions.iter().any(|d| d["function"]["name"] == crate::artifacts::READ) {
+                definitions = self.definitions();
+                definitions_size = size_of(&definitions);
+                budget = budget_for(self.config.context_window, definitions_size);
+            }
             if self.stop.requested() {
                 return self.stopped(turn);
             }
@@ -360,7 +373,7 @@ impl Agent {
                     (self.on_event)(&Event::Note("the model says the conversation is too long for it"));
                     // Our estimate said it fits, so shrink by what is there, not by the budget.
                     let size = conversation_size(&self.messages);
-                    if self.compact(size / 4) || trim_keeping(&mut self.messages, size / 2, 0) > 0 {
+                    if self.compact(size / 4) || trim_keeping(&mut self.messages, size / 2, 0, Some(&mut self.artifacts)) > 0 {
                         continue;
                     }
                 }
@@ -509,7 +522,7 @@ impl Agent {
     /// part is summarized; if even that is not enough, recent tool outputs are
     /// stubbed too, oldest first.
     fn fit(&mut self, budget: usize) {
-        let dropped = trim_context(&mut self.messages, budget);
+        let dropped = trim_keeping(&mut self.messages, budget, KEEP_RECENT, Some(&mut self.artifacts));
         if dropped > 0 {
             (self.on_event)(&Event::Note(&format!("context is filling up: dropped {dropped} old tool outputs")));
         }
@@ -517,7 +530,7 @@ impl Agent {
             self.compact(budget / 4);
         }
         if conversation_size(&self.messages) > budget {
-            let dropped = trim_keeping(&mut self.messages, budget, 0);
+            let dropped = trim_keeping(&mut self.messages, budget, 0, Some(&mut self.artifacts));
             if dropped > 0 {
                 (self.on_event)(&Event::Note(&format!("context is still full: dropped {dropped} recent tool outputs")));
             }
@@ -610,6 +623,14 @@ impl Agent {
     /// Runs one tool call and returns (ok, text for the model, an image if it
     /// brought one). Sets `refused` when the person said no.
     fn run_tool(&mut self, name: &str, arguments: &str, refused: &mut Option<String>) -> (bool, String, Option<Image>) {
+        if (name == crate::artifacts::READ || name == crate::artifacts::SEARCH) && !self.artifacts.is_empty() {
+            let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+            self.tool_calls += 1;
+            (self.on_event)(&Event::ToolStarted { name, args: &args });
+            let (ok, text) = self.artifacts.run(name, &args);
+            (self.on_event)(&Event::ToolFinished { name, ok, denied: false, text: &text, millis: 0 });
+            return (ok, text, None);
+        }
         if name == LOAD_TOOLS && !self.groups.is_empty() {
             let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
             self.tool_calls += 1;
@@ -697,14 +718,20 @@ fn assistant_message(reply: &Reply) -> Value {
 
 /// Pure — unit-tested. What replaces a removed output: which call it was and
 /// how it began, so the model knows what it no longer has and can get it back.
-pub fn dropped_stub(call: Option<&(String, String)>, output: &str) -> String {
-    let Some((name, target)) = call else { return DROPPED.to_string() };
+pub fn dropped_stub(call: Option<&(String, String)>, output: &str, kept_as: Option<&str>) -> String {
+    let again = match kept_as {
+        Some(id) => format!("artifact_read {id} brings it back (artifact_search finds lines in it)"),
+        None => "Run it again if you need it".to_string(),
+    };
+    let Some((name, target)) = call else {
+        return match kept_as {
+            Some(_) => format!("[earlier output removed to save context; {again}.]"),
+            None => DROPPED.to_string(),
+        };
+    };
     let first = output.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-    format!(
-        "[output of {name} {target} removed to save context. It began: {}. Run it again if you need it.]",
-        crate::text::one_line(first, 120)
-    )
-    .replace("  ", " ")
+    format!("[output of {name} {target} removed to save context. It began: {}. {again}.]", crate::text::one_line(first, 120))
+        .replace("  ", " ")
 }
 
 /// The conversation's size for the context budget, in characters.
@@ -717,11 +744,18 @@ pub fn conversation_size(messages: &[Value]) -> usize {
 /// it fits. The most recent messages are never touched. Returns how many
 /// outputs were dropped.
 pub fn trim_context(messages: &mut [Value], budget_chars: usize) -> usize {
-    trim_keeping(messages, budget_chars, KEEP_RECENT)
+    trim_keeping(messages, budget_chars, KEEP_RECENT, None)
 }
 
 /// `trim_context`, leaving the last `keep_recent` messages alone.
-pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: usize) -> usize {
+/// With a `store`, each removed output is kept there and its stub says how
+/// to read it back.
+pub fn trim_keeping(
+    messages: &mut [Value],
+    budget_chars: usize,
+    keep_recent: usize,
+    mut store: Option<&mut crate::artifacts::Artifacts>,
+) -> usize {
     let size = message_size;
     let mut total: usize = messages.iter().map(size).sum();
     if total <= budget_chars {
@@ -743,7 +777,11 @@ pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: us
             && message["content"].as_str().is_some_and(|c| c.len() > DROPPED.len() * 3 && !c.starts_with("[output of "));
         let has_image = message["content"].as_array().is_some_and(|parts| parts.iter().any(|p| p["type"] == "image_url"));
         let replacement = if is_big_tool_output {
-            Some(dropped_stub(call.as_ref(), message["content"].as_str().unwrap_or("")))
+            let output = message["content"].as_str().unwrap_or("");
+            let label =
+                call.as_ref().map(|(name, target)| format!("{name} {target}").trim().to_string()).unwrap_or_else(|| "tool output".into());
+            let kept_as = store.as_deref_mut().map(|s| s.save(&label, output));
+            Some(dropped_stub(call.as_ref(), output, kept_as.as_deref()))
         } else if has_image {
             Some(IMAGE_DROPPED.to_string())
         } else {
@@ -760,6 +798,11 @@ pub fn trim_keeping(messages: &mut [Value], budget_chars: usize, keep_recent: us
                 *message = stubbed;
                 total -= before - after;
                 dropped += 1;
+            } else if is_big_tool_output {
+                // Not removed after all: nothing to keep.
+                if let Some(store) = store.as_deref_mut() {
+                    store.forget_last();
+                }
             }
         }
     }
@@ -986,6 +1029,36 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_output_is_kept_and_read_back_by_id() {
+        let big = format!("first line of the log\n{}\nTHE END", "x".repeat(20_000));
+        let mut history = vec![
+            json!({ "role": "user", "content": "build it" }),
+            json!({ "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "type": "function", "function": { "name": "run_shell", "arguments": "{\"command\":\"make\"}" } }] }),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": big }),
+        ];
+        for i in 0..5 {
+            history.push(json!({ "role": "assistant", "content": format!("step {i}") }));
+            history.push(json!({ "role": "user", "content": format!("go on {i}") }));
+        }
+        let mut s = setup(
+            "artifacts",
+            vec![Ok(call("artifact_search", json!({ "artifact_id": "out-1", "queries": ["the end"] }))), Ok(text("found it"))],
+            10,
+        );
+        s.agent.restore(history);
+        s.agent.set_context_window(8_000);
+        assert_eq!(s.agent.run("what did the build print last?").answer, "found it");
+        let seen = s.seen.borrow();
+        let stub = seen[0][3]["content"].as_str().unwrap();
+        assert!(stub.contains("output of run_shell make removed") && stub.contains("artifact_read out-1"), "{stub}");
+        let found = seen[1].last().unwrap()["content"].as_str().unwrap();
+        assert!(found.contains(">3 | THE END"), "{found}");
+        drop(seen);
+        s.agent.clear();
+        assert!(!s.agent.definitions().iter().any(|d| d["function"]["name"] == "artifact_read"), "cleared with the chat");
+    }
+
+    #[test]
     fn an_answer_right_after_a_failed_tool_is_asked_about_once() {
         let mut s = setup(
             "repair",
@@ -1114,7 +1187,7 @@ mod tests {
             messages[4]["content"],
             "[output of read_file src/main.rs removed to save context. It began: fn main() {}. Run it again if you need it.]"
         );
-        assert_eq!(dropped_stub(None, "x"), DROPPED);
+        assert_eq!(dropped_stub(None, "x", None), DROPPED);
     }
 
     #[test]
@@ -1130,8 +1203,8 @@ mod tests {
             json!({ "role": "tool", "tool_call_id": "a", "content": output }),
         ];
         let before = conversation_size(&messages);
-        assert!(dropped_stub(Some(&("read_file".into(), crate::text::one_line(&path, 80))), &output).len() > output.len());
-        assert_eq!(trim_keeping(&mut messages, 10, 0), 0, "a bigger stub saves nothing");
+        assert!(dropped_stub(Some(&("read_file".into(), crate::text::one_line(&path, 80))), &output, None).len() > output.len());
+        assert_eq!(trim_keeping(&mut messages, 10, 0, None), 0, "a bigger stub saves nothing");
         assert_eq!(messages[2]["content"], output.as_str());
         assert_eq!(conversation_size(&messages), before);
     }

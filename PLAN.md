@@ -101,7 +101,7 @@ In the order they are being built (value for a coding agent first):
 - [x] 5. Stream stall limit (SAK `StreamStallPolicy`): a streamed answer that
       makes no progress for too long fails as retryable, instead of waiting
       out a 15-minute read timeout.
-- [ ] 6. Tool-output artifacts (SAK `ArtifactStore`, `artifact_read`): a
+- [x] 6. Tool-output artifacts (SAK `ArtifactStore`, `artifact_read`): a
       trimmed tool output stays readable by id instead of being lost.
 - [ ] 7. Memory (SAK `RememberTool`, `AgentMemoryStore`): `remember` keeps a
       fact per project in a file, put in later system prompts.
