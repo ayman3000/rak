@@ -10,6 +10,7 @@
 //!   keys_command rak keys: the key file and what is set
 //!   skills_command rak skills list|add|remove, and /skills add
 //!   settings     what is kept between runs
+//!   trust        a project folder's own .rak/ and .env, used once trusted
 //!   signals      Ctrl-C
 //!   editor, menu, markdown, welcome, style, term, commands
 //!                the interface's parts, each pure where it can be
@@ -33,6 +34,7 @@ pub mod signals;
 pub mod skills_command;
 pub mod style;
 pub mod term;
+pub mod trust;
 pub mod welcome;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -154,10 +154,12 @@ pub fn global_key_file() -> Option<PathBuf> {
 }
 
 impl Keys {
-    pub fn load(project: &Path) -> Keys {
+    /// `with_project`: also the project's .env (only in a trusted folder).
+    pub fn load(project: &Path, with_project: bool) -> Keys {
         let mut keys = Keys::default();
         // Lowest priority first, so later files overwrite earlier ones.
-        for file in global_key_file().into_iter().chain([project.join(".env")]) {
+        let project_file = with_project.then(|| project.join(".env"));
+        for file in global_key_file().into_iter().chain(project_file) {
             let Ok(text) = std::fs::read_to_string(&file) else { continue };
             // An empty line never overrides a value from another file.
             keys.values.extend(parse_env(&text).into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k, (v, file.clone()))));
@@ -192,9 +194,10 @@ impl Keys {
 
 static KEYS: OnceLock<Keys> = OnceLock::new();
 
-/// Reads the .env files for this project. Once, before the first `key()`.
-pub fn load_keys(project: &Path) {
-    let _ = KEYS.set(Keys::load(project));
+/// Reads the .env files for this project (its own only when trusted). Once,
+/// before the first `key()`.
+pub fn load_keys(project: &Path, with_project: bool) {
+    let _ = KEYS.set(Keys::load(project, with_project));
 }
 
 /// A setting or key; the environment alone until `load_keys` has run.

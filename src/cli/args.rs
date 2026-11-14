@@ -50,6 +50,8 @@ BEHAVIOUR
       --any-path          let file tools reach outside the project folder
       --no-mcp            don't connect the MCP servers for this run
       --no-skills         no skills for this run, built-in ones included
+      --trust             use this folder's own .rak/ and .env settings this run, as if
+                          trusted (rak asks once in a terminal; see rak --help trust)
       --tools LIST        only these tools, comma-separated (read_file,search_files);
                           none: no tools at all, just the model
       --no-memory         no notes from earlier sessions, and no `remember`
@@ -102,6 +104,8 @@ pub struct Options {
     pub no_skills: bool,
     /// Only these tools (--tools a,b); Some(empty) is --tools none.
     pub tools: Option<Vec<String>>,
+    /// Use the project folder's own .rak/ and .env this run, as if trusted.
+    pub trust: bool,
     pub no_memory: bool,
     pub no_notes: bool,
     pub continue_last: bool,
@@ -154,6 +158,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         no_mcp: false,
         no_skills: false,
         tools: None,
+        trust: false,
         no_memory: false,
         no_notes: false,
         continue_last: false,
@@ -210,6 +215,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--any-path" => o.any_path = true,
             "--no-mcp" => o.no_mcp = true,
             "--no-skills" => o.no_skills = true,
+            "--trust" => o.trust = true,
             "--tools" => o.tools = Some(tool_list(&value("--tools"))),
             "--no-memory" => o.no_memory = true,
             "--no-notes" => o.no_notes = true,

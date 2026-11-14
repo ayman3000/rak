@@ -133,6 +133,19 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.10. A working plan for picking 
       2026-11-13; confirmed by the alpha.9 release build.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
+## From maki (github.com/tontinton/maki, read 2026-11-14)
+
+- [x] Folder trust: a project's .rak/mcp.json, .rak/skills, .rak/routines and
+      a .env with rak settings are used only once the folder is trusted
+      (asked once in a terminal, kept in ~/.config/rak/trusted; --trust for
+      one run). Before this, opening a cloned repo started its MCP programs
+      and a project .env RAK_BASE_URL received the provider key.
+- [x] run_shell keeps the start and the end of long output (a third and two
+      thirds), the middle counted, instead of only the start.
+- [ ] Later: keep a tool's partial output when Esc/Ctrl-C stops it (with the
+      Esc item below); `code_execution` (tools called from a sandboxed
+      script, many reads in one turn) is worth a look.
+
 ## The Harness Leaderboard (2026-11-14)
 
 huggingface.co/spaces/joelniklaus/harness-leaderboard ranks harnesses on

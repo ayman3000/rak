@@ -258,7 +258,7 @@ After each request rak shows how much input came from the cache (`6220 tokens in
 | `write_file` | Writes or appends a file. Refuses to overwrite a file that changed on disk since rak read it. | yes |
 | `edit_file` | Replaces exact text, tolerating trailing-whitespace differences; when the text isn't found it shows the closest lines. | yes |
 | `apply_patch` | Applies a unified diff to one file: several changes in one approved step, all or nothing. Hunks are placed by their lines, not their `@@` numbers. | yes |
-| `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. | yes |
+| `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. Long output keeps its start and its end, where a failing build prints its error, and says how much of the middle was cut. | yes |
 | `todo` | The agent's task list for work with three or more steps, shown to you as it changes. If the agent says it is done with steps still open, rak sends it back once. | |
 | `delegate` | Hands a question to a helper agent with a fresh context. The helper has only `list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url` (and `web_search` with a key): no shell, no edits. Only its answer comes back, so a big search doesn't fill the main context. Several `delegate` calls in one reply run at the same time: up to 3 on a commercial cloud API, 2 on Ollama's cloud, 1 on a model on this machine (the rest wait their turn). Their steps show indented, tagged `[1]`, `[2]`… Each helper may spend 200,000 input tokens (`--helper-budget`); near that it is told to wrap up, and at it to answer with what it found. | |
 | `web_search` | Searches the web through [Tavily](https://tavily.com). Only there when `TAVILY_API_KEY` is set; each search spends a Tavily credit. | |
@@ -284,6 +284,7 @@ Two more appear only when needed: `load_tools` for a [large MCP server](#mcp-ser
 - **File tools stay in the project folder** unless you pass `--any-path`. Symlinks are resolved first.
 - **`run_shell` is not confined.** A command you approve can do anything your user can. Read it before you say yes.
 - **Starting in your home folder or `/`** shows a warning first, since the agent could then reach everything below it.
+- **A folder's own settings wait for your trust** (from maki). A cloned repository can ship a `.rak/mcp.json` (its servers are programs rak would start), a `.env` that points rak's requests, and your key with them, at another address (`RAK_BASE_URL`), and skills or routines for the agent to follow. rak uses none of that until you say you trust the folder: it asks once, in a terminal, and remembers the answer in `~/.config/rak/trusted`. Without a terminal (a script, CI, an unattended `-y` run) an untrusted folder's settings are left out and rak says so; `--trust` uses them for one run. `rak mcp add --project` and `rak skills add --project` trust the folder, since you put them there. The project's instructions (`AGENTS.md`, `rak/rules.md`) are read as before.
 - **An MCP server is a program you chose to run.** rak starts it with your rights and trusts what it says about which tools are read-only.
 
 ## Project notes: the `rak/` folder
@@ -380,6 +381,7 @@ rak mcp remove files
 | `--read-only` | No edits and no commands: read and report. |
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp`, `--no-skills`, `--no-memory`, `--no-notes` | Leave out MCP servers, skills, memory notes, or the after-request notes update. |
+| `--trust` | Use this folder's own `.rak/` settings and `.env` this run, as if trusted (see [Safety](#safety)). |
 | `--tools LIST` | Only these tools, comma-separated (`--tools read_file,search_files,code_map`); MCP tools by their `server__tool` name. `--tools none` sends no tools at all: for a model that can't call tools, or a plain question for less (a one-word question measured 2,232 input tokens with every tool and 256 with none, kimi-k2.6:cloud). A name that matches no tool is said at the start. |
 | `-c`, `--continue` | Continue this folder's last chat (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |

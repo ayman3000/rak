@@ -57,6 +57,10 @@ pub fn run(args: &[String]) -> ! {
         }
         Some("add") => {
             let [source] = words.as_slice() else { usage_error("rak skills add needs one URL or file (see rak skills --help)") };
+            if project {
+                // The person adds it to this folder: it is theirs to trust.
+                super::trust::remember(&cwd);
+            }
             match add(source, &folder, yes, color) {
                 Ok(Some(_)) => {}
                 Ok(None) => std::process::exit(1),

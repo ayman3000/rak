@@ -46,6 +46,10 @@ sleep 30"#,
         std::fs::create_dir_all(&home).unwrap();
         let config = serde_json::json!({ "mcpServers": { "fake": { "command": "sh", "args": ["-c", fake_server(&pid_file)] } } });
         std::fs::write(project.join(".rak/mcp.json"), config.to_string()).unwrap();
+        // The person has trusted this folder (its servers are programs).
+        let trusted = std::fs::canonicalize(&project).unwrap();
+        std::fs::create_dir_all(home.join(".config/rak")).unwrap();
+        std::fs::write(home.join(".config/rak/trusted"), format!("{}\n", trusted.display())).unwrap();
         (dir, project, home, pid_file)
     }
 
@@ -130,6 +134,25 @@ sleep 30"#,
         };
         assert_eq!(status.code(), Some(130));
         assert_server_stopped(&pid_file);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untrusted_folder_s_servers_are_never_started() {
+        let (dir, project, home, pid_file) = project_with_server("untrusted");
+        std::fs::remove_file(home.join(".config/rak/trusted")).unwrap();
+        let output = rak(&home).args(["mcp", "list"]).current_dir(&project).output().unwrap();
+        let shown = String::from_utf8_lossy(&output.stdout);
+        assert!(shown.contains("not started: this folder is not trusted"), "{shown}");
+        // A run with no terminal to ask in leaves them out too ("nothing to
+        // do" ends it right after the servers would have started).
+        let _ = rak(&home)
+            .args(["-m", "test-model", "--base-url", "http://127.0.0.1:9/v1", "--no-skills", "-C"])
+            .arg(&project)
+            .output()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!pid_file.exists(), "the project's MCP server was started");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

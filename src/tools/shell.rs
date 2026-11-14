@@ -201,9 +201,10 @@ impl RunShell {
         drop(cmd); // closes our copies of the pipe's write end
 
         // Output is collected on its own thread, so a command that prints a
-        // lot never blocks on a full pipe.
+        // lot never blocks on a full pipe. Its start and its end are kept (a
+        // failing build prints its error last), the middle counted.
         let keep_bytes = self.max_output_chars * 4;
-        let collected = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let collected = Arc::new(Mutex::new(Collected::new(keep_bytes / 3, keep_bytes - keep_bytes / 3)));
         let closed = Arc::new(AtomicBool::new(false));
         {
             let (collected, closed) = (collected.clone(), closed.clone());
@@ -212,11 +213,7 @@ impl RunShell {
                 loop {
                     match reader.read(&mut chunk) {
                         Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            let mut all = collected.lock().unwrap();
-                            let room = keep_bytes.saturating_sub(all.len());
-                            all.extend_from_slice(&chunk[..n.min(room)]);
-                        }
+                        Ok(n) => collected.lock().unwrap().push(&chunk[..n]),
                     }
                 }
                 closed.store(true, Ordering::SeqCst);
@@ -254,7 +251,7 @@ impl RunShell {
             std::thread::sleep(Duration::from_millis(5));
         }
         let pipe_closed = closed.load(Ordering::SeqCst);
-        let mut output = String::from_utf8_lossy(&collected.lock().unwrap()).into_owned();
+        let output = collected.lock().unwrap().text();
 
         let code = exit_code(status);
         let header = if timed_out {
@@ -272,9 +269,7 @@ impl RunShell {
         } else {
             format!("exit {code}")
         };
-        if output.chars().count() > self.max_output_chars {
-            output = output.chars().take(self.max_output_chars).collect::<String>() + "\n… [output truncated]";
-        }
+        let output = head_and_tail(&output, self.max_output_chars);
         ToolResult::ok(if output.is_empty() { header } else { format!("{header}\n{output}") })
     }
 
@@ -347,6 +342,63 @@ impl RunShell {
 
 /// The end of a log, at most `max_chars` characters, without reading the
 /// whole file (a chatty server can write megabytes in its first seconds).
+/// A command's output as it arrives: the first `head` bytes and the last
+/// `tail` bytes, with how many bytes between them were dropped.
+struct Collected {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    head_max: usize,
+    tail_max: usize,
+    dropped: usize,
+}
+
+impl Collected {
+    fn new(head_max: usize, tail_max: usize) -> Self {
+        Collected { head: Vec::new(), tail: Vec::new(), head_max, tail_max, dropped: 0 }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        let room = self.head_max.saturating_sub(self.head.len());
+        let (to_head, rest) = bytes.split_at(room.min(bytes.len()));
+        self.head.extend_from_slice(to_head);
+        self.tail.extend_from_slice(rest);
+        // Trimmed in batches, so a flood is not copied byte by byte.
+        if self.tail.len() > self.tail_max * 2 {
+            let cut = self.tail.len() - self.tail_max;
+            self.dropped += cut;
+            self.tail.drain(..cut);
+        }
+    }
+
+    fn text(&self) -> String {
+        let cut = self.tail.len().saturating_sub(self.tail_max);
+        let dropped = self.dropped + cut;
+        let head = String::from_utf8_lossy(&self.head);
+        let tail = String::from_utf8_lossy(&self.tail[cut..]);
+        if dropped == 0 {
+            format!("{head}{tail}")
+        } else {
+            format!("{head}\n… [{dropped} bytes cut from the middle] …\n{tail}")
+        }
+    }
+}
+
+/// Pure — unit-tested. Output longer than `max_chars`: its first third and
+/// its last two thirds, the middle replaced by a note. The end weighs more:
+/// a failing build or test run prints its error last.
+pub fn head_and_tail(output: &str, max_chars: usize) -> String {
+    let count = output.chars().count();
+    if count <= max_chars {
+        return output.to_string();
+    }
+    let head_chars = max_chars / 3;
+    let tail_chars = max_chars - head_chars;
+    let head: String = output.chars().take(head_chars).collect();
+    let tail: String = output.chars().skip(count - tail_chars).collect();
+    let lines_cut = output.chars().skip(head_chars).take(count - head_chars - tail_chars).filter(|c| *c == '\n').count();
+    format!("{head}\n… [output cut: {} characters, about {lines_cut} lines, from the middle] …\n{tail}", count - head_chars - tail_chars)
+}
+
 fn log_tail(path: &Path, max_chars: usize) -> String {
     use std::io::{Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
@@ -423,12 +475,23 @@ mod tests {
     }
 
     #[test]
-    fn long_output_is_cut_off() {
+    fn long_output_keeps_its_start_and_its_end() {
         let mut s = shell("long");
-        s.max_output_chars = 50;
-        let r = s.run(&json!({ "command": "yes line | head -n 500" }));
-        assert!(r.text.ends_with("… [output truncated]"), "{}", r.text);
-        assert!(r.text.len() < 200);
+        s.max_output_chars = 90;
+        let r = s.run(&json!({ "command": "echo first-line; yes line | head -n 5000; echo 'error: the real failure'" }));
+        assert!(r.text.contains("first-line"), "{}", r.text);
+        assert!(r.text.ends_with("error: the real failure\n"), "the error at the end survives: {}", r.text);
+        assert!(r.text.contains("from the middle"), "{}", r.text);
+        assert!(r.text.len() < 400, "{}", r.text);
+    }
+
+    #[test]
+    fn head_and_tail_cuts_only_the_middle() {
+        assert_eq!(head_and_tail("short", 10), "short");
+        let text = format!("start\n{}end", "x\n".repeat(100));
+        let cut = head_and_tail(&text, 30);
+        assert!(cut.starts_with("start\n") && cut.ends_with("x\nend"), "{cut}");
+        assert!(cut.contains("lines, from the middle"), "{cut}");
     }
 
     #[test]

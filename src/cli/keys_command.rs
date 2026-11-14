@@ -65,7 +65,8 @@ pub fn run(args: &[String]) -> ! {
         }
     }
     let cwd = std::env::current_dir().unwrap_or_default();
-    let keys = Keys::load(&cwd);
+    // What a run here would use: the project's .env only in a trusted folder.
+    let keys = Keys::load(&cwd, super::trust::is_trusted(&cwd) || super::trust::project_settings(&cwd).is_empty());
     for note in &keys.notes {
         println!("Note: {note}.");
     }

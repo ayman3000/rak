@@ -94,6 +94,10 @@ pub fn run(args: &[String]) -> ! {
             };
             let server = mcp::ServerConfig { name: name.clone(), transport, timeout };
             let file = if project { project_file } else { user_file };
+            if project {
+                // The person put it there: this folder is theirs to trust.
+                super::trust::remember(&cwd);
+            }
             let replaced = mcp::add_to_file(&file, &server).unwrap_or_else(|why| fail(why));
             println!("{} {name} in {}", if replaced { "Replaced" } else { "Added" }, file.display());
 
@@ -123,7 +127,10 @@ pub fn run(args: &[String]) -> ! {
                 println!("No MCP servers yet. Add one with:\n  rak mcp add NAME -- COMMAND [ARG…]\n  rak mcp add NAME --url URL");
                 std::process::exit(0);
             }
-            let configs: Vec<mcp::ServerConfig> = servers.iter().map(|(server, _)| server.clone()).collect();
+            // A project's servers are programs: started only in a trusted folder.
+            let trusted = super::trust::is_trusted(&cwd);
+            let configs: Vec<mcp::ServerConfig> =
+                servers.iter().filter(|(_, file)| trusted || *file != project_file).map(|(server, _)| server.clone()).collect();
             let connected = mcp::connect_all(&configs, &cwd, false, &Stop::new());
             for (server, file) in &servers {
                 // Keys stay out of the listing: names of variables and headers only.
@@ -142,6 +149,9 @@ pub fn run(args: &[String]) -> ! {
                     }
                 };
                 let status = match connected.servers.iter().find(|(name, _)| name == &server.name) {
+                    _ if !trusted && *file == project_file => {
+                        "not started: this folder is not trusted (start rak here to be asked)".to_string()
+                    }
                     Some((_, count)) => format!("✓ {count} tool{}", plural(*count)),
                     None => {
                         let prefix = format!("{}: ", server.name);

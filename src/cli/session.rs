@@ -258,7 +258,12 @@ pub fn run(mut o: Options) -> i32 {
     if !cwd.is_dir() {
         usage_error(&format!("{} is not a folder", cwd.display()));
     }
-    load_keys(&cwd);
+    // What the folder brings of its own (.rak/mcp.json, skills, routines, a
+    // .env with rak settings) is used only in a trusted folder: asked once in
+    // a terminal, never in an unattended run.
+    let can_ask = std::io::stdin().is_terminal() && std::io::stderr().is_terminal() && !(o.yes && o.task.is_some());
+    let (trusted, trust_note) = super::trust::decide(&cwd, o.trust, can_ask, std::io::stderr().is_terminal());
+    load_keys(&cwd, trusted);
     // Defaults may also come from the .env files.
     o.model = o.model.or_else(|| key("RAK_MODEL"));
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
@@ -334,7 +339,8 @@ pub fn run(mut o: Options) -> i32 {
     // Plus the ones built into rak for this system; --no-skills leaves all of
     // them out, and so does a --tools list without use_skill.
     let skills_on = !o.no_skills && allowed("use_skill");
-    let loaded = if !skills_on { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
+    let skill_sources: Vec<PathBuf> = if trusted { skill_folders.clone() } else { skill_folders[1..].to_vec() };
+    let loaded = if !skills_on { Vec::new() } else { rak::skills::load_with_built_in(&skill_sources, std::env::consts::OS) };
     // The index is fixed for the session, so the prompt stays cacheable; a skill
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
@@ -428,13 +434,13 @@ pub fn run(mut o: Options) -> i32 {
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).filter(|name| allowed(name)).collect();
 
     // Tools from MCP servers join the built-in ones.
-    let (listed, mut mcp_problems) =
-        if o.no_mcp { (Vec::new(), Vec::new()) } else { mcp::load(&mcp::config_files(&ctx.cwd, config_dir().as_deref())) };
+    let (listed, mut mcp_problems) = if o.no_mcp { (Vec::new(), Vec::new()) } else { mcp::load(&mcp_files(&ctx.cwd, trusted)) };
     let servers: Vec<mcp::ServerConfig> = listed.into_iter().map(|(server, _)| server).collect();
     let mut connected = mcp::connect_all(&servers, &ctx.cwd, o.read_only, &stop);
     mcp_problems.append(&mut connected.problems);
     // Settings set twice in a .env file: shown with the MCP warnings.
     mcp_problems.extend(super::settings::key_notes());
+    mcp_problems.extend(trust_note);
     let mcp_summary = connected.summary();
     let mut deferred = connected.to_defer();
     tools.append(&mut connected.tools);
@@ -466,7 +472,8 @@ pub fn run(mut o: Options) -> i32 {
         agent.gate = rak::notes::Gate::from_instructions(&project_notes.instructions);
     }
     if !o.read_only && allowed(rak::routines::RUN) {
-        agent.enable_routines(std::iter::once(routine_folders.0.clone()).chain(routine_folders.1.clone()).collect());
+        let project_routines = trusted.then(|| routine_folders.0.clone());
+        agent.enable_routines(project_routines.into_iter().chain(routine_folders.1.clone()).collect());
     }
     agent.stop = stop.clone();
     if learns {
@@ -833,6 +840,16 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
 }
 
 // MARK: - Chat
+
+/// The mcp.json files to read: the project's only when its folder is trusted.
+pub fn mcp_files(project: &Path, trusted: bool) -> Vec<PathBuf> {
+    let files = mcp::config_files(project, config_dir().as_deref());
+    if trusted {
+        files
+    } else {
+        files[1..].to_vec()
+    }
+}
 
 /// Pure — unit-tested. What the system prompt says when --tools narrowed the
 /// tools: the general advice above it names tools this run may not have.
