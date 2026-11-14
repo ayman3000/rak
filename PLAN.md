@@ -1,13 +1,13 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-14, after releasing v0.1.0-alpha.11. A working plan for picking the work up on another machine.
+Updated 2026-11-14, after releasing v0.1.0-alpha.12. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.11** (2026-11-14). It has everything
+- The newest release is **v0.1.0-alpha.12** (2026-11-14). It has everything
   below; `main` and the release match.
 
-### On main, not released
+### In v0.1.0-alpha.12
 
 - First-run setup: a chat with no key file and nothing chosen asks for a
   provider (local servers that are running first), its key (hidden, saved
