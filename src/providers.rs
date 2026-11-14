@@ -16,6 +16,10 @@ pub struct Provider {
     pub key: Option<String>,
     /// Anthropic's Messages API rather than OpenAI's chat-completions API.
     pub anthropic: bool,
+    /// An address a key must be good to read (GET, the key as a bearer
+    /// token), for providers whose model list answers anyone: setup checks
+    /// the key there, so a mistyped one is caught before the first message.
+    pub key_check: Option<String>,
 }
 
 const DATA: &str = include_str!("providers.json");
@@ -52,6 +56,7 @@ pub fn parse(text: &str) -> Result<Vec<Provider>, String> {
                 base_url: field("base_url")?,
                 key: p["key"].as_str().map(str::to_string),
                 anthropic: api == "anthropic",
+                key_check: p["key_check"].as_str().map(str::to_string),
             })
         })
         .collect()
@@ -75,6 +80,12 @@ mod tests {
         assert_eq!(find("ollama").unwrap().key, None);
         assert_eq!(find("ollama-cloud").unwrap().key.as_deref(), Some("OLLAMA_API_KEY"));
         assert!(find("nope").is_none());
+        // Where the model list answers without a key, a key check is listed.
+        // (ollama.com has none known: its /api/ps refuses a good key too.)
+        for name in ["openrouter", "huggingface"] {
+            assert!(find(name).unwrap().key_check.as_deref().is_some_and(|u| u.starts_with("https://")), "{name}");
+        }
+        assert!(all.iter().filter(|p| p.key_check.is_some()).all(|p| p.key.is_some()), "a check needs a key");
     }
 
     #[test]

@@ -155,6 +155,7 @@ mod tests {
             base_url: format!("https://{name}"),
             key: key.map(str::to_string),
             anthropic: false,
+            key_check: None,
         }
     }
 

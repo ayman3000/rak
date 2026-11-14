@@ -7,6 +7,17 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.12. A working plan for picking 
 - The newest release is **v0.1.0-alpha.12** (2026-11-14). It has everything
   below; `main` and the release match.
 
+### On main, not released
+
+- Setup checks a key where the model list would not: OpenRouter
+  (`/api/v1/key`) and Hugging Face (`whoami-v2`), set as `key_check` in
+  providers.json. A refusal asks "Type it again?"; "n" goes on, so a wrong
+  check address can never lock out a good key. Gemini's 400 counts as a
+  refused key. ollama.com has no check: its `/api/ps` refuses a good key too
+  (found with a real key), and its model list is public.
+- Not verified with a real key: the OpenRouter and Hugging Face checks
+  (both refuse a fake key with 401).
+
 ### In v0.1.0-alpha.12
 
 - First-run setup: a chat with no key file and nothing chosen asks for a

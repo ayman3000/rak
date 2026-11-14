@@ -240,6 +240,24 @@ pub fn run(color: bool) -> Option<()> {
                 Some(typed)
             }
         };
+        // Where the model list answers anyone, the key is checked first.
+        if let (Some(url), Some(key)) = (&provider.key_check, &api_key) {
+            match check_key(url, key) {
+                Check::Accepted => {}
+                Check::Refused(code) => {
+                    println!("{}", paint(color, Style::Yellow, &format!("{} did not accept that key ({code}).", provider.label)));
+                    // "n" goes on with this key: a check is a help, never a lock.
+                    if ask_yes("Type it again? [Y/n] › ", color) {
+                        ask_key = true;
+                        continue;
+                    }
+                    println!("{}", paint(color, Style::Dim, "Going on with it as it is."));
+                }
+                Check::Unknown(why) => {
+                    println!("{}", paint(color, Style::Dim, &format!("Couldn't check the key ({why}); going on.")))
+                }
+            }
+        }
         let model: Box<dyn rak::provider::Model> = if provider.anthropic {
             Box::new(rak::anthropic::Anthropic::new(&provider.base_url, api_key.unwrap_or_default(), ""))
         } else {
@@ -290,11 +308,42 @@ pub fn run(color: bool) -> Option<()> {
     }
 }
 
+/// What a key check found.
+#[derive(Debug, PartialEq)]
+pub enum Check {
+    Accepted,
+    /// The provider said no: 401, 403 (or 400, Gemini's answer to a bad key).
+    Refused(u16),
+    /// Couldn't tell (no network, a server error): setup goes on.
+    Unknown(String),
+}
+
+/// Pure — unit-tested. A check's HTTP status as an answer about the key.
+pub fn classify(status: u16) -> Check {
+    match status {
+        200..=299 => Check::Accepted,
+        400 | 401 | 403 => Check::Refused(status),
+        other => Check::Unknown(format!("it answered {other}")),
+    }
+}
+
+/// GET `url` with the key as a bearer token. Costs nothing: it reads the
+/// account, it runs no model.
+fn check_key(url: &str, key: &str) -> Check {
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build();
+    match agent.get(url).set("Authorization", &format!("Bearer {key}")).call() {
+        Ok(response) => classify(response.status()),
+        Err(ureq::Error::Status(code, _)) => classify(code),
+        Err(ureq::Error::Transport(t)) => Check::Unknown(t.kind().to_string()),
+    }
+}
+
 /// Pure — unit-tested. What to say when the model list could not be had:
 /// a refused key said as such, anything else as it came.
 pub fn listing_failed(label: &str, why: &str, keyed: bool) -> String {
-    if keyed && (why.contains(" 401") || why.contains(" 403")) {
-        format!("{label} did not accept that key ({}).", why.rsplit(' ').next().unwrap_or(why))
+    let refused = [" 400", " 401", " 403"].iter().find_map(|code| why.find(code).map(|at| &why[at + 1..at + 4]));
+    if let (true, Some(code)) = (keyed, refused) {
+        format!("{label} did not accept that key ({code}).")
     } else {
         format!("Couldn't get {label}'s models: {why}")
     }
@@ -388,6 +437,18 @@ mod tests {
             "OpenAI did not accept that key (401)."
         );
         assert!(listing_failed("Ollama", "connection refused", false).starts_with("Couldn't get Ollama's models"));
+    }
+
+    #[test]
+    fn a_key_check_s_answer_is_read_as_accepted_refused_or_unknown() {
+        assert_eq!(classify(200), Check::Accepted);
+        assert_eq!(classify(401), Check::Refused(401));
+        assert_eq!(classify(400), Check::Refused(400), "Gemini answers a bad key with 400");
+        assert!(matches!(classify(503), Check::Unknown(_)), "a server error is no verdict on the key");
+        assert_eq!(
+            listing_failed("Gemini", "https://x/models answered 400: Please pass a valid API key", true),
+            "Gemini did not accept that key (400)."
+        );
     }
 
     #[test]

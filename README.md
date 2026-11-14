@@ -65,7 +65,7 @@ cargo install --git https://github.com/ayman3000/rak --locked
 **1. Run `rak`.** The first time, it sets itself up:
 
 - **Pick a provider** from the list. Ollama on your machine comes first when it is running, and needs no key.
-- **Paste its key.** It is not shown as you type or paste, and it is saved to `~/.config/rak/.env`, readable by you only.
+- **Paste its key.** It is not shown as you type or paste, and it is saved to `~/.config/rak/.env`, readable by you only. A key the provider refuses is caught here, not at your first message (for OpenRouter and Hugging Face, whose model lists need no key, rak checks the key against the account first; that runs no model and costs nothing).
 - **Pick a model** from the provider's own list (type to narrow it).
 
 Then the chat starts. Run `rak setup` any time to switch provider or model, or to give a new key; the rest of the file stays as it was.
