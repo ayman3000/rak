@@ -1,11 +1,21 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-13, after releasing v0.1.0-alpha.8. A working plan for picking the work up on another machine.
+Updated 2026-11-14, after releasing v0.1.0-alpha.9. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.8** (2026-11-13). It has everything
+- The newest release is **v0.1.0-alpha.9** (2026-11-14). It has everything
   below; `main` and the release match.
+
+### In v0.1.0-alpha.9
+
+- Parallel helpers: several `delegate` calls in one reply run at the same
+  time (3 on commercial cloud APIs, 2 on Ollama's cloud, 1 locally), steps
+  tagged `[1]`, `[2]`…, fallback per helper (SAK `SubAgentGate`).
+- `delegate`'s description names the helper's tools; the footer, `/usage`
+  and `--json` count the helpers' tool calls apart.
+- README rewritten; benchmarks and field notes moved to `docs/`.
+- Still open: Markdown tables show as raw pipes in the terminal.
 
 ### In v0.1.0-alpha.8
 
