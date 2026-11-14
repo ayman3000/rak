@@ -88,21 +88,35 @@ expected=$(cut -d ' ' -f 1 "$tmp/$archive.sha256")
 actual=$(sha256 "$tmp/$archive")
 [ "$expected" = "$actual" ] || fail "the download does not match its checksum; nothing was installed"
 
+# The version already here, if any, to say what this upgraded from.
+before=""
+if [ -x "$INSTALL_DIR/rak" ]; then
+    before=$("$INSTALL_DIR/rak" --version 2>/dev/null | awk '{ print $2 }') || before=""
+fi
+
 tar -xzf "$tmp/$archive" -C "$tmp"
 mkdir -p "$INSTALL_DIR"
 cp "$tmp/rak-$VERSION-$target/rak" "$INSTALL_DIR/rak.new"
 chmod 755 "$INSTALL_DIR/rak.new"
 mv -f "$INSTALL_DIR/rak.new" "$INSTALL_DIR/rak"
 
-say "Installed $("$INSTALL_DIR/rak" --version) to $INSTALL_DIR/rak"
+now=$("$INSTALL_DIR/rak" --version | awk '{ print $2 }')
+if [ -n "$before" ] && [ "$before" != "$now" ]; then
+    say "Upgraded rak $before → $now in $INSTALL_DIR/rak"
+else
+    say "Installed rak $now to $INSTALL_DIR/rak"
+fi
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
     *) say "" && say "$INSTALL_DIR is not on your PATH. Add this line to your shell's profile:" \
         && say "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
+# Set up already (a key file): nothing more to do. Only whether the file
+# exists is checked; it is never read.
+config="${XDG_CONFIG_HOME:-$HOME/.config}/rak/.env"
 say ""
-say "Next:"
-say "  1. rak keys      creates ~/.config/rak/.env (an older one: rak keys --update)"
-say "  2. Fill in your keys, RAK_PROVIDER and RAK_MODEL in that file."
-say "  3. rak           starts a chat; /provider and /model switch."
-say "  With Ollama on this machine you need no key: rak -m <model>"
+if [ -f "$config" ]; then
+    say "Start a chat with: rak"
+else
+    say "Next: run  rak  — the first time, it asks for a provider, its key and a model."
+fi

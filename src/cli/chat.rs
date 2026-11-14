@@ -134,7 +134,7 @@ pub fn list_models(provider: &dyn Model, current: Option<&str>, color: bool) -> 
 /// type a name it doesn't list. None when they cancel (Esc) or the provider
 /// can't list its models.
 pub fn pick_model(provider: &dyn Model, current: Option<&str>, color: bool) -> Option<String> {
-    let mut models = match provider.list_models() {
+    let models = match provider.list_models() {
         Ok(models) => models,
         Err(why) => {
             println!("{}", paint(color, Style::Yellow, &format!("Couldn't list the models: {why}")));
@@ -142,12 +142,17 @@ pub fn pick_model(provider: &dyn Model, current: Option<&str>, color: bool) -> O
             return None;
         }
     };
-    // Only models that can chat.
-    models.retain(|m| !m.to_lowercase().contains("embed"));
-    if models.is_empty() {
+    if models.iter().all(|m| m.to_lowercase().contains("embed")) {
         println!("{}", paint(color, Style::Dim, "The provider lists no models. Switch by name: /model NAME"));
         return None;
     }
+    pick_from(models, current, color)
+}
+
+/// The picker over a provider's models (those that can chat), a name not
+/// listed typed in allowed. None when cancelled.
+pub fn pick_from(mut models: Vec<String>, current: Option<&str>, color: bool) -> Option<String> {
+    models.retain(|m| !m.to_lowercase().contains("embed"));
     let choices: Vec<Choice> = models.iter().map(|m| Choice { name: m.clone(), note: String::new(), dim: false }).collect();
     let start = current.and_then(|c| models.iter().position(|m| m == c));
     match picker::pick(&choices, start, true, color) {

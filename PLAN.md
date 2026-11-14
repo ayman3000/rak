@@ -7,6 +7,16 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.11. A working plan for picking 
 - The newest release is **v0.1.0-alpha.11** (2026-11-14). It has everything
   below; `main` and the release match.
 
+### On main, not released
+
+- First-run setup: a chat with no key file and nothing chosen asks for a
+  provider (local servers that are running first), its key (hidden, saved
+  0600) and a model from the provider's list, then starts. `rak setup` runs
+  it again and keeps the rest of the file. A refused key is said plainly;
+  scripts never get questions.
+- install.sh says "Upgraded A → B" on an upgrade, and only "Start a chat
+  with: rak" when a key file exists (checked, never read).
+
 ### In v0.1.0-alpha.11
 
 - Folder trust (from maki): a folder's own `.rak/mcp.json`, `.env` rak

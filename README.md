@@ -62,36 +62,30 @@ cargo install --git https://github.com/ayman3000/rak --locked
 
 ## Getting started
 
-**1. Create your key file.**
+**1. Run `rak`.** The first time, it sets itself up:
 
-```bash
-rak keys
-```
+- **Pick a provider** from the list. Ollama on your machine comes first when it is running, and needs no key.
+- **Paste its key.** It is not shown as you type or paste, and it is saved to `~/.config/rak/.env`, readable by you only.
+- **Pick a model** from the provider's own list (type to narrow it).
 
-This creates `~/.config/rak/.env` (readable by you only) and lists every provider rak knows, with whether its key is set.
-
-**2. Fill it in.** Open it in any editor (`open -t ~/.config/rak/.env` on macOS, `nano ~/.config/rak/.env` on Linux). Put each key right after its `=` (no quotes), and say which provider and model to use:
-
-```bash
-# 1. API keys: one per provider. Fill in the ones you have.
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=sk-ant-…
-OLLAMA_API_KEY=
-…
-
-# 2. Selected provider and model
-RAK_PROVIDER=anthropic
-RAK_MODEL=claude-sonnet-5-5
-```
-
-Leave `RAK_MODEL` empty and rak lists the provider's models to pick from. With Ollama on your machine you need no key at all: leave `RAK_PROVIDER` empty and name a model, such as `kimi-k2.6:cloud`.
-
-**3. Check, then start.** Run `rak keys` again: each key you filled in should say `set`, and your provider should be marked `▸`. Then:
+Then the chat starts. Run `rak setup` any time to switch provider or model, or to give a new key; the rest of the file stays as it was.
 
 ```bash
 rak                                    # a chat
 rak "explain what this project does"   # one request
 ```
+
+**2. Check what is set** with `rak keys`: each provider, whether its key is set, and where it came from (never the key itself).
+
+**3. More keys by hand.** `~/.config/rak/.env` has a line for every provider, the web search key and rak's settings. Open it in any editor, put each key right after its `=` (no quotes):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-…
+RAK_PROVIDER=anthropic
+RAK_MODEL=claude-sonnet-5-5
+```
+
+Scripts and CI never get questions: without a terminal, rak reads the environment and the key file, and says what is missing.
 
 **4. In a project, type `/init`** once. rak looks at the project and writes its notes in `rak/`, so every later session starts already knowing it (see [Project notes](#project-notes-the-rak-folder)).
 
@@ -392,7 +386,7 @@ rak mcp remove files
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |
 | `-q`, `--quiet` | Only the answer. |
 
-Other commands: `rak keys`, `rak skills …`, `rak mcp …`.
+Other commands: `rak setup`, `rak keys`, `rak skills …`, `rak mcp …`.
 
 Progress goes to stderr, so `rak "…" > answer.txt` holds only the answer. Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4` turn limit, `5` stuck repeating a call, `130` stopped with Ctrl-C.
 
@@ -456,7 +450,7 @@ The code is in two layers: a library that knows nothing about terminals, and the
 | `args`, `session`, `chain` | The command line; one run set up and reported; the fallback chain's questions. |
 | `chat`, `commands` | The chat loop and its slash commands. |
 | `approval`, `output`, `log` | Asking before changes; what is shown; `--log`. |
-| `mcp_command`, `skills_command`, `keys_command` | `rak mcp`, `rak skills`, `rak keys`. |
+| `mcp_command`, `skills_command`, `keys_command`, `setup` | `rak mcp`, `rak skills`, `rak keys`, and the first-run setup (`rak setup`). |
 | `editor`, `menu`, `picker`, `markdown`, `welcome`, `style`, `term` | The interface's parts, each pure where it can be, and tested. |
 | `settings`, `signals` | What is kept between runs; Ctrl-C. |
 

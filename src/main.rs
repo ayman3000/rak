@@ -12,6 +12,9 @@ fn main() {
     if argv.first().map(String::as_str) == Some("keys") {
         cli::keys_command::run(&argv[1..]);
     }
+    if argv.first().map(String::as_str) == Some("setup") {
+        cli::setup::command(&argv[1..]);
+    }
     if argv.first().map(String::as_str) == Some("skills") {
         cli::skills_command::run(&argv[1..]);
     }

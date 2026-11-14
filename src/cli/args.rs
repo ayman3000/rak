@@ -10,7 +10,9 @@ USAGE
   rak [options] \"what to do\"      one request, then exit
   rak [options]                   chat (type / for the commands, /exit to leave)
   echo \"what to do\" | rak         the request from a pipe
-  rak keys                        set up ~/.config/rak/.env and see which keys are set
+  rak setup                       pick a provider, give its key, pick a model (asked
+                                  on the first chat too)
+  rak keys                        create ~/.config/rak/.env and see which keys are set
   rak keys --update               bring an older key file up to date, keeping its values
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 

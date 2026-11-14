@@ -101,7 +101,7 @@ pub fn run(args: &[String]) -> ! {
 
 /// Writes a file readable by its owner only (it is for keys): to a temporary
 /// file first, then renamed over, so a failed write never leaves half a file.
-fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
+pub fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
     if let Some(folder) = file.parent() {
         std::fs::create_dir_all(folder)?;
     }
@@ -204,7 +204,7 @@ pub fn update(template: &str, old: &std::collections::HashMap<String, String>) -
 
 /// A value as it must be written to read back the same: quoted when it has
 /// spaces, a `#` or a leading quote.
-fn quote(value: &str) -> String {
+pub fn quote(value: &str) -> String {
     let plain = !value.contains(char::is_whitespace) && !value.contains('#') && !value.starts_with(['"', '\'']);
     match (plain, value.contains('\'')) {
         (true, _) => value.to_string(),

@@ -212,9 +212,9 @@ pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
     let api_key = match &route.key {
         KeySource::None => None,
         KeySource::IfSet(name) => key(name),
-        KeySource::Required(name, why) => {
-            Some(key(name).ok_or(format!("{name} is not set ({why}). Add it to ~/.config/rak/.env; `rak keys` shows which keys are set"))?)
-        }
+        KeySource::Required(name, why) => Some(key(name).ok_or(format!(
+            "{name} is not set ({why}). Run `rak setup` to give it, or add it to ~/.config/rak/.env; `rak keys` shows which keys are set"
+        ))?),
     };
     Ok(Backend {
         provider: route.provider.map(|p| p.name.clone()),
@@ -263,6 +263,21 @@ pub fn run(mut o: Options) -> i32 {
     // a terminal, never in an unattended run.
     let can_ask = std::io::stdin().is_terminal() && std::io::stderr().is_terminal() && !(o.yes && o.task.is_some());
     let (trusted, trust_note) = super::trust::decide(&cwd, o.trust, can_ask, std::io::stderr().is_terminal());
+    // First run: a chat with no key file and nothing chosen asks for a
+    // provider, its key and a model, and saves them, before anything is read.
+    let can_set_up = o.task.is_none() && !o.json && o.replay.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let chosen = o.model.is_some() || o.provider.is_some() || o.base_url.is_some() || {
+        let keys = super::settings::Keys::load(&cwd, trusted);
+        ["RAK_PROVIDER", "RAK_MODEL", "RAK_BASE_URL"].iter().any(|name| keys.get(name).is_some())
+    };
+    let has_key_file = super::settings::global_key_file().is_some_and(|file| file.exists());
+    if super::setup::needed(can_set_up, has_key_file, chosen) {
+        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        if super::setup::run(color).is_none() {
+            println!("Nothing was saved. Run `rak setup` when you're ready, or start with a model: rak -m NAME");
+            std::process::exit(1);
+        }
+    }
     load_keys(&cwd, trusted);
     // Defaults may also come from the .env files.
     o.model = o.model.or_else(|| key("RAK_MODEL"));
