@@ -12,6 +12,7 @@ use super::args::Options;
 use super::output::Ui;
 use super::session::{backend, make_provider, window_for, Backend};
 use super::style::{paint, Style};
+use rak::delegate::Offer;
 use rak::fallback::{Failure, Hook, Next, Switch};
 use rak::interrupt::Stop;
 use rak::providers::Provider;
@@ -99,41 +100,48 @@ pub fn is_yes(typed: &str) -> bool {
 /// The hook for the agent: the next provider in the chain whose key is set,
 /// asked about first in a chat.
 pub fn hook(asker: Asker, state: Rc<RefCell<State>>) -> Hook {
-    Box::new(move |why, failure| {
-        let mut st = state.borrow_mut();
-        while st.next < st.links.len() {
-            let link = st.links[st.next].clone();
-            st.next += 1;
-            let mut o = asker.o.clone();
-            o.provider = Some(link.provider.clone());
-            o.provider_flag = true;
-            (o.base_url, o.base_url_flag, o.api_key_env) = (None, false, None);
-            let Ok(backend) = backend(&o, Some(&link.model)) else { continue };
-            let to = label(&backend, &link.model);
-            if !asker.auto.get() && asker.interactive {
-                asker.ui.borrow_mut().end_line();
-                let question = format!("{} failed: {}\n  Continue with {to}? [y/n] › ", st.current_label, one_line(why, 120));
-                eprint!("{}", paint(asker.color, Style::Yellow, &question));
-                asker.ui.borrow_mut().asked = true;
-                let _ = std::io::stderr().flush();
-                let mut typed = String::new();
-                let _ = std::io::stdin().lock().read_line(&mut typed);
-                if asker.stop.requested() || !is_yes(&typed) {
-                    asker.ui.borrow_mut().asked = false;
-                    return Next::Declined;
-                }
-            }
-            let model = make_provider(&o, &backend, &link.model, &asker.stop);
-            let (window, _) = window_for(&o, model.as_ref());
-            if failure == Failure::Config {
-                st.for_good = true;
-            }
-            st.current = Some((o, backend, link.model.clone(), window));
-            st.current_label = to.clone();
-            return Next::Switch(Switch { model, context_window: window, label: to });
-        }
-        Next::NoneLeft
+    Box::new(move |why, failure| match offer(&asker, &mut state.borrow_mut(), why, failure) {
+        Offer::Switch { model, context_window, label } => Next::Switch(Switch { model, context_window, label }),
+        Offer::NoneLeft => Next::NoneLeft,
+        Offer::Declined => Next::Declined,
     })
+}
+
+/// The next model in the chain, after asking when there is someone to ask.
+/// Its model can go to another thread (a delegate helper's).
+pub fn offer(asker: &Asker, st: &mut State, why: &str, failure: Failure) -> Offer {
+    while st.next < st.links.len() {
+        let link = st.links[st.next].clone();
+        st.next += 1;
+        let mut o = asker.o.clone();
+        o.provider = Some(link.provider.clone());
+        o.provider_flag = true;
+        (o.base_url, o.base_url_flag, o.api_key_env) = (None, false, None);
+        let Ok(backend) = backend(&o, Some(&link.model)) else { continue };
+        let to = label(&backend, &link.model);
+        if !asker.auto.get() && asker.interactive {
+            asker.ui.borrow_mut().end_line();
+            let question = format!("{} failed: {}\n  Continue with {to}? [y/n] › ", st.current_label, one_line(why, 120));
+            eprint!("{}", paint(asker.color, Style::Yellow, &question));
+            asker.ui.borrow_mut().asked = true;
+            let _ = std::io::stderr().flush();
+            let mut typed = String::new();
+            let _ = std::io::stdin().lock().read_line(&mut typed);
+            if asker.stop.requested() || !is_yes(&typed) {
+                asker.ui.borrow_mut().asked = false;
+                return Offer::Declined;
+            }
+        }
+        let model = make_provider(&o, &backend, &link.model, &asker.stop);
+        let (window, _) = window_for(&o, model.as_ref());
+        if failure == Failure::Config {
+            st.for_good = true;
+        }
+        st.current = Some((o, backend, link.model.clone(), window));
+        st.current_label = to.clone();
+        return Offer::Switch { model, context_window: window, label: to };
+    }
+    Offer::NoneLeft
 }
 
 #[cfg(test)]

@@ -57,6 +57,15 @@ pub trait Tool {
         false
     }
     fn run(&self, args: &Value) -> ToolResult;
+    /// True when several calls of this tool from one reply should go to
+    /// `run_together` (delegate's helpers run in parallel).
+    fn runs_together(&self) -> bool {
+        false
+    }
+    /// Several calls from one reply, one result each, in order.
+    fn run_together(&self, calls: &[Value]) -> Vec<ToolResult> {
+        calls.iter().map(|args| self.run(args)).collect()
+    }
 }
 
 /// The tool in the shape chat-completions servers expect.
@@ -69,13 +78,7 @@ pub fn definition(tool: &dyn Tool) -> Value {
 
 /// The standard set. Read-only leaves out everything that changes the machine.
 pub fn core_tools(ctx: &Arc<Ctx>, read_only: bool) -> Vec<Box<dyn Tool>> {
-    let mut tools: Vec<Box<dyn Tool>> = vec![
-        Box::new(fs::ListDir(ctx.clone())),
-        Box::new(fs::SearchFiles(ctx.clone())),
-        Box::new(map::CodeMap(ctx.clone())),
-        Box::new(fs::ReadFile(ctx.clone())),
-        Box::new(fetch::FetchUrl::new()),
-    ];
+    let mut tools: Vec<Box<dyn Tool>> = reading_tools(ctx).into_iter().map(|t| t as Box<dyn Tool>).collect();
     if !read_only {
         tools.push(Box::new(fs::WriteFile(ctx.clone())));
         tools.push(Box::new(fs::EditFile(ctx.clone())));
@@ -83,6 +86,18 @@ pub fn core_tools(ctx: &Arc<Ctx>, read_only: bool) -> Vec<Box<dyn Tool>> {
         tools.push(Box::new(shell::RunShell::new(ctx.clone())));
     }
     tools
+}
+
+/// The tools that only read, in a form that can move to another thread
+/// (delegate's helpers run on their own).
+pub fn reading_tools(ctx: &Arc<Ctx>) -> Vec<Box<dyn Tool + Send>> {
+    vec![
+        Box::new(fs::ListDir(ctx.clone())),
+        Box::new(fs::SearchFiles(ctx.clone())),
+        Box::new(map::CodeMap(ctx.clone())),
+        Box::new(fs::ReadFile(ctx.clone())),
+        Box::new(fetch::FetchUrl::new()),
+    ]
 }
 
 /// Shared by every tool in one run.

@@ -260,7 +260,7 @@ After each request rak shows how much input came from the cache (`6220 tokens in
 | `apply_patch` | Applies a unified diff to one file: several changes in one approved step, all or nothing. Hunks are placed by their lines, not their `@@` numbers. | yes |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. | yes |
 | `todo` | The agent's task list for work with three or more steps, shown to you as it changes. If the agent says it is done with steps still open, rak sends it back once. | |
-| `delegate` | Hands a question to a helper agent with a fresh context. The helper has only `list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url` (and `web_search` with a key): no shell, no edits, one at a time. Only its answer comes back, so a big search doesn't fill the main context. Its steps show indented. | |
+| `delegate` | Hands a question to a helper agent with a fresh context. The helper has only `list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url` (and `web_search` with a key): no shell, no edits. Only its answer comes back, so a big search doesn't fill the main context. Several `delegate` calls in one reply run at the same time: up to 3 on a commercial cloud API, 2 on Ollama's cloud, 1 on a model on this machine (the rest wait their turn). Their steps show indented, tagged `[1]`, `[2]`… | |
 | `web_search` | Searches the web through [Tavily](https://tavily.com). Only there when `TAVILY_API_KEY` is set; each search spends a Tavily credit. | |
 | `fetch_url` | Reads one public web page as Markdown, text or HTML. Addresses on this machine or a private network are refused, even through a redirect. | |
 | `remember` | Keeps a one-line note for later sessions, for this project or for all. | yes |
@@ -322,7 +322,7 @@ What helps the agent on a project too big to read whole:
 
 - **A map first.** `code_map` shows where everything is, and `read_file` with line numbers reads only what's needed.
 - **A plan it keeps.** `todo` holds the steps, and is never dropped when the context fills.
-- **A helper for searching.** `delegate` reads many files in its own context and returns only the answer.
+- **Helpers for searching.** `delegate` reads many files in its own context and returns only the answer; independent questions run side by side.
 - **Chats are saved** after every request (30 per project folder). `rak -c` continues the last one; `/resume` picks any.
 - **When the context fills,** old tool outputs are replaced by a short note naming the call (`read_file src/main.rs`). The output itself is set aside (`out-3`), and the agent reads it back with `artifact_read` or searches it with `artifact_search` instead of running the tool again.
 - **When that isn't enough,** the older part of the conversation is replaced by a summary the model writes; the newest turns and the task list stay word for word. If the server still says the request is too long, rak summarizes once more and asks again.

@@ -158,6 +158,19 @@ In the order they are being built (value for a coding agent first):
       no model call between them.
 - [x] 9. Record and replay (SAK `SwiftAgentKitReplay`): capture a live run's
       replies to a file and replay it in tests.
+- [x] 10. Parallel helpers (SAK `SubAgentGate`, `maxSubAgentConcurrency`;
+      Naseem's `subAgentConcurrency`): several `delegate` calls in one reply
+      run at the same time, each on its own thread, at most as many as the
+      helper's provider takes: 3 on a commercial cloud API, 2 on Ollama's
+      cloud (it slowed to timeouts with three, Naseem 2026-09-08), 1 on a
+      model on this machine. The rest wait their turn. Helpers stay
+      read-only, so two never edit one file. The main thread prints every
+      helper's steps, tagged `[1]`, `[2]`… when more than one runs, and asks
+      the fallback questions for them; Ctrl-C stops them all. Results go back
+      in the order the model asked. Not ported: SAK's helpers that can edit
+      (they would need approvals from several threads at once). Built
+      2026-11-14; live: kimi-k2.6:cloud ran two helpers side by side on
+      rak's own code, steps interleaved, both answers right.
 
 Lower value for rak, later or never: `PythonTool` (run_shell covers it),
 Office/PDF text, `ToolTrace`, `StructuredOutput`, goals (`AgentGoal`; rak

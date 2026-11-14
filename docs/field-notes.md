@@ -35,6 +35,10 @@ Not tried yet: a real codebase of thousands of files, a real session long enough
 
 On 2026-11-12 deepseek-v4.1-flash chose `delegate` on its own for "check the codebase" (about 38 reads in the helper, 1.3M input tokens for the request, 93% cached). On 2026-11-14 kimi-k2.7-code used it when asked, reading 14 files in the helper while the main context went from 2.9K to 6.2K tokens.
 
+## Parallel helpers
+
+On 2026-11-14 kimi-k2.6:cloud, asked to use two `delegate` calls in one reply on rak's own code (one about the stall limit, one about the journal archive), ran both helpers side by side: their steps arrived interleaved (`[2]`, `[1]`, `[2]`), both answers were right, and the request took 75 s with `2 tool calls (+5 in helpers)`. Whether a model splits work into parallel calls without being asked is not tried yet.
+
 ## What has been tested where
 
 Not yet tested: Windows (not built yet), and any public benchmark. Anthropic's real API was tried on Claude Haiku 5.5 (2026-11-11): the first call wrote 1,514 tokens to the cache and the second read all 1,514 back, writing only the 87 new ones. Its other paths (thinking blocks sent back, refusal fallbacks) are tested against a local stand-in. The chat and the MCP client were driven by hand on macOS only; on Linux they build and their unit tests pass. The MCP client was tried with one real server (the reference filesystem server, a program); web-address servers are covered by a unit test against a stand-in. Auto mode (`-y`) has only been run inside the benchmark's containers.

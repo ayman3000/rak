@@ -224,7 +224,7 @@ pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
     })
 }
 
-pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -> Box<dyn Model> {
+pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -> Box<dyn Model + Send> {
     if backend.anthropic {
         let mut provider = Anthropic::new(&backend.base_url, backend.api_key.clone().unwrap_or_default(), model);
         provider.effort = o.effort.clone();
@@ -387,45 +387,17 @@ pub fn run(mut o: Options) -> i32 {
     let auto = Rc::new(Cell::new(o.yes));
     let interactive = stdin_tty && std::io::stderr().is_terminal();
     let asker = chain::Asker { o: o.clone(), stop: stop.clone(), ui: ui.clone(), auto: auto.clone(), interactive, color: err_color };
-    let delegate = {
-        let (current, o, stop, ui, ctx) = (helper_model.clone(), o.clone(), stop.clone(), ui.clone(), ctx.clone());
-        let asker = asker.clone();
-        let (notes, tavily) = (notes.clone(), key("TAVILY_API_KEY"));
-        rak::delegate::Delegate::new(Box::new(move || {
-            let (backend, model, window) = current.borrow().clone();
-            let mut tools = core_tools(&ctx, true);
-            if let Some(tavily) = &tavily {
-                tools.push(Box::new(WebSearch::new(tavily.clone())));
-            }
-            let mut system_prompt = system_prompt(&ctx.cwd, true, notes.as_deref());
-            system_prompt.push_str(rak::delegate::HELPER_NOTE);
-            let config = Config { system_prompt, max_turns: 25, context_window: window };
-            let mut helper = Agent::new(make_provider(&o, &backend, &model, &stop), tools, config);
-            helper.stop = stop.clone();
-            // A helper falls back along the same chain, on its own.
-            let links = fallback_chain(&backend);
-            if !links.is_empty() {
-                let state = chain::State { links, current_label: chain::label(&backend, &model), ..Default::default() };
-                helper.fallback = Some(chain::hook(asker.clone(), Rc::new(RefCell::new(state))));
-            }
-            let ui = ui.clone();
-            helper.on_event(move |event| match event {
-                rak::agent::Event::ToolStarted { name, args } => {
-                    ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {}", output::describe(name, args)));
-                }
-                rak::agent::Event::FellBack { to, why, failure } => {
-                    let mut ui = ui.borrow_mut();
-                    let asked = std::mem::take(&mut ui.asked);
-                    for (i, line) in output::fallback_note(to, why, *failure, asked).iter().enumerate() {
-                        let (style, mark) = if i == 0 { (Style::Yellow, "    ↪ ") } else { (Style::Dim, "      ") };
-                        ui.progress(Some(style), &output::fit(&format!("{mark}{line}")));
-                    }
-                }
-                _ => {}
-            });
-            helper
-        }))
-    };
+    let delegate = rak::delegate::Delegate::new(Box::new(Helpers {
+        current: helper_model.clone(),
+        o: o.clone(),
+        stop: stop.clone(),
+        ui: ui.clone(),
+        ctx: ctx.clone(),
+        asker: asker.clone(),
+        notes: notes.clone(),
+        tavily: key("TAVILY_API_KEY"),
+        chains: RefCell::new(Vec::new()),
+    }));
     let (helper_usage, helper_calls) = (delegate.usage.clone(), delegate.calls.clone());
     tools.push(Box::new(delegate));
     // When to use code_map, delegate and todo: without this line, models
@@ -612,6 +584,73 @@ fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
             s.ui.borrow_mut().progress(Some(Style::Dim), &format!("  {}", rak::notes::summary(&update, applied)));
         }
         Err(e) => s.ui.borrow_mut().progress(Some(Style::Yellow), &format!("  notes: could not write rak/: {e}")),
+    }
+}
+
+/// delegate's side on the chat's thread: makes each helper on the chat's
+/// current model, shows its steps indented, and asks the fallback questions
+/// for it (each helper has its own place in the chain).
+struct Helpers {
+    current: Rc<RefCell<(Backend, String, usize)>>,
+    o: Options,
+    stop: Stop,
+    ui: Rc<RefCell<Ui>>,
+    ctx: std::sync::Arc<Ctx>,
+    asker: chain::Asker,
+    notes: Option<String>,
+    tavily: Option<String>,
+    chains: RefCell<Vec<chain::State>>,
+}
+
+impl rak::delegate::Host for Helpers {
+    fn make(&self) -> rak::delegate::Helper {
+        let (backend, model, window) = self.current.borrow().clone();
+        let mut tools = rak::tools::reading_tools(&self.ctx);
+        if let Some(tavily) = &self.tavily {
+            tools.push(Box::new(WebSearch::new(tavily.clone())));
+        }
+        let mut system_prompt = system_prompt(&self.ctx.cwd, true, self.notes.as_deref());
+        system_prompt.push_str(rak::delegate::HELPER_NOTE);
+        rak::delegate::Helper {
+            model: make_provider(&self.o, &backend, &model, &self.stop),
+            tools,
+            config: Config { system_prompt, max_turns: 25, context_window: window },
+            stop: self.stop.clone(),
+            falls_back: !fallback_chain(&backend).is_empty(),
+        }
+    }
+    fn limit(&self) -> usize {
+        let current = self.current.borrow();
+        rak::delegate::limit_for(&current.0.base_url, &current.1)
+    }
+    fn begin(&self, count: usize) {
+        let (backend, model, _) = self.current.borrow().clone();
+        let fresh =
+            || chain::State { links: fallback_chain(&backend), current_label: chain::label(&backend, &model), ..Default::default() };
+        *self.chains.borrow_mut() = (0..count).map(|_| fresh()).collect();
+    }
+    fn show(&self, helper: Option<usize>, step: rak::delegate::Step) {
+        let tag = helper.map(|n| format!("[{n}] ")).unwrap_or_default();
+        match step {
+            rak::delegate::Step::Tool { name, args } => {
+                self.ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {tag}{}", output::describe(name, args)));
+            }
+            rak::delegate::Step::FellBack { to, why, failure } => {
+                let mut ui = self.ui.borrow_mut();
+                let asked = std::mem::take(&mut ui.asked);
+                for (i, line) in output::fallback_note(to, why, failure, asked).iter().enumerate() {
+                    let (style, mark) = if i == 0 { (Style::Yellow, format!("    ↪ {tag}")) } else { (Style::Dim, "      ".to_string()) };
+                    ui.progress(Some(style), &output::fit(&format!("{mark}{line}")));
+                }
+            }
+        }
+    }
+    fn fall_back(&self, index: usize, why: &str, failure: rak::fallback::Failure) -> rak::delegate::Offer {
+        let mut chains = self.chains.borrow_mut();
+        match chains.get_mut(index) {
+            Some(state) => chain::offer(&self.asker, state, why, failure),
+            None => rak::delegate::Offer::NoneLeft,
+        }
     }
 }
 

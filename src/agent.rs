@@ -566,11 +566,17 @@ impl Agent {
             let mut images: Vec<Image> = Vec::new();
             failed.clear();
             let loaded_before = self.loaded.len();
-            for call in &reply.tool_calls {
+            let mut together: Vec<Option<(bool, String)>> = vec![None; reply.tool_calls.len()];
+            for (index, call) in reply.tool_calls.iter().enumerate() {
+                if refused.is_none() && !self.stop.requested() && together[index].is_none() {
+                    self.run_together(&reply.tool_calls, index, &mut together);
+                }
                 let mut result = if refused.is_some() {
                     (false, self.refusal_note.clone())
                 } else if self.stop.requested() {
                     (false, STOP_NOTE.to_string())
+                } else if let Some(done) = together[index].take() {
+                    done
                 } else {
                     let (ok, text, image) = self.run_tool(&call.name, &call.arguments, &mut refused);
                     images.extend(image);
@@ -739,6 +745,39 @@ impl Agent {
 
     /// Runs one tool call and returns (ok, text for the model, an image if it
     /// brought one). Sets `refused` when the person said no.
+    /// When the call at `from` is to a tool that runs several calls together
+    /// (delegate) and the reply has more of them from here on, runs them all
+    /// now and puts their results in `done`. Each is shown as started first,
+    /// so the helpers' steps follow all of their calls.
+    fn run_together(&mut self, calls: &[crate::provider::ToolCall], from: usize, done: &mut [Option<(bool, String)>]) {
+        let name = calls[from].name.as_str();
+        let Some(tool) = self.tools.iter().find(|t| t.name() == name && t.runs_together() && !t.needs_approval()) else {
+            return;
+        };
+        let mut batch: Vec<(usize, Value)> = Vec::new();
+        for (index, call) in calls.iter().enumerate().skip(from).filter(|(_, c)| c.name == name) {
+            let text = if call.arguments.trim().is_empty() { "{}" } else { call.arguments.as_str() };
+            if let Ok(args @ Value::Object(_)) = serde_json::from_str::<Value>(text) {
+                batch.push((index, args));
+            }
+        }
+        if batch.len() < 2 {
+            return;
+        }
+        for (_, args) in &batch {
+            self.tool_calls += 1;
+            (self.on_event)(&Event::ToolStarted { name, args });
+        }
+        let started = Instant::now();
+        let args: Vec<Value> = batch.iter().map(|(_, a)| a.clone()).collect();
+        let results = tool.run_together(&args);
+        let millis = started.elapsed().as_millis();
+        for ((index, _), result) in batch.iter().zip(results) {
+            (self.on_event)(&Event::ToolFinished { name, ok: result.ok, denied: false, text: &result.text, millis });
+            done[*index] = Some((result.ok, result.text));
+        }
+    }
+
     fn run_tool(&mut self, name: &str, arguments: &str, refused: &mut Option<String>) -> (bool, String, Option<Image>) {
         if (name == crate::artifacts::READ || name == crate::artifacts::SEARCH) && !self.artifacts.is_empty() {
             let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
@@ -1062,6 +1101,53 @@ mod tests {
         let mut agent = Agent::new(Box::new(model), core_tools(&ctx, false), config);
         agent.retry_base = Duration::ZERO;
         Setup { agent, seen, dir }
+    }
+
+    /// Records how calls reached it: together, in batches, or one by one.
+    struct Batched(Rc<RefCell<Vec<usize>>>);
+    impl Tool for Batched {
+        fn name(&self) -> &str {
+            "ask"
+        }
+        fn description(&self) -> &str {
+            "asks"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn run(&self, args: &Value) -> crate::tools::ToolResult {
+            self.0.borrow_mut().push(1);
+            crate::tools::ToolResult::ok(format!("answer {}", args["q"]))
+        }
+        fn runs_together(&self) -> bool {
+            true
+        }
+        fn run_together(&self, calls: &[Value]) -> Vec<crate::tools::ToolResult> {
+            self.0.borrow_mut().push(calls.len());
+            calls.iter().map(|a| crate::tools::ToolResult::ok(format!("answer {}", a["q"]))).collect()
+        }
+    }
+
+    #[test]
+    fn several_calls_to_a_tool_that_runs_together_go_in_one_batch_in_order() {
+        let mut s = setup(
+            "together",
+            vec![
+                Ok(calls(vec![("ask", json!({ "q": 1 })), ("list_dir", json!({ "path": "." })), ("ask", json!({ "q": 2 }))])),
+                Ok(call("ask", json!({ "q": 3 }))),
+                Ok(text("done")),
+            ],
+            10,
+        );
+        let batches = Rc::new(RefCell::new(Vec::new()));
+        s.agent.tools.push(Box::new(Batched(batches.clone())));
+        assert_eq!(s.agent.run("go").outcome, Outcome::Done);
+        assert_eq!(*batches.borrow(), vec![2, 1], "two in one batch, then a lone call through run");
+        assert_eq!(s.agent.tool_calls, 4);
+        let results: Vec<String> =
+            s.agent.history().iter().filter(|m| m["role"] == "tool").map(|m| m["content"].as_str().unwrap().to_string()).collect();
+        assert_eq!(results[0], "answer 1");
+        assert_eq!(results[2], "answer 2", "results stay in the order the model asked");
     }
 
     #[test]
