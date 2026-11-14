@@ -1,11 +1,22 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-14, after releasing v0.1.0-alpha.9. A working plan for picking the work up on another machine.
+Updated 2026-11-14, after releasing v0.1.0-alpha.10. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.9** (2026-11-14). It has everything
+- The newest release is **v0.1.0-alpha.10** (2026-11-14). It has everything
   below; `main` and the release match.
+
+### In v0.1.0-alpha.10
+
+- Ready for the Harness Leaderboard: one request has no turn limit by
+  default; an unattended run (one request with -y) keeps nothing;
+  `reasoning_content` goes back within a request; a Harbor adapter in
+  bench/harbor (not run yet: no Docker here).
+- `--tools LIST` / `--tools none`; the welcome panel follows it.
+- Helper spending cap (`--helper-budget`, 200K input tokens); an empty
+  helper answer comes back as an error.
+- Markdown tables drawn as tables in the terminal.
 
 ### In v0.1.0-alpha.9
 
@@ -138,7 +149,8 @@ the Space's Community tab (the owner's step, public).
 - [x] `reasoning_content` sent back within a request, dropped at the next
       (DeepSeek's rule); only to a server that sent it.
 - [x] Harbor adapter: bench/harbor/rak_agent.py (not run yet).
-- [ ] Release alpha.10 with these, then a trial: ~10 Terminal-Bench 2.1 tasks,
+- [x] Released in alpha.10.
+- [ ] A trial: ~10 Terminal-Bench 2.1 tasks,
       one attempt, deepseek-v4.1-flash, Docker on this Mac (not installed
       2026-11-14).
 

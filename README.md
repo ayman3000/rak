@@ -4,7 +4,7 @@ A small coding agent for the terminal. One binary of a few megabytes, no runtime
 
 rak is the cross-platform sibling of [sak](https://github.com/ayman3000/sak). sak is built on SwiftAgentKit and stays the Mac tool; rak carries the same prompt, the same tool designs and the same loop to everything else.
 
-> **Status: early alpha (0.1.0-alpha.9).** The core works and is tested. See [What is missing](#what-is-missing).
+> **Status: early alpha (0.1.0-alpha.10).** The core works and is tested. See [What is missing](#what-is-missing).
 
 **Contents:** [What it does](#what-it-does) · [Install](#install) · [Getting started](#getting-started) · [The chat](#the-chat) · [Providers and models](#providers-and-models) · [Tools](#tools) · [Safety](#safety) · [Project notes](#project-notes-the-rak-folder) · [Large projects](#large-projects) · [Skills](#skills) · [MCP servers](#mcp-servers) · [Command line](#command-line) · [As a library](#as-a-library) · [What is missing](#what-is-missing) · [Development](#development) · [Benchmarks](#benchmarks)
 
@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 The script downloads the newest release for your system, checks its SHA-256 checksum, and puts `rak` in `~/.local/bin`. Nothing else is changed.
 
-- `RAK_VERSION=v0.1.0-alpha.9` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
+- `RAK_VERSION=v0.1.0-alpha.10` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder.
 - **Builds:** Linux on x86-64 and ARM (static, any distribution), macOS on Apple Silicon and Intel. Windows is not supported yet.
 - **macOS:** the builds are not notarized. Installed with the script they just run; a build downloaded in a web browser needs `xattr -d com.apple.quarantine rak` first.
 
@@ -114,7 +114,7 @@ What changed meaning with named providers (`--update` warns about the second and
 Started without a task, rak opens a chat:
 
 ```
-╭─ rak 0.1.0-alpha.9 ──────────────────────────────────────────────────────────╮
+╭─ rak 0.1.0-alpha.10 ─────────────────────────────────────────────────────────╮
 │ ██████   █████  ██   ██            │ Tools                                   │
 │ ██   ██ ██   ██ ██  ██             │ files   list_dir, search_files,         │
 │ ██████  ███████ █████              │         code_map, read_file, +4 more    │
@@ -461,7 +461,7 @@ The code is in two layers: a library that knows nothing about terminals, and the
 **Checks and releases.** Every push to `main` and every pull request runs the tests on Linux and macOS, the format and lint checks, and a build with the oldest supported Rust (`.github/workflows/ci.yml`). A version tag matching `Cargo.toml` builds the four release archives and publishes them (`.github/workflows/release.yml`); a tag with a `-` makes a pre-release:
 
 ```bash
-git tag v0.1.0-alpha.9 && git push origin v0.1.0-alpha.9
+git tag v0.1.0-alpha.10 && git push origin v0.1.0-alpha.10
 ```
 
 MIT licence.
