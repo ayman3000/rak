@@ -39,6 +39,8 @@ pub struct Helper {
     pub stop: Stop,
     /// Whether to ask the host for another model when this one fails.
     pub falls_back: bool,
+    /// Input tokens it may spend before it must answer; None: no cap.
+    pub input_budget: Option<u64>,
 }
 
 /// The model a helper carries on with after a failure.
@@ -159,6 +161,7 @@ fn run_helper(index: usize, task: &str, helper: Helper, tx: &Sender<Message>) ->
     let tools: Vec<Box<dyn Tool>> = helper.tools.into_iter().map(|t| t as Box<dyn Tool>).collect();
     let mut agent = Agent::new(helper.model, tools, helper.config);
     agent.stop = helper.stop;
+    agent.input_budget = helper.input_budget;
     let events = tx.clone();
     agent.on_event(move |event| match event {
         Event::ToolStarted { name, args } => {
@@ -192,7 +195,20 @@ fn run_helper(index: usize, task: &str, helper: Helper, tx: &Sender<Message>) ->
         if agent.tool_calls == 1 { "" } else { "s" }
     );
     let result = match result.outcome {
+        // Some models stop with nothing after a large read; say so instead of
+        // passing on an answer that is only the footer.
+        Outcome::Done if result.answer.trim().is_empty() => ToolResult::err(format!(
+            "The helper ended with an empty reply, so there is no answer. Ask again with a narrower question, or read \
+             the files yourself.\n{footer}"
+        )),
         Outcome::Done => ToolResult::ok(format!("{}\n{footer}", result.answer.trim())),
+        // What it found by then is still an answer, marked as possibly short.
+        Outcome::OverBudget => ToolResult::ok(format!(
+            "{}\n[The helper reached its budget of {} input tokens and answered with what it had; this may be \
+             incomplete. Ask a narrower question for what is missing.]\n{footer}",
+            result.answer.trim(),
+            helper.input_budget.unwrap_or(0)
+        )),
         Outcome::Stopped => ToolResult::err("The helper was stopped (Ctrl-C)."),
         Outcome::Failed(why) => ToolResult::err(format!("The helper failed: {why}")),
         other => {
@@ -304,6 +320,7 @@ mod tests {
         wait: Duration,
         failing: bool,
         asked: Rc<RefCell<Vec<usize>>>,
+        budget: Option<u64>,
     }
 
     impl Host for TestHost {
@@ -311,7 +328,7 @@ mod tests {
             let config = Config { system_prompt: format!("helper{HELPER_NOTE}"), max_turns: 5, context_window: 10_000 };
             let model: Box<dyn Model + Send> =
                 if self.failing { Box::new(Fails) } else { Box::new(Says("Found it in src/a.rs:12.", self.wait)) };
-            Helper { model, tools: Vec::new(), config, stop: Stop::new(), falls_back: self.failing }
+            Helper { model, tools: Vec::new(), config, stop: Stop::new(), falls_back: self.failing, input_budget: self.budget }
         }
         fn limit(&self) -> usize {
             self.limit
@@ -328,7 +345,7 @@ mod tests {
     }
 
     fn host(limit: usize, wait: Duration) -> TestHost {
-        TestHost { limit, wait, failing: false, asked: Rc::default() }
+        TestHost { limit, wait, failing: false, asked: Rc::default(), budget: None }
     }
 
     #[test]
@@ -363,6 +380,34 @@ mod tests {
         assert!(started.elapsed() >= wait * 3, "limit 1 must run them one by one");
     }
 
+    struct Silent;
+    impl Model for Silent {
+        fn chat(&mut self, _: &[Value], _: &[Value]) -> Result<Reply, ModelError> {
+            Ok(Reply::default())
+        }
+    }
+
+    struct SilentHost;
+    impl Host for SilentHost {
+        fn make(&self) -> Helper {
+            let config = Config { system_prompt: "helper".into(), max_turns: 5, context_window: 10_000 };
+            Helper { model: Box::new(Silent), tools: Vec::new(), config, stop: Stop::new(), falls_back: false, input_budget: None }
+        }
+        fn limit(&self) -> usize {
+            1
+        }
+        fn show(&self, _: Option<usize>, _: Step) {}
+        fn fall_back(&self, _: usize, _: &str, _: Failure) -> Offer {
+            Offer::NoneLeft
+        }
+    }
+
+    #[test]
+    fn an_empty_answer_comes_back_as_an_error_not_as_a_bare_footer() {
+        let result = Delegate::new(Box::new(SilentHost)).run(&json!({ "task": "x" }));
+        assert!(!result.ok && result.text.starts_with("The helper ended with an empty reply"), "{}", result.text);
+    }
+
     #[test]
     fn a_call_without_a_task_gets_its_error_in_its_place() {
         let tool = Delegate::new(Box::new(host(2, Duration::ZERO)));
@@ -374,13 +419,51 @@ mod tests {
     #[test]
     fn a_failing_helper_asks_the_calling_thread_and_carries_on() {
         let asked = Rc::new(RefCell::new(Vec::new()));
-        let test = TestHost { limit: 2, wait: Duration::ZERO, failing: true, asked: asked.clone() };
+        let test = TestHost { limit: 2, wait: Duration::ZERO, failing: true, asked: asked.clone(), budget: None };
         let tool = Delegate::new(Box::new(test));
         let results = tool.run_together(&[json!({ "task": "a" }), json!({ "task": "b" })]);
         assert!(results.iter().all(|r| r.ok && r.text.starts_with("Answered on the second model.")), "{}", results[0].text);
         let mut asked = asked.borrow().clone();
         asked.sort();
         assert_eq!(asked, vec![0, 1], "each helper asked once, from its own index");
+    }
+
+    /// Keeps asking to list a folder; each call costs 100 input tokens.
+    struct Wanders;
+    impl Model for Wanders {
+        fn chat(&mut self, messages: &[Value], _: &[Value]) -> Result<Reply, ModelError> {
+            let usage = Usage { input: 100, ..Default::default() };
+            let told_to_answer = messages.last().and_then(|m| m["content"].as_str()).is_some_and(|t| t.contains("Do not call any tools"));
+            if told_to_answer {
+                return Ok(Reply { content: "Partial answer.".into(), usage, ..Default::default() });
+            }
+            let call = crate::provider::ToolCall { id: "c".into(), name: "none".into(), arguments: "{}".into() };
+            Ok(Reply { tool_calls: vec![call], usage, ..Default::default() })
+        }
+    }
+
+    struct WanderingHost;
+    impl Host for WanderingHost {
+        fn make(&self) -> Helper {
+            let config = Config { system_prompt: "helper".into(), max_turns: 25, context_window: 10_000 };
+            Helper { model: Box::new(Wanders), tools: Vec::new(), config, stop: Stop::new(), falls_back: false, input_budget: Some(250) }
+        }
+        fn limit(&self) -> usize {
+            1
+        }
+        fn show(&self, _: Option<usize>, _: Step) {}
+        fn fall_back(&self, _: usize, _: &str, _: Failure) -> Offer {
+            Offer::NoneLeft
+        }
+    }
+
+    #[test]
+    fn a_helper_over_its_budget_answers_with_what_it_has() {
+        let tool = Delegate::new(Box::new(WanderingHost));
+        let result = tool.run(&json!({ "task": "look everywhere" }));
+        assert!(result.ok, "{}", result.text);
+        assert!(result.text.starts_with("Partial answer.\n[The helper reached its budget of 250 input tokens"), "{}", result.text);
+        assert_eq!(tool.usage.get().input, 400, "three calls to pass 250, then the answer");
     }
 
     #[test]

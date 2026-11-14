@@ -30,6 +30,9 @@ pub enum Outcome {
     Done,
     /// The turn limit was reached; the answer is the model's own summary.
     MaxTurns,
+    /// The request's input-token budget (`Agent::input_budget`) ran out; the
+    /// answer is what the model found by then.
+    OverBudget,
     /// The person said no to this tool (or nobody was there to ask).
     Refused {
         tool: String,
@@ -177,6 +180,10 @@ pub struct Agent {
     pub fallback: Option<fallback::Hook>,
     /// Every model fallen back to, in order, since the agent was made.
     pub switches: Vec<String>,
+    /// Input tokens one request may spend (delegate's helpers have one): past
+    /// three quarters the model is told to wrap up; at the budget it must
+    /// answer with what it has. None: no budget.
+    pub input_budget: Option<u64>,
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,
     loaded: Vec<String>,
@@ -211,6 +218,7 @@ impl Agent {
             refusal_note: REFUSAL_NOTE.to_string(),
             finish_check: None,
             fallback: None,
+            input_budget: None,
             switches: Vec::new(),
             groups: Vec::new(),
             loaded: Vec::new(),
@@ -435,6 +443,8 @@ impl Agent {
         self.messages.push(json!({ "role": "user", "content": task }));
         let mut definitions = self.definitions();
         let nudge_at = (self.config.max_turns >= 10).then(|| self.config.max_turns * 4 / 5);
+        let input_at_start = self.usage.input;
+        let mut budget_warned = false;
         let mut repeated: (String, usize) = (String::new(), 0);
         let mut empty_replies = 0;
         // Tool errors from the latest step, and how often the model was asked
@@ -618,6 +628,23 @@ impl Agent {
             if repeated.1 >= LOOP_STOP {
                 return RunResult { outcome: Outcome::Loop, answer: String::new(), turns: turn };
             }
+            if let Some(budget) = self.input_budget {
+                let spent = self.usage.input - input_at_start;
+                if spent >= budget {
+                    return self.last_word(
+                        turn,
+                        Outcome::OverBudget,
+                        "You have used this task's token budget. Do not call any tools. Answer now with what you \
+                         found, and say plainly what you could not check.",
+                    );
+                }
+                if !budget_warned && spent >= budget.saturating_mul(3) / 4 {
+                    budget_warned = true;
+                    self.messages.push(json!({ "role": "user", "content":
+                        "[budget note] You have used three quarters of this task's token budget. Stop exploring: \
+                         read only what the answer still needs, then give it." }));
+                }
+            }
             if nudge_at == Some(turn) {
                 self.messages.push(json!({ "role": "user", "content": format!(
                     "[progress note] You have used {turn} of {} turns. Finish the essential work now and \
@@ -626,18 +653,25 @@ impl Agent {
         }
 
         // Out of turns: one last call without tools, for a summary of where things stand.
-        self.messages.push(json!({ "role": "user", "content":
-            "You have reached the turn limit. Do not call any tools. Say briefly what you did and what is left to do." }));
-        let turns = self.config.max_turns;
+        self.last_word(
+            self.config.max_turns,
+            Outcome::MaxTurns,
+            "You have reached the turn limit. Do not call any tools. Say briefly what you did and what is left to do.",
+        )
+    }
+
+    /// One last call without tools, for an answer from what the model has.
+    fn last_word(&mut self, turns: usize, outcome: Outcome, note: &str) -> RunResult {
+        self.messages.push(json!({ "role": "user", "content": note }));
         let answer = match self.call_model(turns + 1, &[]) {
             Ok(reply) => reply.content,
             Err(_) if self.stop.requested() => return self.stopped(turns),
-            // Still the turn limit, but say why there is no summary rather
-            // than hand back an empty answer.
-            Err(e) => format!("The turn limit was reached, and the summary of where things stand could not be written: {e}"),
+            // Still the limit, but say why there is no summary rather than
+            // hand back an empty answer.
+            Err(e) => format!("The limit was reached, and the summary of where things stand could not be written: {e}"),
         };
         self.messages.push(json!({ "role": "assistant", "content": answer }));
-        RunResult { outcome: Outcome::MaxTurns, answer, turns }
+        RunResult { outcome, answer, turns }
     }
 
     /// Brings the conversation under `budget` characters, cheapest step first:
@@ -1101,6 +1135,22 @@ mod tests {
         let mut agent = Agent::new(Box::new(model), core_tools(&ctx, false), config);
         agent.retry_base = Duration::ZERO;
         Setup { agent, seen, dir }
+    }
+
+    #[test]
+    fn a_request_over_its_input_budget_is_warned_then_made_to_answer() {
+        let list = || Ok(call("list_dir", json!({ "path": "." })));
+        let mut s = setup("budget", vec![list(), list(), list(), list(), Ok(text("What I found so far."))], 10);
+        s.agent.input_budget = Some(40);
+        let result = s.agent.run("explore");
+        assert_eq!(result.outcome, Outcome::OverBudget);
+        assert_eq!(result.answer, "What I found so far.");
+        assert_eq!(result.turns, 4, "each call sends 10 tokens: the budget of 40 is used after four");
+        let notes: Vec<String> =
+            s.agent.history().iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str().map(str::to_string)).collect();
+        assert!(notes.iter().any(|n| n.starts_with("[budget note]")), "warned at three quarters");
+        assert!(notes.last().unwrap().contains("Do not call any tools"));
+        assert!(s.seen.borrow().last().is_some(), "the last call went out");
     }
 
     /// Records how calls reached it: together, in batches, or one by one.

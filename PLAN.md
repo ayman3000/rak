@@ -90,8 +90,9 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.9. A working plan for picking t
       did; deepseek-v4.1-flash did on its own (2026-11-12, "check the
       codebase": about 38 reads in the helper, 1.3M input tokens for the
       request, 93% cached). So it depends on the model. Still to do: try
-      more models, and cap what a helper may spend (its 25 turns re-send a
-      growing context).
+      more models. Done: a helper's spending cap (`--helper-budget`, 200K
+      input tokens by default; warned at three quarters, made to answer at
+      the cap), built 2026-11-14 and checked live on kimi-k2.6:cloud.
 - [ ] Fix whatever these turn up, with a unit test for each fix.
 
 ### 2. Try the untested providers
@@ -106,17 +107,19 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.9. A working plan for picking t
 
 - [ ] Undo for the agent's changes (`/undo`), git-aware where the project is a
       git repo.
-- [ ] Several edits in one approved step.
+- [x] Several edits in one approved step (`apply_patch`).
 - [ ] From README "What is missing": Ctrl-R history search, the "still
-      running" note during a long tool call, fetching a whole web page,
-      Gemini's own API.
+      running" note during a long tool call, Gemini's own API. (Fetching a
+      page is done: `fetch_url`.)
+- [x] Markdown tables drawn as tables in the terminal: aligned, fit to the
+      width, long cells wrapped (2026-11-14).
 - [ ] Esc stops a running request, as Ctrl-C does (Esc already cancels the
       /provider and /model lists).
 - [ ] RAK_PROVIDER and RAK_MODEL from different files (a project's .env and
       the global one) can still pair a model with the wrong provider: take
       the model from the same place as the provider.
 - [x] release.yml: upload-artifact v7, download-artifact v8 (Node 24), done
-      2026-11-13; to be confirmed by the next release's build.
+      2026-11-13; confirmed by the alpha.9 release build.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
 ## Project notes in rak/ (from Naseem, built 2026-11-13, released in alpha.7)

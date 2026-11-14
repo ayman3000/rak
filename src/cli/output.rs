@@ -181,6 +181,10 @@ impl Ui {
             Some(_) => {
                 let mut renderer = markdown::Renderer::default();
                 print!("{}", renderer.push(&format!("{text}\n")));
+                let rest = renderer.finish();
+                if !rest.is_empty() {
+                    println!("{rest}");
+                }
             }
             None => println!("{text}"),
         }

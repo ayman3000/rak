@@ -142,7 +142,7 @@ Started without a task, rak opens a chat:
 
 - **The rule above the prompt** shows the model, how full its context is, the folder and branch, and the mode.
 - **Type `/`** for the commands. The list narrows as you type; ↑ and ↓ choose, Tab completes, Enter runs, Esc closes it.
-- **Answers appear as they are written**, with Markdown shown as headings, bullets and code.
+- **Answers appear as they are written**, with Markdown shown as headings, bullets, code and tables. A table is drawn with aligned columns that fit the terminal, long cells wrapping inside their column.
 - **Ctrl-C stops a request** (the answer being written, or a running command) and keeps the chat. A second Ctrl-C quits.
 - **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
 - **After each request** a line shows turns, tool calls (a helper's counted apart: `3 tool calls (+14 in helpers)`), tokens in and out, how many came from the cache, and the time.
@@ -260,7 +260,7 @@ After each request rak shows how much input came from the cache (`6220 tokens in
 | `apply_patch` | Applies a unified diff to one file: several changes in one approved step, all or nothing. Hunks are placed by their lines, not their `@@` numbers. | yes |
 | `run_shell` | Runs a command with a time limit that kills the whole process tree. Background mode for servers. | yes |
 | `todo` | The agent's task list for work with three or more steps, shown to you as it changes. If the agent says it is done with steps still open, rak sends it back once. | |
-| `delegate` | Hands a question to a helper agent with a fresh context. The helper has only `list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url` (and `web_search` with a key): no shell, no edits. Only its answer comes back, so a big search doesn't fill the main context. Several `delegate` calls in one reply run at the same time: up to 3 on a commercial cloud API, 2 on Ollama's cloud, 1 on a model on this machine (the rest wait their turn). Their steps show indented, tagged `[1]`, `[2]`… | |
+| `delegate` | Hands a question to a helper agent with a fresh context. The helper has only `list_dir`, `search_files`, `code_map`, `read_file`, `fetch_url` (and `web_search` with a key): no shell, no edits. Only its answer comes back, so a big search doesn't fill the main context. Several `delegate` calls in one reply run at the same time: up to 3 on a commercial cloud API, 2 on Ollama's cloud, 1 on a model on this machine (the rest wait their turn). Their steps show indented, tagged `[1]`, `[2]`… Each helper may spend 200,000 input tokens (`--helper-budget`); near that it is told to wrap up, and at it to answer with what it found. | |
 | `web_search` | Searches the web through [Tavily](https://tavily.com). Only there when `TAVILY_API_KEY` is set; each search spends a Tavily credit. | |
 | `fetch_url` | Reads one public web page as Markdown, text or HTML. Addresses on this machine or a private network are refused, even through a redirect. | |
 | `remember` | Keeps a one-line note for later sessions, for this project or for all. | yes |
@@ -383,6 +383,7 @@ rak mcp remove files
 | `-c`, `--continue` | Continue this folder's last chat (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default 30. |
+| `--helper-budget N` | Input tokens one `delegate` helper may spend. Default 200000; `0` for no cap. |
 | `--json` | Print one JSON object: answer, outcome, turns, tool calls, tokens, seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |
@@ -416,7 +417,6 @@ Compared with sak, rak doesn't have yet:
 
 - Ctrl-R to search the history, and a "still running" note during a long tool call
 - Gemini's own API (`--provider gemini` uses its OpenAI-compatible endpoint)
-- Markdown tables drawn as tables in the terminal (they show as raw pipes)
 - Windows
 
 Known limits:

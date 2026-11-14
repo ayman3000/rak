@@ -56,6 +56,7 @@ BEHAVIOUR
                           after every request; /resume lists them)
   -C, --cwd DIR           the project folder (default: where rak was started)
       --max-turns N       model calls allowed per request (default 30)
+      --helper-budget N   input tokens one delegate helper may spend (default 200000; 0: no cap)
 
 OUTPUT
       --json              print one JSON object with the answer and the numbers
@@ -101,6 +102,8 @@ pub struct Options {
     pub continue_last: bool,
     pub cwd: Option<PathBuf>,
     pub max_turns: usize,
+    /// Input tokens one delegate helper may spend; 0 is no cap.
+    pub helper_budget: u64,
     pub json: bool,
     pub log: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -138,6 +141,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         continue_last: false,
         cwd: None,
         max_turns: 30,
+        helper_budget: 200_000,
         json: false,
         log: None,
         record: None,
@@ -193,6 +197,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "-c" | "--continue" => o.continue_last = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
+            "--helper-budget" => o.helper_budget = number::<u64>("--helper-budget", value("--helper-budget")),
             "--json" => o.json = true,
             "--log" => o.log = Some(PathBuf::from(value("--log"))),
             "--record" => o.record = Some(PathBuf::from(value("--record"))),

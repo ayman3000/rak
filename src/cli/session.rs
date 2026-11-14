@@ -617,6 +617,7 @@ impl rak::delegate::Host for Helpers {
             config: Config { system_prompt, max_turns: 25, context_window: window },
             stop: self.stop.clone(),
             falls_back: !fallback_chain(&backend).is_empty(),
+            input_budget: (self.o.helper_budget > 0).then_some(self.o.helper_budget),
         }
     }
     fn limit(&self) -> usize {
@@ -737,6 +738,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
         }
         Outcome::Refused { tool } => Some(format!("stopped: {tool} was not approved. Nothing was changed by it.")),
         Outcome::MaxTurns => Some(format!("stopped at the turn limit ({}). Raise it with --max-turns.", s.o.max_turns)),
+        Outcome::OverBudget => Some("stopped at the token budget.".to_string()),
         Outcome::Loop => Some("stopped: the model kept repeating the same call with the same result.".to_string()),
         Outcome::Stopped => Some("stopped".to_string()),
     };
@@ -795,7 +797,7 @@ pub fn exit_code(outcome: &Outcome) -> i32 {
         Outcome::Done => 0,
         Outcome::Failed(_) => 1,
         Outcome::Refused { .. } => 3,
-        Outcome::MaxTurns => 4,
+        Outcome::MaxTurns | Outcome::OverBudget => 4,
         Outcome::Loop => 5,
         Outcome::Stopped => 130,
     }
@@ -807,6 +809,7 @@ pub fn outcome_name(outcome: &Outcome) -> &'static str {
         Outcome::Failed(_) => "failed",
         Outcome::Refused { .. } => "refused",
         Outcome::MaxTurns => "max_turns",
+        Outcome::OverBudget => "over_budget",
         Outcome::Loop => "loop",
         Outcome::Stopped => "stopped",
     }
