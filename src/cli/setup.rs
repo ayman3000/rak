@@ -258,10 +258,8 @@ pub fn run(color: bool) -> Option<()> {
             }
         };
         let picked = match listed {
-            Some(models) => match super::chat::pick_from(models, None, color) {
-                Some(name) => Some(name),
-                None => return None, // Esc on the model list: stop.
-            },
+            // Esc on the model list: stop.
+            Some(models) => Some(super::chat::pick_from(models, None, color)?),
             None => None,
         };
         let Some(model_name) = picked else {
