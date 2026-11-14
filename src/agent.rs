@@ -440,9 +440,17 @@ impl Agent {
     }
 
     pub fn run(&mut self, task: &str) -> RunResult {
+        // Reasoning a chat-completions server sent goes back only within the
+        // request it belongs to (DeepSeek's rule); a new request drops it.
+        for message in self.messages.iter_mut() {
+            if message.get("native").is_some_and(|n| n.get(crate::provider::REASONING_FIELD).is_some()) {
+                message.as_object_mut().map(|o| o.remove("native"));
+            }
+        }
         self.messages.push(json!({ "role": "user", "content": task }));
         let mut definitions = self.definitions();
-        let nudge_at = (self.config.max_turns >= 10).then(|| self.config.max_turns * 4 / 5);
+        let limited = self.config.max_turns != usize::MAX;
+        let nudge_at = (limited && self.config.max_turns >= 10).then(|| self.config.max_turns / 5 * 4);
         let input_at_start = self.usage.input;
         let mut budget_warned = false;
         let mut repeated: (String, usize) = (String::new(), 0);
@@ -663,7 +671,7 @@ impl Agent {
     /// One last call without tools, for an answer from what the model has.
     fn last_word(&mut self, turns: usize, outcome: Outcome, note: &str) -> RunResult {
         self.messages.push(json!({ "role": "user", "content": note }));
-        let answer = match self.call_model(turns + 1, &[]) {
+        let answer = match self.call_model(turns.saturating_add(1), &[]) {
             Ok(reply) => reply.content,
             Err(_) if self.stop.requested() => return self.stopped(turns),
             // Still the limit, but say why there is no summary rather than

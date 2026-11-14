@@ -50,12 +50,15 @@ BEHAVIOUR
       --any-path          let file tools reach outside the project folder
       --no-mcp            don't connect the MCP servers for this run
       --no-skills         no skills for this run, built-in ones included
+      --tools LIST        only these tools, comma-separated (read_file,search_files);
+                          none: no tools at all, just the model
       --no-memory         no notes from earlier sessions, and no `remember`
       --no-notes          don't update rak/journal.md and rak/roadmap.md after a request
   -c, --continue          continue this folder's last chat (chats are saved
                           after every request; /resume lists them)
   -C, --cwd DIR           the project folder (default: where rak was started)
-      --max-turns N       model calls allowed per request (default 30)
+      --max-turns N       model calls allowed per request (default: 30 in a chat,
+                          no limit for one request; 0: no limit)
       --helper-budget N   input tokens one delegate helper may spend (default 200000; 0: no cap)
 
 OUTPUT
@@ -97,11 +100,15 @@ pub struct Options {
     pub any_path: bool,
     pub no_mcp: bool,
     pub no_skills: bool,
+    /// Only these tools (--tools a,b); Some(empty) is --tools none.
+    pub tools: Option<Vec<String>>,
     pub no_memory: bool,
     pub no_notes: bool,
     pub continue_last: bool,
     pub cwd: Option<PathBuf>,
-    pub max_turns: usize,
+    /// Model calls allowed per request; None: 30 in a chat, no limit for a
+    /// one-off run (an unattended task must not stop half-way).
+    pub max_turns: Option<usize>,
     /// Input tokens one delegate helper may spend; 0 is no cap.
     pub helper_budget: u64,
     pub json: bool,
@@ -109,6 +116,16 @@ pub struct Options {
     pub record: Option<PathBuf>,
     pub replay: Option<PathBuf>,
     pub quiet: bool,
+}
+
+/// Pure — unit-tested. `--tools` as names: "none" (or nothing) is no tools.
+pub fn tool_list(text: &str) -> Vec<String> {
+    let names: Vec<String> = text.split(',').map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).collect();
+    if names.len() == 1 && names[0].eq_ignore_ascii_case("none") {
+        Vec::new()
+    } else {
+        names
+    }
 }
 
 pub fn usage_error(message: &str) -> ! {
@@ -136,11 +153,12 @@ pub fn parse_args(args: Vec<String>) -> Options {
         any_path: false,
         no_mcp: false,
         no_skills: false,
+        tools: None,
         no_memory: false,
         no_notes: false,
         continue_last: false,
         cwd: None,
-        max_turns: 30,
+        max_turns: None,
         helper_budget: 200_000,
         json: false,
         log: None,
@@ -192,11 +210,12 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--any-path" => o.any_path = true,
             "--no-mcp" => o.no_mcp = true,
             "--no-skills" => o.no_skills = true,
+            "--tools" => o.tools = Some(tool_list(&value("--tools"))),
             "--no-memory" => o.no_memory = true,
             "--no-notes" => o.no_notes = true,
             "-c" | "--continue" => o.continue_last = true,
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
-            "--max-turns" => o.max_turns = number::<usize>("--max-turns", value("--max-turns")).max(1),
+            "--max-turns" => o.max_turns = Some(number::<usize>("--max-turns", value("--max-turns"))),
             "--helper-budget" => o.helper_budget = number::<u64>("--helper-budget", value("--helper-budget")),
             "--json" => o.json = true,
             "--log" => o.log = Some(PathBuf::from(value("--log"))),

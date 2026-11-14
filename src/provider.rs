@@ -132,13 +132,18 @@ impl OpenAICompatible {
 
     /// Pure — unit-tested.
     pub fn request_body(&self, messages: &[Value], tools: &[Value]) -> Value {
-        // A message's `native` form is for the provider that made it, not for this one.
+        // A message's `native` form is for the provider that made it, not for
+        // this one; only the reasoning a chat-completions server sent comes
+        // back, under its own field (see `reasoning_native`).
         let messages: Vec<Value> = messages
             .iter()
             .map(|m| match m.get("native") {
-                Some(_) => {
+                Some(native) => {
                     let mut plain = m.clone();
                     plain.as_object_mut().map(|o| o.remove("native"));
+                    if let Some(text) = native.get(REASONING_FIELD).and_then(Value::as_str) {
+                        plain[REASONING_FIELD] = json!(text);
+                    }
                     plain
                 }
                 None => m.clone(),
@@ -292,10 +297,23 @@ pub fn context_length(show: &Value) -> Option<usize> {
         .map(|n| n as usize)
 }
 
+/// The field DeepSeek, vLLM and many providers put a reasoning model's
+/// thinking in. Within one request (the tool calls of one task) it goes back
+/// with each assistant message, as DeepSeek asks; a new request drops it
+/// (`Agent::run`). Only this name is echoed: it is sent back only to a server
+/// that sent it, and other names (`reasoning`) are not accepted everywhere.
+pub const REASONING_FIELD: &str = "reasoning_content";
+
+/// A reply's reasoning, kept as its native form so it can go back.
+fn reasoning_native(text: &str) -> Option<Value> {
+    (!text.is_empty()).then(|| json!({ REASONING_FIELD: text }))
+}
+
 /// A streamed reply being put together from its events.
 #[derive(Default)]
 pub struct StreamedReply {
     pub content: String,
+    reasoning: String,
     /// (id, name, arguments so far)
     calls: Vec<(String, String, String)>,
     usage: Usage,
@@ -341,6 +359,9 @@ impl StreamedReply {
             slot.1.push_str(name);
             slot.2.push_str(&arguments);
         }
+        if let Some(text) = delta.get(REASONING_FIELD).and_then(Value::as_str) {
+            self.reasoning.push_str(text);
+        }
         match delta.get("content").and_then(Value::as_str) {
             Some(text) if !text.is_empty() => {
                 self.content.push_str(text);
@@ -362,7 +383,7 @@ impl StreamedReply {
                 arguments: if arguments.trim().is_empty() { "{}".to_string() } else { arguments },
             })
             .collect();
-        Reply { content: self.content, tool_calls, usage: self.usage, native: None }
+        Reply { content: self.content, tool_calls, usage: self.usage, native: reasoning_native(&self.reasoning) }
     }
 }
 
@@ -405,7 +426,8 @@ pub fn parse_reply(body: &Value) -> Result<Reply, ModelError> {
         tool_calls.push(ToolCall { id, name, arguments });
     }
     let usage = openai_usage(&body["usage"]);
-    Ok(Reply { content, tool_calls, usage, native: None })
+    let reasoning = message.get(REASONING_FIELD).and_then(Value::as_str).unwrap_or("");
+    Ok(Reply { content, tool_calls, usage, native: reasoning_native(reasoning) })
 }
 
 /// Pure — unit-tested. A chat-completions `usage` object. Servers that cache
@@ -515,6 +537,28 @@ mod tests {
         assert_eq!(context_length(&show), Some(262_144));
         assert_eq!(context_length(&json!({ "model_info": {} })), None);
         assert_eq!(context_length(&json!({ "error": "not found" })), None);
+    }
+
+    #[test]
+    fn reasoning_content_is_kept_and_sent_back_under_its_own_name() {
+        let mut r = StreamedReply::default();
+        r.push_line(r#"data: {"choices":[{"delta":{"reasoning_content":"Think "}}]}"#).unwrap();
+        r.push_line(r#"data: {"choices":[{"delta":{"reasoning_content":"more."}}]}"#).unwrap();
+        r.push_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"list_dir","arguments":"{}"}}]}}]}"#,
+        )
+        .unwrap();
+        let reply = r.finish();
+        assert_eq!(reply.native, Some(json!({ "reasoning_content": "Think more." })));
+        let p = OpenAICompatible::new("http://x/v1", None, "m");
+        let message = json!({ "role": "assistant", "content": "", "native": reply.native });
+        let body = p.request_body(&[message], &[]);
+        assert_eq!(body["messages"][0]["reasoning_content"], "Think more.");
+        assert!(body["messages"][0].get("native").is_none());
+        let whole = parse_reply(&json!({ "choices": [{ "message": { "content": "hi", "reasoning_content": "hm" } }] })).unwrap();
+        assert_eq!(whole.native, Some(json!({ "reasoning_content": "hm" })));
+        // A server that sends no reasoning gets none back.
+        assert!(parse_reply(&json!({ "choices": [{ "message": { "content": "hi" } }] })).unwrap().native.is_none());
     }
 
     #[test]

@@ -122,6 +122,26 @@ Updated 2026-11-14, after releasing v0.1.0-alpha.9. A working plan for picking t
       2026-11-13; confirmed by the alpha.9 release build.
 - [ ] Announce rak once the providers people will try first are confirmed.
 
+## The Harness Leaderboard (2026-11-14)
+
+huggingface.co/spaces/joelniklaus/harness-leaderboard ranks harnesses on
+Terminal-Bench 2.1 and DeepSWE v1.1 with the open model held fixed
+(GLM-5.3-Flash, DeepSeek-V4.1-Flash, Flint), three attempts each, through
+Harbor. Top seven within 48.5-52%; cost per trial $0.097 (Pi) to $0.34. rak
+meets its six entry rules; the aim is the cost frontier. Added by asking on
+the Space's Community tab (the owner's step, public).
+
+- [x] No turn limit for one request (`--max-turns` default 30 only in a chat;
+      0 = none): the board sets no step limit.
+- [x] An unattended run (one request with -y) keeps nothing: no remember,
+      save_skill, save_routine or journal, so no rak files in the graded repo.
+- [x] `reasoning_content` sent back within a request, dropped at the next
+      (DeepSeek's rule); only to a server that sent it.
+- [x] Harbor adapter: bench/harbor/rak_agent.py (not run yet).
+- [ ] Release alpha.10 with these, then a trial: ~10 Terminal-Bench 2.1 tasks,
+      one attempt, deepseek-v4.1-flash, Docker on this Mac (not installed
+      2026-11-14).
+
 ## Project notes in rak/ (from Naseem, built 2026-11-13, released in alpha.7)
 
 The owner asked to learn from Naseem's `naseem/` folder. Built in

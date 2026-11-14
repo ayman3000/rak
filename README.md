@@ -376,13 +376,14 @@ rak mcp remove files
 | `--max-tokens N` | Longest reply to ask for. |
 | `--context N` | The model's context window. Default: what Anthropic or Ollama reports, otherwise 128000. |
 | `--no-stream` | Wait for each whole reply instead of showing it as it arrives. |
-| `-y`, `--yes` | Run every tool without asking. Use it only inside a container. |
+| `-y`, `--yes` | Run every tool without asking. Use it only inside a container. One request with `-y` (an unattended run, as a benchmark or CI does it) keeps nothing for later sessions: no `remember`, skills, routines or journal, so it writes no files of its own into the project. |
 | `--read-only` | No edits and no commands: read and report. |
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp`, `--no-skills`, `--no-memory`, `--no-notes` | Leave out MCP servers, skills, memory notes, or the after-request notes update. |
+| `--tools LIST` | Only these tools, comma-separated (`--tools read_file,search_files,code_map`); MCP tools by their `server__tool` name. `--tools none` sends no tools at all: for a model that can't call tools, or a plain question for less (a one-word question measured 2,232 input tokens with every tool and 256 with none, kimi-k2.6:cloud). A name that matches no tool is said at the start. |
 | `-c`, `--continue` | Continue this folder's last chat (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
-| `--max-turns N` | Model calls allowed per request. Default 30. |
+| `--max-turns N` | Model calls allowed per request. Default: 30 in a chat (where you can say "go on"), no limit for one request; `0` for no limit. |
 | `--helper-budget N` | Input tokens one `delegate` helper may spend. Default 200000; `0` for no cap. |
 | `--json` | Print one JSON object: answer, outcome, turns, tool calls, tokens, seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |

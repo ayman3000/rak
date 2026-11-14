@@ -316,15 +316,25 @@ pub fn run(mut o: Options) -> i32 {
     // oriented instead of spending its first steps reading them.
     let project_notes = rak::notes::read(&ctx.cwd);
     let notes = project_notes.instructions_text();
-    let mut config =
-        Config { system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()), max_turns: o.max_turns, context_window: window };
-    config.system_prompt.push_str(&rak::notes::prompt_block(&project_notes));
+    let mut config = Config {
+        system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()),
+        max_turns: turn_limit(o.max_turns, chat),
+        context_window: window,
+    };
+    // The /init suggestion is for a chat; a one-off run has nobody to type it.
+    if chat || project_notes.exists() {
+        config.system_prompt.push_str(&rak::notes::prompt_block(&project_notes));
+    }
     let instruction_files: Vec<String> = project_notes.instructions.iter().map(|(name, _)| name.clone()).collect();
     let has_notes = project_notes.exists();
     // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
     let skill_folders = rak::skills::folders(&ctx.cwd, config_dir().as_deref());
-    // Plus the ones built into rak for this system; --no-skills leaves all of them out.
-    let loaded = if o.no_skills { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
+    // --tools: only the tools named there (none: no tools at all).
+    let allowed = |name: &str| o.tools.as_ref().is_none_or(|list| list.iter().any(|n| n == name));
+    // Plus the ones built into rak for this system; --no-skills leaves all of
+    // them out, and so does a --tools list without use_skill.
+    let skills_on = !o.no_skills && allowed("use_skill");
+    let loaded = if !skills_on { Vec::new() } else { rak::skills::load_with_built_in(&skill_folders, std::env::consts::OS) };
     // The index is fixed for the session, so the prompt stays cacheable; a skill
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
@@ -351,15 +361,20 @@ pub fn run(mut o: Options) -> i32 {
         asked: false,
     }));
 
+    // What is kept for later sessions (skills, routines, memory notes, the
+    // journal) needs someone to approve it. An unattended run (one request
+    // with -y, as a benchmark or CI runs it) keeps nothing, so it never
+    // writes files of its own into the project it was given.
+    let keeps = (chat || !o.yes) && !o.read_only;
     let mut tools = core_tools(&ctx, o.read_only);
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
         tools.push(Box::new(WebSearch::new(tavily)));
     }
-    if !o.no_skills {
+    if skills_on {
         tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));
         // Writing skills changes what later sessions do, so read-only leaves it out.
-        if !o.read_only {
+        if keeps && allowed("save_skill") {
             config.system_prompt.push_str(rak::skills::save::LEARNING);
             let user = skill_folders.get(1).cloned();
             tools.push(Box::new(rak::skills::save::SaveSkill::new(skills.clone(), skill_folders[0].clone(), user)));
@@ -368,11 +383,11 @@ pub fn run(mut o: Options) -> i32 {
     // Routines: saved steps that run with no model between them. Saving one
     // changes what later sessions can do, so read-only leaves them out.
     let routine_folders = rak::routines::folders(&ctx.cwd, config_dir().as_deref());
-    if !o.read_only {
+    if keeps {
         tools.push(Box::new(rak::routines::SaveRoutine { project: routine_folders.0.clone(), user: routine_folders.1.clone() }));
     }
     // Keeping a note changes what later sessions do, so read-only leaves it out.
-    if !o.no_memory && !o.read_only {
+    if !o.no_memory && keeps {
         tools.push(Box::new(rak::memory::Remember { project_file: memory_file.clone(), user_file: user_memory_file.clone() }));
     }
     // view_image, unless the server says the model can't see.
@@ -402,7 +417,9 @@ pub fn run(mut o: Options) -> i32 {
     tools.push(Box::new(delegate));
     // When to use code_map, delegate and todo: without this line, models
     // searched and read whole files of a 45-file project instead.
-    config.system_prompt.push_str(BIG_PROJECTS);
+    if ["code_map", "delegate", "todo"].iter().any(|t| allowed(t)) {
+        config.system_prompt.push_str(BIG_PROJECTS);
+    }
     // The task list, for work with several steps.
     let todo = rak::tools::todo::TodoList::default();
     tools.push(Box::new(rak::tools::todo::Todo(todo.clone())));
@@ -417,8 +434,28 @@ pub fn run(mut o: Options) -> i32 {
     // Settings set twice in a .env file: shown with the MCP warnings.
     mcp_problems.extend(super::settings::key_notes());
     let mcp_summary = connected.summary();
-    let deferred = connected.to_defer();
+    let mut deferred = connected.to_defer();
     tools.append(&mut connected.tools);
+    if let Some(list) = &o.tools {
+        // A name that matches nothing is said, not silently ignored.
+        let mut known: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
+        known.push(rak::routines::RUN.to_string());
+        // The skill tools were left out above when the list doesn't name them.
+        for name in ["use_skill", "save_skill"] {
+            if !o.no_skills && !known.iter().any(|k| k == name) {
+                known.push(name.to_string());
+            }
+        }
+        for name in list.iter().filter(|n| !known.contains(n)) {
+            mcp_problems.push(format!("--tools: there is no tool named {name}. The tools are: {}.", known.join(", ")));
+        }
+        tools.retain(|t| allowed(t.name()));
+        for group in deferred.iter_mut() {
+            group.tools.retain(|name| allowed(name));
+        }
+        deferred.retain(|group| !group.tools.is_empty());
+        config.system_prompt.push_str(&tools_note(&tools.iter().map(|t| t.name()).collect::<Vec<_>>()));
+    }
 
     let learns = tools.iter().any(|t| t.name() == "save_skill");
     let mut agent = Agent::new(provider, tools, config);
@@ -426,7 +463,7 @@ pub fn run(mut o: Options) -> i32 {
     if !o.read_only {
         agent.gate = rak::notes::Gate::from_instructions(&project_notes.instructions);
     }
-    if !o.read_only {
+    if !o.read_only && allowed(rak::routines::RUN) {
         agent.enable_routines(std::iter::once(routine_folders.0.clone()).chain(routine_folders.1.clone()).collect());
     }
     agent.stop = stop.clone();
@@ -560,7 +597,8 @@ pub fn broad_folder_warning(cwd: &Path, home: &str, chat: bool) -> Option<String
 /// call writes the journal line and names roadmap edits (Naseem's after-run
 /// update). Never for a question, in read-only mode, or with --no-notes.
 fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
-    if s.o.no_notes || s.o.read_only || !s.agent.acted() || matches!(outcome, Outcome::Stopped) {
+    let unattended = s.o.yes && !s.ui.borrow().chat;
+    if s.o.no_notes || s.o.read_only || unattended || !s.agent.acted() || matches!(outcome, Outcome::Stopped) {
         return;
     }
     // Read now: the request may have just written the notes.
@@ -737,7 +775,9 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
             Some(format!("stopped: you said no to {tool}. Nothing was changed by it — say what to do instead."))
         }
         Outcome::Refused { tool } => Some(format!("stopped: {tool} was not approved. Nothing was changed by it.")),
-        Outcome::MaxTurns => Some(format!("stopped at the turn limit ({}). Raise it with --max-turns.", s.o.max_turns)),
+        Outcome::MaxTurns => {
+            Some(format!("stopped at the turn limit ({}). Raise it with --max-turns.", turn_limit(s.o.max_turns, s.ui.borrow().chat)))
+        }
         Outcome::OverBudget => Some("stopped at the token budget.".to_string()),
         Outcome::Loop => Some("stopped: the model kept repeating the same call with the same result.".to_string()),
         Outcome::Stopped => Some("stopped".to_string()),
@@ -792,6 +832,30 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
 
 // MARK: - Chat
 
+/// Pure — unit-tested. What the system prompt says when --tools narrowed the
+/// tools: the general advice above it names tools this run may not have.
+pub fn tools_note(names: &[&str]) -> String {
+    if names.is_empty() {
+        "\n\nThis run has no tools: you cannot read files, search or run commands. Answer from the conversation \
+         alone, and say what you would need to see to be sure."
+            .to_string()
+    } else {
+        format!("\n\nThis run has only these tools: {}. Work with them; don't ask for others.", names.join(", "))
+    }
+}
+
+/// Pure — unit-tested. Model calls allowed per request: what --max-turns
+/// says (0 for no limit), else 30 in a chat, where the person can say
+/// "go on", and no limit for one request, which nobody is there to restart.
+pub fn turn_limit(asked: Option<usize>, chat: bool) -> usize {
+    match asked {
+        Some(0) => usize::MAX,
+        Some(n) => n,
+        None if chat => 30,
+        None => usize::MAX,
+    }
+}
+
 pub fn exit_code(outcome: &Outcome) -> i32 {
     match outcome {
         Outcome::Done => 0,
@@ -817,6 +881,23 @@ pub fn outcome_name(outcome: &Outcome) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_prompt_says_which_tools_a_narrowed_run_has() {
+        assert!(tools_note(&[]).contains("no tools"));
+        assert!(tools_note(&["read_file", "search_files"]).contains("only these tools: read_file, search_files."));
+        assert_eq!(super::super::args::tool_list("none"), Vec::<String>::new());
+        assert_eq!(super::super::args::tool_list(" read_file, search_files ,"), vec!["read_file", "search_files"]);
+    }
+
+    #[test]
+    fn a_one_off_run_has_no_turn_limit_unless_asked_and_a_chat_has_thirty() {
+        assert_eq!(turn_limit(None, true), 30);
+        assert_eq!(turn_limit(None, false), usize::MAX);
+        assert_eq!(turn_limit(Some(0), true), usize::MAX, "0 means no limit");
+        assert_eq!(turn_limit(Some(50), false), 50);
+    }
+
     #[test]
     fn a_home_or_disk_top_start_is_warned_about() {
         let home = std::env::temp_dir();
