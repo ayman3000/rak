@@ -37,7 +37,7 @@ On 2026-11-12 deepseek-v4.1-flash chose `delegate` on its own for "check the cod
 
 ## Parallel helpers
 
-On 2026-11-14 kimi-k2.6:cloud, asked to use two `delegate` calls in one reply on rak's own code (one about the stall limit, one about the journal archive), ran both helpers side by side: their steps arrived interleaved (`[2]`, `[1]`, `[2]`), both answers were right, and the request took 75 s with `2 tool calls (+5 in helpers)`. Whether a model splits work into parallel calls without being asked is not tried yet.
+On 2026-11-14 kimi-k2.6:cloud, asked to use two `delegate` calls in one reply on rak's own code (one about the stall limit, one about the journal archive), ran both helpers side by side: their steps arrived interleaved (`[2]`, `[1]`, `[2]`), both answers were right, and the request took 75 s with `2 tool calls (+5 in helpers)`. Later that day Claude Haiku 5.5, given two independent questions about rak's code and told only to keep its own context small, split them into two `delegate` calls in its first reply on its own. The helpers made 22 tool calls between them; the request took 48 s, 287K input tokens (224K from the cache) and 2 turns of the main conversation. Both answers matched the code (the MCP `readOnlyHint` check, the write check's parsers and its 5-lines-and-20% rule); line numbers were approximate.
 
 ## What has been tested where
 

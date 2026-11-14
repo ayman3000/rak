@@ -74,7 +74,8 @@ Updated 2026-11-13, after releasing v0.1.0-alpha.8. A working plan for picking t
       sense of the stubs and the summary, and what the summary call costs.
 - [ ] Anthropic's real "prompt is too long" error triggering the retry (only
       a stand-in has so far).
-- [ ] `delegate` with Claude (only kimi has used it so far).
+- [x] `delegate` with Claude: Haiku 5.5 chose two parallel helpers on its own
+      (2026-11-14), both answers right.
 - [ ] The model choosing `delegate` without being asked. kimi-k2.6 never
       did; deepseek-v4.1-flash did on its own (2026-11-12, "check the
       codebase": about 38 reads in the helper, 1.3M input tokens for the
