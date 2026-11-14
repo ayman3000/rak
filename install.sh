@@ -52,14 +52,29 @@ case "$(uname -m)" in
 esac
 target="$arch-$os"
 
+# The highest of the version tags on stdin (v1.2.3, v1.2.3-alpha.10).
+newest() {
+    awk '{
+        tag = $0; v = tag; sub(/^v/, "", v)
+        core = v; pre = ""
+        dash = index(v, "-"); if (dash) { core = substr(v, 1, dash - 1); pre = substr(v, dash + 1) }
+        n = split(core, c, "."); name = pre; num = 0
+        dot = index(pre, "."); if (dot) { name = substr(pre, 1, dot - 1); num = substr(pre, dot + 1) + 0 }
+        printf "%09d %09d %09d %d %-12s %09d %s\n", c[1], c[2], c[3], (pre == "" ? 1 : 0), name, num, tag
+    }' | sort | tail -n 1 | awk '{ print $NF }'
+}
+
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT INT TERM
 
 if [ -z "$VERSION" ]; then
-    # The newest release, pre-releases included (rak is in alpha).
-    fetch "https://api.github.com/repos/$REPO/releases?per_page=1" "$tmp/releases.json" \
+    # The newest release, pre-releases included (rak is in alpha). GitHub's
+    # list is not in version order (it put alpha.9 before alpha.10), so the
+    # versions are compared here: numbers as numbers, a release after its
+    # pre-releases.
+    fetch "https://api.github.com/repos/$REPO/releases?per_page=100" "$tmp/releases.json" \
         || fail "could not ask GitHub for rak's releases"
-    VERSION=$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/releases.json" | head -n 1)
+    VERSION=$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/releases.json" | newest)
     [ -n "$VERSION" ] || fail "found no rak release on GitHub"
 fi
 
