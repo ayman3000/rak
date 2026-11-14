@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 #
 # Settings (all optional):
-#   RAK_VERSION=v0.1.0-alpha.10   a release; default the newest, pre-releases included
+#   RAK_VERSION=v0.1.0-alpha.11   a release; default the newest, pre-releases included
 #   RAK_INSTALL_DIR=~/bin        where rak goes; default ~/.local/bin
 #
 # It downloads the archive for this system, checks it against its published

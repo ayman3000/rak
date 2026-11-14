@@ -1,11 +1,21 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-14, after releasing v0.1.0-alpha.10. A working plan for picking the work up on another machine.
+Updated 2026-11-14, after releasing v0.1.0-alpha.11. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.10** (2026-11-14). It has everything
+- The newest release is **v0.1.0-alpha.11** (2026-11-14). It has everything
   below; `main` and the release match.
+
+### In v0.1.0-alpha.11
+
+- Folder trust (from maki): a folder's own `.rak/mcp.json`, `.env` rak
+  settings, skills and routines are used only once the folder is trusted
+  (asked once in a terminal, remembered in ~/.config/rak/trusted; `--trust`
+  for one run).
+- `run_shell` keeps the start and the end of long output, so the error at
+  the end of a failing build reaches the model.
+- The Harbor adapter installs alpha.11.
 
 ### In v0.1.0-alpha.10
 

@@ -9,7 +9,7 @@ Status: written against Harbor's `BaseInstalledAgent` (install/run), **not run y
 - Docker running (or another runtime Harbor supports locally: podman, apple-container).
 - Harbor: `uv tool install harbor`.
 - A model endpoint that speaks Chat Completions. Ollama on this Mac works for a trial: the container reaches it at `http://host.docker.internal:11434/v1`, with no key. For a provider that needs one, export `RAK_API_KEY` in the shell that runs Harbor.
-- A rak release that has the unattended-run fixes (no turn limit, keeps nothing, reasoning sent back): v0.1.0-alpha.10 or later.
+- A rak release that has the unattended-run fixes (no turn limit, keeps nothing, reasoning sent back): v0.1.0-alpha.10 or later; the adapter installs v0.1.0-alpha.11, whose long shell output keeps its end.
 
 ## A small trial: one attempt at a few Terminal-Bench 2.1 tasks
 

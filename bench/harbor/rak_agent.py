@@ -29,7 +29,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import EnvironmentPaths
 
-RAK_DEFAULT_VERSION = "v0.1.0-alpha.10"
+RAK_DEFAULT_VERSION = "v0.1.0-alpha.11"
 RAK_INSTALL_URL = "https://raw.githubusercontent.com/ayman3000/rak/main/install.sh"
 PATH_PREFIX = 'export PATH="$HOME/.local/bin:$PATH"'
 
