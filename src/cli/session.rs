@@ -423,7 +423,9 @@ pub fn run(mut o: Options) -> i32 {
     // The task list, for work with several steps.
     let todo = rak::tools::todo::TodoList::default();
     tools.push(Box::new(rak::tools::todo::Todo(todo.clone())));
-    let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
+    // The built-in tools, as the welcome panel lists them: only those a
+    // --tools list keeps.
+    let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).filter(|name| allowed(name)).collect();
 
     // Tools from MCP servers join the built-in ones.
     let (listed, mut mcp_problems) =
