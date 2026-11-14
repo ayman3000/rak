@@ -25,11 +25,13 @@ pub struct Delegate {
     make: Box<dyn Fn() -> Agent>,
     /// What the helpers spent, for the caller to add to its own count.
     pub usage: Rc<Cell<Usage>>,
+    /// The tool calls the helpers made, counted apart from the caller's own.
+    pub calls: Rc<Cell<usize>>,
 }
 
 impl Delegate {
     pub fn new(make: Box<dyn Fn() -> Agent>) -> Self {
-        Delegate { make, usage: Rc::new(Cell::new(Usage::default())) }
+        Delegate { make, usage: Rc::new(Cell::new(Usage::default())), calls: Rc::new(Cell::new(0)) }
     }
 }
 
@@ -38,9 +40,10 @@ impl Tool for Delegate {
         "delegate"
     }
     fn description(&self) -> &str {
-        "Give a self-contained question to a helper agent with a fresh context and read-only tools; you get back only \
-         its answer. Use it to search or understand a large codebase without filling your own context. It sees none \
-         of this conversation: put everything it needs in `task`."
+        "Give a self-contained question to a helper agent with a fresh context; you get back only its answer. Its only \
+         tools are list_dir, search_files, code_map, read_file and fetch_url (and web_search when set up): no shell, no \
+         edits. One helper runs at a time. Use it to search or understand a large codebase without filling your own \
+         context. It sees none of this conversation: put everything it needs in `task`."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -58,6 +61,7 @@ impl Tool for Delegate {
         let mut spent = self.usage.get();
         spent.add(helper.usage);
         self.usage.set(spent);
+        self.calls.set(self.calls.get() + helper.tool_calls);
         let footer = format!(
             "[helper: {} turn{}, {} tool call{}]",
             result.turns,
@@ -107,6 +111,7 @@ mod tests {
         assert!(answer.ok && answer.text.starts_with("Found it in src/a.rs:12.\n[helper: 1 turn, 0 tool calls]"), "{}", answer.text);
         tool.run(&json!({ "task": "again" }));
         assert_eq!((tool.usage.get().input, tool.usage.get().output), (14, 6));
+        assert_eq!(tool.calls.get(), 0, "Says makes no tool calls");
         assert!(!tool.run(&json!({})).ok);
     }
 }

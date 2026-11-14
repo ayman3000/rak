@@ -62,6 +62,9 @@ pub struct Session {
     /// The model delegate's helpers use, and what they spent since it was last counted.
     pub helper_model: Rc<RefCell<(Backend, String, usize)>>,
     pub helper_usage: Rc<Cell<rak::provider::Usage>>,
+    /// Tool calls the helpers made since last counted, and in this whole chat.
+    pub helper_calls: Rc<Cell<usize>>,
+    pub helper_calls_total: usize,
     /// Where the fallback chain stands, and what its hook needs.
     pub chain: Rc<RefCell<chain::State>>,
     pub asker: chain::Asker,
@@ -423,7 +426,7 @@ pub fn run(mut o: Options) -> i32 {
             helper
         }))
     };
-    let helper_usage = delegate.usage.clone();
+    let (helper_usage, helper_calls) = (delegate.usage.clone(), delegate.calls.clone());
     tools.push(Box::new(delegate));
     // When to use code_map, delegate and todo: without this line, models
     // searched and read whole files of a 45-file project instead.
@@ -509,6 +512,8 @@ pub fn run(mut o: Options) -> i32 {
         todo,
         helper_model,
         helper_usage,
+        helper_calls,
+        helper_calls_total: 0,
         chain: Rc::new(RefCell::new(chain::State::default())),
         asker,
     };
@@ -676,6 +681,8 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     // What delegate's helpers spent counts as this request's too.
     let helpers = s.helper_usage.take();
     s.agent.usage.add(helpers);
+    let helper_calls = s.helper_calls.take();
+    s.helper_calls_total += helper_calls;
     signals::set_running(false);
     let seconds = (started.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     let input = s.agent.usage.input - usage_before.input;
@@ -696,6 +703,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     };
     let summary = json!({
         "outcome": outcome_name(&outcome), "answer": answer, "error": problem, "turns": turns, "tool_calls": tool_calls,
+        "helper_tool_calls": helper_calls,
         "input_tokens": input, "cached_tokens": cached, "output_tokens": output, "seconds": seconds,
         "fell_back_to": fell_back_to,
     });
@@ -734,7 +742,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
         &format!(
             "  {} · {} · {input} tokens in{} · {output} out · {seconds} s",
             output::plural(turns, "turn"),
-            output::plural(tool_calls, "tool call"),
+            output::calls(tool_calls, helper_calls),
             if cached > 0 { format!(" ({cached} cached)") } else { String::new() }
         ),
     );

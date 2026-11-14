@@ -2,6 +2,7 @@
 
 use super::args::Options;
 use super::editor::Editor;
+use super::output;
 use super::picker::{self, Choice, Picked};
 use super::session::{backend, make_provider, provider_label, run_one, window_for, Backend, Session};
 use super::settings::{home, key, key_files, last_model, remember_model};
@@ -385,7 +386,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             let from_cache = if cached > 0 { format!(" ({} from cache)", grouped(cached)) } else { String::new() };
             println!("  input tokens   {}{from_cache}", grouped(s.agent.usage.input));
             println!("  output tokens  {}", grouped(s.agent.usage.output));
-            println!("  tool calls     {}", s.agent.tool_calls);
+            println!("  tool calls     {}", output::calls(s.agent.tool_calls, s.helper_calls_total));
             println!("  context        ~{} tokens in the last request", grouped(s.agent.last_prompt_tokens));
             println!("  window         {} tokens ({})", grouped(s.window as u64), s.window_source);
             if !s.agent.switches.is_empty() {

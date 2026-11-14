@@ -98,6 +98,17 @@ pub fn plural(n: usize, word: &str) -> String {
     }
 }
 
+/// Pure — unit-tested. "3 tool calls", or "3 tool calls (+14 in helpers)"
+/// when delegate's helpers made calls of their own.
+pub fn calls(own: usize, helpers: usize) -> String {
+    let own = plural(own, "tool call");
+    if helpers == 0 {
+        own
+    } else {
+        format!("{own} (+{helpers} in helpers)")
+    }
+}
+
 /// What is on screen, shared by everything that prints during a request.
 pub struct Ui {
     /// Chat: progress goes to stdout with the answer. One request: to stderr,
@@ -237,6 +248,13 @@ pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>)
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn helper_calls_are_shown_apart() {
+        assert_eq!(calls(3, 0), "3 tool calls");
+        assert_eq!(calls(1, 14), "1 tool call (+14 in helpers)");
+    }
+
     use super::*;
 
     #[test]
