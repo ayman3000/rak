@@ -15,6 +15,7 @@ pub mod interrupt;
 pub mod mcp;
 pub mod memory;
 pub mod notes;
+pub mod private_file;
 pub mod provider;
 pub mod providers;
 pub mod read_slice;

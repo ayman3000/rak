@@ -115,18 +115,9 @@ fn read_file_object(file: &Path) -> Result<Map<String, Value>, String> {
 }
 
 fn write_file_object(file: &Path, top: Map<String, Value>) -> Result<(), String> {
-    if let Some(folder) = file.parent() {
-        std::fs::create_dir_all(folder).map_err(|e| format!("cannot create {}: {e}", folder.display()))?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(top)).unwrap_or_default() + "\n";
-    std::fs::write(file, text).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     // The file can hold keys (env, headers): readable by its owner only.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    crate::private_file::write(file, &text).map_err(|e| format!("cannot write {}: {e}", file.display()))
 }
 
 /// Adds the server to the file, or replaces the entry with its name. The rest

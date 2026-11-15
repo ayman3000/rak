@@ -99,20 +99,10 @@ pub fn run(args: &[String]) -> ! {
     std::process::exit(0);
 }
 
-/// Writes a file readable by its owner only (it is for keys): to a temporary
-/// file first, then renamed over, so a failed write never leaves half a file.
+/// Writes a file readable by its owner only (it is for keys), from the moment
+/// it exists; see `rak::private_file`.
 pub fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(folder) = file.parent() {
-        std::fs::create_dir_all(folder)?;
-    }
-    let temporary = file.with_extension("new");
-    std::fs::write(&temporary, text)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
-    }
-    std::fs::rename(&temporary, file)
+    rak::private_file::write(file, text)
 }
 
 /// Pure — unit-tested. Whether a key file lacks a line the template has (a
@@ -136,12 +126,7 @@ fn update_file(file: &Path) -> std::io::Result<Option<(PathBuf, Updated, Vec<Str
         .map(|n| if n == 1 { file.with_extension("bak") } else { file.with_extension(format!("bak.{n}")) })
         .find(|path| !path.exists())
         .expect("a free name");
-    std::fs::copy(file, &backup)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_private(&backup, &old_text)?;
     write_private(file, &updated.text)?;
     Ok(Some((backup, updated, update_notes(&old))))
 }
