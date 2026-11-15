@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/ayman3000/rak/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ayman3000/rak/ci.yml?branch=main&style=flat-square&label=CI"></a>
-  <a href="https://github.com/ayman3000/rak/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ayman3000/rak?include_prereleases&style=flat-square&color=f97316"></a>
+  <a href="https://github.com/ayman3000/rak/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ayman3000/rak?style=flat-square&color=f97316"></a>
   <img alt="Rust 1.88+" src="https://img.shields.io/badge/rust-1.88%2B-b7410e?style=flat-square&logo=rust">
   <img alt="Linux and macOS" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-475569?style=flat-square">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-22c55e?style=flat-square"></a>
