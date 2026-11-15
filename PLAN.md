@@ -15,9 +15,12 @@ Nothing yet.
 
 - Knows when it is done: the standing instructions now say to stop once what
   was asked works and is checked, and to name extra work in the summary
-  instead of doing it. Found in the Terminal-Bench trial: on
-  schemelike-metacircular-eval every test matched by step 46 of 124; the rest
-  was unasked speed-ups until the 40-min limit.
+  instead of doing it. Prompted by the Terminal-Bench trial, but a misread:
+  on schemelike-metacircular-eval the second half of the run (after every
+  test matched at one level) went into running the tests with the evaluator
+  interpreting itself, which the task asks for. An alpha.13 re-run also
+  passed and also hit the 40-min limit (59 model calls against 118, one run
+  each). The rule stays as a general default; it does not change that task.
 - Setup checks a key where the model list would not: OpenRouter
   (`/api/v1/key`) and Hugging Face (`whoami-v2`), set as `key_check` in
   providers.json. A refusal asks "Type it again?"; "n" goes on, so a wrong

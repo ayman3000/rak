@@ -9,7 +9,7 @@ Status: written for Harbor 0.26 and run on 10 Terminal-Bench 2.1 tasks (2026-11-
 - Docker running. On a Mac, [OrbStack](https://orbstack.dev) works (`brew install --cask orbstack`, then pick Docker in its welcome screen).
 - Harbor: `uv tool install harbor`.
 - A model endpoint that speaks Chat Completions. Ollama on the host works: the container reaches it at `http://host.docker.internal:11434/v1`, with no key. For a provider that needs one, export `RAK_API_KEY` in the shell that runs Harbor.
-- A rak release: the adapter installs v0.1.0-alpha.13 (knows when it is done since alpha.13; long shell output keeps its end since alpha.11).
+- A rak release: the adapter installs v0.1.0-alpha.13 (long shell output keeps its end since alpha.11).
 
 ## Running a few Terminal-Bench 2.1 tasks
 
@@ -39,7 +39,7 @@ rak 0.1.0-alpha.12, `deepseek-v4.1-flash:cloud` through Ollama, effort low, one 
 |---|---|---|
 | write-compressor | 1 | 8.6 min, 43 turns (a later re-run timed out at 15 min) |
 | kv-store-grpc | 1 | 45 s, 14 turns |
-| schemelike-metacircular-eval | 1 | All tests matched by step 46 of 124; the rest was unasked speed-ups until the 40-min limit |
+| schemelike-metacircular-eval | 1 | Hit the 40-min limit while making the tests run with the evaluator interpreting itself (part of the task); an alpha.13 re-run did the same |
 | openssl-selfsigned-cert | 1 | 22 s, 12 turns |
 | pypi-server | 1 | 66 s, 20 turns |
 | regex-chess | 1 | Still testing at the 60-min limit |
@@ -48,4 +48,4 @@ rak 0.1.0-alpha.12, `deepseek-v4.1-flash:cloud` through Ollama, effort low, one 
 | torch-tensor-parallelism | – | rak finished; the grader timed out |
 | torch-pipeline-parallelism | – | rak finished; the grader timed out |
 
-Six of ten. What it changed: alpha.13 tells rak to stop once the task works ([PLAN](../../PLAN.md)), and the adapter installs with wget when the image has it (qemu-alpine-ssh's Debian 11 image cannot install curl). A full run belongs on an x86 Linux machine.
+Six of ten. What it changed: the adapter installs with wget when the image has it (qemu-alpine-ssh's Debian 11 image cannot install curl). The timeouts come from a cheap model at low effort on emulated x86; a full run belongs on an x86 Linux machine.
