@@ -1,20 +1,23 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-14, after releasing v0.1.0-alpha.12. A working plan for picking the work up on another machine.
+Updated 2026-11-15, after releasing v0.1.0-alpha.13. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.12** (2026-11-14). It has everything
+- The newest release is **v0.1.0-alpha.13** (2026-11-15). It has everything
   below; `main` and the release match.
 
 ### On main, not released
+
+Nothing yet.
+
+### In v0.1.0-alpha.13
 
 - Knows when it is done: the standing instructions now say to stop once what
   was asked works and is checked, and to name extra work in the summary
   instead of doing it. Found in the Terminal-Bench trial: on
   schemelike-metacircular-eval every test matched by step 46 of 124; the rest
-  was unasked speed-ups until the 40-min limit. Not yet re-run on the
-  benchmark (needs a release, since Harbor installs one).
+  was unasked speed-ups until the 40-min limit.
 - Setup checks a key where the model list would not: OpenRouter
   (`/api/v1/key`) and Hugging Face (`whoami-v2`), set as `key_check` in
   providers.json. A refusal asks "Type it again?"; "n" goes on, so a wrong
