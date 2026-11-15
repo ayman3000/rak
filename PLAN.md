@@ -1,15 +1,26 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-15, after releasing v0.1.0-alpha.13. A working plan for picking the work up on another machine.
+Updated 2026-11-15, after releasing v0.1.0-alpha.14. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.13** (2026-11-15). It has everything
+- The newest release is **v0.1.0-alpha.14** (2026-11-15). It has everything
   below; `main` and the release match.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.14
+
+- Key files are owner-only from the moment they exist: the key file, its
+  backups and the MCP server list are created with mode 0600 and renamed
+  into place (`src/private_file.rs`); before, they were written first and
+  restricted after.
+- README rewritten as a landing page (banner, badges, "Why rak", grouped
+  features); the detailed reference moved into guides under `docs/`.
+- Releases are normal ones, marked latest, alphas included (alpha.13 was
+  switched by hand); this is the first tag published that way.
 
 ### In v0.1.0-alpha.13
 

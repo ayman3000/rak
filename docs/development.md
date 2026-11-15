@@ -63,5 +63,5 @@ The code is in two layers: a library that knows nothing about terminals, and the
 Every push to `main` and every pull request runs the tests on Linux and macOS, the format and lint checks, and a build with the oldest supported Rust (`.github/workflows/ci.yml`). A version tag matching `Cargo.toml` builds the four release archives and publishes them as the latest release (`.github/workflows/release.yml`), alphas included:
 
 ```bash
-git tag v0.1.0-alpha.13 && git push origin v0.1.0-alpha.13
+git tag v0.1.0-alpha.14 && git push origin v0.1.0-alpha.14
 ```

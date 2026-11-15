@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 ```
 
 > [!NOTE]
-> **Early alpha (0.1.0-alpha.13).** The core works and is tested on every push. See [Status](#status) for what isn't there yet.
+> **Early alpha (0.1.0-alpha.14).** The core works and is tested on every push. See [Status](#status) for what isn't there yet.
 
 ## See it work
 
@@ -80,7 +80,7 @@ cargo install --git https://github.com/ayman3000/rak --locked
 <details>
 <summary><b>More install options</b></summary>
 
-- **Pick a release or a folder:** `RAK_VERSION=v0.1.0-alpha.13` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Nothing else on your system is changed.
+- **Pick a release or a folder:** `RAK_VERSION=v0.1.0-alpha.14` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Nothing else on your system is changed.
 - **Builds:** Linux on x86-64 and ARM (static, any distribution), macOS on Apple Silicon and Intel. Windows is not supported yet.
 - **Read before you run:** download the script first (`curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh -o install.sh`), read it, then run `sh install.sh`.
 - **macOS:** the builds are not notarized. Installed with the script they just run; a build downloaded in a web browser needs `xattr -d com.apple.quarantine rak` first.
