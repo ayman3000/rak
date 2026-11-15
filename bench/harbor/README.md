@@ -48,4 +48,4 @@ rak 0.1.0-alpha.12, `deepseek-v4.1-flash:cloud` through Ollama, effort low, one 
 | torch-tensor-parallelism | – | rak finished; the grader timed out |
 | torch-pipeline-parallelism | – | rak finished; the grader timed out |
 
-Six of ten. What it changed: the adapter installs with wget when the image has it (qemu-alpine-ssh's Debian 11 image cannot install curl). The timeouts come from a cheap model at low effort on emulated x86; a full run belongs on an x86 Linux machine.
+Six of ten. What it changed: the adapter installs with wget when the image has it (qemu-alpine-ssh's Debian 11 image cannot install curl). The timeouts most likely come from a cheap model at low effort on emulated x86 (not checked on x86); a full run belongs on an x86 Linux machine.
