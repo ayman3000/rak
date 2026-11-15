@@ -131,11 +131,13 @@ class RakAgent(BaseInstalledAgent):
         logs = self.environment_logs_dir.as_posix()
         # The answer and numbers (--json) go to one file, the step-by-step
         # progress (stderr) to another, and every step as JSON lines to a log.
+        # "--" ends the options, so a task that starts with "-" (a Markdown
+        # list) is still read as the task, not as an unknown option.
         await self.exec_as_agent(
             environment,
             command=(
                 f"mkdir -p {logs} && {PATH_PREFIX} && "
-                f"rak {' '.join(flags)} --log {logs}/rak-log.jsonl {shlex.quote(instruction)} "
+                f"rak {' '.join(flags)} --log {logs}/rak-log.jsonl -- {shlex.quote(instruction)} "
                 f"> {logs}/rak-result.json 2> {logs}/rak-progress.txt"
             ),
             env=env,

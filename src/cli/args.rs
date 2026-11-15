@@ -253,4 +253,12 @@ mod tests {
             assert!(normalized.split(',').any(|word| word == provider.name), "--help does not name {}", provider.name);
         }
     }
+
+    #[test]
+    fn a_task_after_double_dash_may_start_with_a_dash() {
+        let args = ["-y", "--json", "--", "- Fix the bug\n- Add a test"].map(String::from).to_vec();
+        let o = super::parse_args(args);
+        assert_eq!(o.task.as_deref(), Some("- Fix the bug\n- Add a test"));
+        assert!(o.json);
+    }
 }

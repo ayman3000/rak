@@ -31,7 +31,57 @@ frontierharness@runta.com (the owner's step).
 - [x] Oracle check on one task: reward 1.0 in 5 min.
 - [x] First rak run (alpha.14, deepseek-v4.1-flash on ollama.com): failed
       on TLS, fixed in alpha.15.
-- [ ] Rerun one task on alpha.15, then a few, then all 62.
+- [x] Rerun on alpha.15: openssl-selfsigned-cert passed (reward 1.0), 11
+      turns, 11 tool calls, 49.7K tokens in (42.6K cached), 3.6K out, 13 s
+      of rak's own time, 2 min 49 s in all. Harbor records the tokens per
+      trial; `cost_usd` stays empty (rak doesn't price tokens).
+- [x] A batch of 10 (2026-11-15, alpha.15, deepseek-v4.1-flash, 3 at a
+      time, 18 min): **9/10**. 1.62M tokens in (94% cached), 241K out.
+      Passed: adaptive-rejection-sampler (the costliest, 765K in),
+      cancel-async-tasks, fix-git, kv-store-grpc, log-summary-date-ranges,
+      polyglot-c-py, pypi-server, regex-log, sqlite-db-truncate. Failed:
+      nginx-request-logging, the model's slip, not rak's: it put
+      `$request_time` after the quoted user agent, and the hidden test wants
+      the user agent last. Picked from the shorter tasks, so 9/10 is not a
+      forecast for all 62.
+- How the board works (frontierharness.org/about and /participate): every
+  harness runs the same 62 pinned tasks with each of 5 models (GLM-5.3,
+  GLM-5.3-Flash, DeepSeek-V4.1-Flash, Muse Spark Open, Kimi-K3), 4 scored
+  attempts per task. Infra failures are not scored. Cost is Harbor's
+  `cost_usd`, else tokens x models.dev list prices (rak leaves `cost_usd`
+  empty). A submission is reviewed, rerun by them, and then considered for
+  their next run, so the board's numbers come from their runs, not ours.
+  The v1.0 board (Kimi K3) ran from 50% (Hermes, OpenCode) to 66.7%
+  (Codex); median cost per task $1.05 (Exo Harness) to $18.34 (Claude Code).
+- [x] The 10-task batch with kimi-k3 (21 min): **9/10**. 905K tokens in
+      (91% cached), 140K out: about half of DeepSeek's, with fewer tool
+      calls. nginx-request-logging passed this time. adaptive-rejection-
+      sampler timed out at its 15-min limit: kimi-k3's first reply took
+      291 s and 25.5K output tokens of thinking before any tool call, R took
+      88 s to install, and the last 4 min went into extra statistical
+      checks after the samplers already worked. rak doesn't know a task's
+      time limit; worth a look whether a lower `--effort` or a hint about
+      time would help, without hurting the rest.
+- [ ] All 62 with deepseek-v4.1-flash (job 2026-11-15__16-45-02, alpha.15,
+      4 at a time, `run-tasks.sh all`); at 44/62 the pass rate was 60.5%.
+      Not the model's fault: 4 tasks hit Ollama's session usage limit (429)
+      at the same moment (batched-eval-parity, sam-cell-seg,
+      session-window-debug, video-processing); pytorch-model-recovery's
+      task starts with "- ", which rak read as an option (fixed: the adapter
+      now passes `--` before the task); mteb-leaderboard never installed
+      rak (the image has wget but no curl, and wget failed TLS, exit 5).
+      Rerun those once the run ends.
+- Tokens: input looks large (3-5M on long tasks) but is 97-99% cached; the
+  context grows from the model's own thinking (sent back within a task, as
+  DeepSeek asks) and the code it writes, not from tool output. With cache
+  counted, output is 70-80% of the cost. Trimming old thinking would break
+  the cache, so the levers to try are fewer model calls (several commands
+  per call) and a lower `--effort`, A/B tested on hard tasks.
+- [ ] Look at mteb-leaderboard's install (wget TLS) in the adapter.
+- [ ] Submit (the owner's step): the job folders, and ask whether they need
+      a Kimi K3 run from us and whether cost counts cached tokens.
+- Kimi K3 for all 62 if needed: `run-tasks.sh batch 1` to `batch 4`
+  (20/20/20/2, lists in ~/rak-frontier/batches/), one per quota window.
 - `~/rak-frontier/run-one.sh [task]` runs one task; it needs
   `OLLAMA_API_KEY` set in that shell.
 
