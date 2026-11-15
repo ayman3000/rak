@@ -1,15 +1,39 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-15, after releasing v0.1.0-alpha.14. A working plan for picking the work up on another machine.
+Updated 2026-11-15, after releasing v0.1.0-alpha.15. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.14** (2026-11-15). It has everything
+- The newest release is **v0.1.0-alpha.15** (2026-11-15). It has everything
   below; `main` and the release match.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.15
+
+- Trusts the system's certificates as well as the built-in list
+  (`src/http.rs`, used by every HTTP client). Found on FrontierHarness
+  Eval: Runta's egress proxy presents its own CA, so every model request
+  failed with "invalid peer certificate: UnknownIssuer". Checked with a
+  throwaway CA on macOS (`SSL_CERT_FILE`) and in Debian (system store), and
+  a container with no certificates still reaches HTTPS sites.
+
+### FrontierHarness Eval (frontierharness.org, started 2026-11-15)
+
+Harbor + Runta, dataset `frontier-harness-eval/frontier-harness-eval@v1.1.0`
+(62 tasks, names prefixed `terminal-bench/`). Results are emailed to
+frontierharness@runta.com (the owner's step).
+
+- [x] Harbor 0.26.0 with `harbor[runta]`, Runta CLI 0.2.17, signed in
+      (`runta login` needs `~/.config/runta/` to exist first).
+- [x] Oracle check on one task: reward 1.0 in 5 min.
+- [x] First rak run (alpha.14, deepseek-v4.1-flash on ollama.com): failed
+      on TLS, fixed in alpha.15.
+- [ ] Rerun one task on alpha.15, then a few, then all 62.
+- `~/rak-frontier/run-one.sh [task]` runs one task; it needs
+  `OLLAMA_API_KEY` set in that shell.
 
 ### In v0.1.0-alpha.14
 

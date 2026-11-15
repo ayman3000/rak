@@ -52,7 +52,7 @@ What changed meaning with named providers (`--update` warns about the second and
 Started without a task, rak opens a chat:
 
 ```
-╭─ rak 0.1.0-alpha.14 ─────────────────────────────────────────────────────────╮
+╭─ rak 0.1.0-alpha.15 ─────────────────────────────────────────────────────────╮
 │ ██████   █████  ██   ██            │ Tools                                   │
 │ ██   ██ ██   ██ ██  ██             │ files   list_dir, search_files,         │
 │ ██████  ███████ █████              │         code_map, read_file, +4 more    │
