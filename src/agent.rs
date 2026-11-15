@@ -1071,6 +1071,9 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
          Report only what happened: say you ran, tested or verified something only if a command you ran in this \
          conversation did it, and say whether it passed. A screenshot or log you have not looked at checks nothing. \
          Say plainly what you could not check, and why.\n\
+         Know when you are done: once what was asked works and you have checked it, stop and answer. Don't take \
+         on work nobody asked for (speed-ups, extra cases, polish, deeper tests of what already passes); name it \
+         in your summary as a possible next step instead.\n\
          Finish with a short summary of what you did.",
         cwd.display()
     );
@@ -1719,6 +1722,8 @@ mod tests {
         assert!(p.contains("READ-ONLY mode"));
         assert!(p.ends_with("Run `make check` before finishing."));
         assert!(!system_prompt(Path::new("/w"), false, None).contains("READ-ONLY"));
+        // A solved task ends the run; extra work is named, not done.
+        assert!(p.contains("Know when you are done") && p.contains("work nobody asked for"));
     }
 
     #[test]

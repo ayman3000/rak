@@ -2,16 +2,16 @@
 
 [`rak_agent.py`](rak_agent.py) runs rak as a [Harbor](https://harborframework.com) installed agent: it installs a pinned rak release in each task's container and runs one unattended request (`rak -y --json --base-url URL -m MODEL "<task>"`). This is how the [Harness Leaderboard](https://huggingface.co/spaces/joelniklaus/harness-leaderboard) runs harnesses: same model for all, reached through a base URL.
 
-Status: written against Harbor's `BaseInstalledAgent` (install/run), **not run yet**.
+Status: written for Harbor 0.26 and run on 10 Terminal-Bench 2.1 tasks (2026-11-14, see [Trial](#trial-2026-11-14)).
 
 ## What you need
 
-- Docker running (or another runtime Harbor supports locally: podman, apple-container).
+- Docker running. On a Mac, [OrbStack](https://orbstack.dev) works (`brew install --cask orbstack`, then pick Docker in its welcome screen).
 - Harbor: `uv tool install harbor`.
-- A model endpoint that speaks Chat Completions. Ollama on this Mac works for a trial: the container reaches it at `http://host.docker.internal:11434/v1`, with no key. For a provider that needs one, export `RAK_API_KEY` in the shell that runs Harbor.
-- A rak release that has the unattended-run fixes (no turn limit, keeps nothing, reasoning sent back): v0.1.0-alpha.10 or later; the adapter installs v0.1.0-alpha.12 (long shell output keeps its end since alpha.11).
+- A model endpoint that speaks Chat Completions. Ollama on the host works: the container reaches it at `http://host.docker.internal:11434/v1`, with no key. For a provider that needs one, export `RAK_API_KEY` in the shell that runs Harbor.
+- A rak release: the adapter installs v0.1.0-alpha.13 (knows when it is done since alpha.13; long shell output keeps its end since alpha.11).
 
-## A small trial: one attempt at a few Terminal-Bench 2.1 tasks
+## Running a few Terminal-Bench 2.1 tasks
 
 ```bash
 cd bench/harbor
@@ -20,14 +20,32 @@ PYTHONPATH=. harbor run \
   -a rak_agent:RakAgent \
   -m deepseek-v4.1-flash:cloud \
   --base-url http://host.docker.internal:11434/v1 \
-  --ak effort=low \
-  -e docker \
+  --effort low \
   -l 10 -k 1 -n 2 \
-  -o ../../../rak-harbor-jobs
+  -o ~/rak-harbor-jobs -y -q
 ```
 
-`-l 10` takes ten tasks, `-k 1` one attempt each, `-n 2` two at a time. Each trial's folder holds `rak-result.json` (the `--json` summary), `rak-progress.txt` (what rak showed) and `rak-log.jsonl` (every step).
+- `-l 10` takes ten tasks, `-k 1` one attempt each, `-n 2` two at a time.
+- `-i '*name*'` / `-x '*name*'` pick or skip tasks; they are globs, so a bare task name matches nothing.
+- Options: `--effort`, and `--context` / `--max-tokens` through the agent's options (see `harbor run --help`).
+- Each trial's `agent/` folder holds `rak-result.json` (the `--json` summary), `rak-log.jsonl` (every step) and `rak-progress.txt` (empty under `--json`). A run stopped at the time limit has no summary; its tokens are added up from the step log.
+- Each task pulls its own image (about 0.3–1 GB). `docker system prune -a` afterwards gives the space back.
 
-Agent options (`--ak key=value`): `version` (a rak release tag), `context` (`--context`), `max_tokens` (`--max-tokens`), `effort` (`--effort`).
+## Trial (2026-11-14)
 
-Check `harbor run --help` first: flag names may differ between Harbor versions (`-a module:Class` against `--agent-import-path`).
+rak 0.1.0-alpha.12, `deepseek-v4.1-flash:cloud` through Ollama, effort low, one attempt, on an Apple Silicon Mac (the task images are x86, so they run emulated).
+
+| Task | Reward | Note |
+|---|---|---|
+| write-compressor | 1 | 8.6 min, 43 turns (a later re-run timed out at 15 min) |
+| kv-store-grpc | 1 | 45 s, 14 turns |
+| schemelike-metacircular-eval | 1 | All tests matched by step 46 of 124; the rest was unasked speed-ups until the 40-min limit |
+| openssl-selfsigned-cert | 1 | 22 s, 12 turns |
+| pypi-server | 1 | 66 s, 20 turns |
+| regex-chess | 1 | Still testing at the 60-min limit |
+| dna-assembly | 0 | Finished with a wrong answer |
+| qemu-alpine-ssh | 0 | Timed out booting a VM under QEMU inside the emulated container |
+| torch-tensor-parallelism | – | rak finished; the grader timed out |
+| torch-pipeline-parallelism | – | rak finished; the grader timed out |
+
+Six of ten. What it changed: alpha.13 tells rak to stop once the task works ([PLAN](../../PLAN.md)), and the adapter installs with wget when the image has it (qemu-alpine-ssh's Debian 11 image cannot install curl). A full run belongs on an x86 Linux machine.
