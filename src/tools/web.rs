@@ -22,7 +22,7 @@ impl WebSearch {
 
     /// For tests: another address than Tavily's.
     pub fn with_endpoint(api_key: String, endpoint: &str) -> Self {
-        let http = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build();
+        let http = crate::http::builder().timeout(Duration::from_secs(30)).build();
         WebSearch { api_key, endpoint: endpoint.to_string(), http }
     }
 }

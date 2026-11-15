@@ -54,7 +54,7 @@ impl Clients {
         let mut clients = self.by_limit.lock().unwrap();
         clients
             .entry(read.as_secs())
-            .or_insert_with(|| ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(read).build())
+            .or_insert_with(|| crate::http::builder().timeout_connect(Duration::from_secs(30)).timeout_read(read).build())
             .clone()
     }
 }

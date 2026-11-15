@@ -11,6 +11,7 @@ pub mod artifacts;
 pub mod compact;
 pub mod delegate;
 pub mod fallback;
+pub mod http;
 pub mod interrupt;
 pub mod mcp;
 pub mod memory;

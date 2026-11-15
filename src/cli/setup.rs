@@ -330,7 +330,7 @@ pub fn classify(status: u16) -> Check {
 /// GET `url` with the key as a bearer token. Costs nothing: it reads the
 /// account, it runs no model.
 fn check_key(url: &str, key: &str) -> Check {
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build();
+    let agent = rak::http::builder().timeout(Duration::from_secs(10)).build();
     match agent.get(url).set("Authorization", &format!("Bearer {key}")).call() {
         Ok(response) => classify(response.status()),
         Err(ureq::Error::Status(code, _)) => classify(code),

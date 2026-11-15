@@ -38,7 +38,7 @@ impl Default for FetchUrl {
 
 impl FetchUrl {
     pub fn new() -> Self {
-        let http = ureq::AgentBuilder::new()
+        let http = crate::http::builder()
             .timeout(Duration::from_secs(25))
             .redirects(5)
             .resolver(|netloc: &str| public_addresses(netloc, &|n| n.to_socket_addrs().map(Iterator::collect)))

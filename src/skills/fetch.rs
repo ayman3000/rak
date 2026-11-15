@@ -36,7 +36,7 @@ pub fn fetch_bytes(url: &str, max: u64) -> Result<Vec<u8>, String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(format!("{url} is not a web address (http or https)"));
     }
-    let http = ureq::AgentBuilder::new().timeout(Duration::from_secs(20)).redirects(5).build();
+    let http = crate::http::builder().timeout(Duration::from_secs(20)).redirects(5).build();
     let response = match http.get(url).call() {
         Ok(response) => response,
         Err(ureq::Error::Status(code, _)) => return Err(format!("{url} answered HTTP {code}")),
@@ -70,7 +70,7 @@ pub fn github_folder(url: &str) -> Option<(String, String, String, String)> {
 /// GitHub's contents API.
 pub fn github_files(url: &str) -> Result<Vec<(String, String)>, String> {
     let Some((owner, repo, branch, folder)) = github_folder(url) else { return Ok(Vec::new()) };
-    let http = ureq::AgentBuilder::new().timeout(Duration::from_secs(20)).build();
+    let http = crate::http::builder().timeout(Duration::from_secs(20)).build();
     let mut files = Vec::new();
     let mut pending = vec![folder.clone()];
     while let Some(dir) = pending.pop() {

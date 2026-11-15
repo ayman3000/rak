@@ -116,7 +116,7 @@ pub struct OpenAICompatible {
 
 impl OpenAICompatible {
     pub fn new(base_url: &str, api_key: Option<String>, model: &str) -> Self {
-        let http = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(60)).build();
+        let http = crate::http::builder().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(60)).build();
         OpenAICompatible {
             stall_base: crate::stall::base_for(base_url, false),
             clients: Default::default(),

@@ -71,7 +71,7 @@ impl Client {
         let conn = match &config.transport {
             Transport::Stdio { command, args, env } => start_program(command, args, env, project)?,
             Transport::Http { url, headers } => Conn::Http {
-                http: ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).build(),
+                http: crate::http::builder().timeout_connect(Duration::from_secs(15)).build(),
                 url: url.clone(),
                 headers: headers.clone(),
                 session: None,
