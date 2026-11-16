@@ -64,6 +64,8 @@ BEHAVIOUR
       --max-turns N       model calls allowed per request (default: 30 in a chat,
                           no limit for one request; 0: no limit)
       --helper-budget N   input tokens one delegate helper may spend (default 200000; 0: no cap)
+      --time-limit SECS   the time this run has, counted from start: the model is told,
+                          and warned at 70% and 90% (for benchmarks and CI with a timeout)
 
 OUTPUT
       --json              print one JSON object with the answer and the numbers
@@ -117,6 +119,8 @@ pub struct Options {
     pub max_turns: Option<usize>,
     /// Input tokens one delegate helper may spend; 0 is no cap.
     pub helper_budget: u64,
+    /// Seconds this run has (--time-limit); None: no limit.
+    pub time_limit: Option<u64>,
     pub json: bool,
     pub log: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -167,6 +171,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         cwd: None,
         max_turns: None,
         helper_budget: 200_000,
+        time_limit: None,
         json: false,
         log: None,
         record: None,
@@ -225,6 +230,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "-C" | "--cwd" => o.cwd = Some(PathBuf::from(value("--cwd"))),
             "--max-turns" => o.max_turns = Some(number::<usize>("--max-turns", value("--max-turns"))),
             "--helper-budget" => o.helper_budget = number::<u64>("--helper-budget", value("--helper-budget")),
+            "--time-limit" => o.time_limit = Some(number::<u64>("--time-limit", value("--time-limit"))).filter(|s| *s > 0),
             "--json" => o.json = true,
             "--log" => o.log = Some(PathBuf::from(value("--log"))),
             "--record" => o.record = Some(PathBuf::from(value("--record"))),

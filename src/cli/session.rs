@@ -483,6 +483,8 @@ pub fn run(mut o: Options) -> i32 {
     let learns = tools.iter().any(|t| t.name() == "save_skill");
     let mut agent = Agent::new(provider, tools, config);
     agent.defer(deferred);
+    // Counted from here: start-up before this takes milliseconds.
+    agent.time_limit = o.time_limit.map(|secs| (std::time::Instant::now(), std::time::Duration::from_secs(secs)));
     if !o.read_only {
         agent.gate = rak::notes::Gate::from_instructions(&project_notes.instructions);
     }

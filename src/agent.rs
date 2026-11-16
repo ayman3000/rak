@@ -184,6 +184,10 @@ pub struct Agent {
     /// three quarters the model is told to wrap up; at the budget it must
     /// answer with what it has. None: no budget.
     pub input_budget: Option<u64>,
+    /// The time this run has (`--time-limit`), from the moment given: the task
+    /// says how long there is, and past 70% and 90% the model is told how
+    /// much is left. None: no limit.
+    pub time_limit: Option<(Instant, Duration)>,
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,
     loaded: Vec<String>,
@@ -219,6 +223,7 @@ impl Agent {
             finish_check: None,
             fallback: None,
             input_budget: None,
+            time_limit: None,
             switches: Vec::new(),
             groups: Vec::new(),
             loaded: Vec::new(),
@@ -447,7 +452,18 @@ impl Agent {
                 message.as_object_mut().map(|o| o.remove("native"));
             }
         }
+        // The time there is goes in the task itself, so the prompt before it
+        // stays the same (and cached) from run to run.
+        let task = match self.time_limit {
+            Some((start, limit)) => format!(
+                "{task}\n\n[time note] You have {} for this task in all; work not saved by then is lost. \
+                 Plan for it.",
+                minutes(limit.saturating_sub(start.elapsed()))
+            ),
+            None => task.to_string(),
+        };
         self.messages.push(json!({ "role": "user", "content": task }));
+        let mut time_warned = 0.0;
         let mut definitions = self.definitions();
         let limited = self.config.max_turns != usize::MAX;
         let nudge_at = (limited && self.config.max_turns >= 10).then(|| self.config.max_turns / 5 * 4);
@@ -652,6 +668,10 @@ impl Agent {
                         "[budget note] You have used three quarters of this task's token budget. Stop exploring: \
                          read only what the answer still needs, then give it." }));
                 }
+            }
+            if let Some(note) = self.time_limit.and_then(|(start, limit)| time_note(start.elapsed(), limit, &mut time_warned)) {
+                (self.on_event)(&Event::Note("time is running out: told the model"));
+                self.messages.push(json!({ "role": "user", "content": note }));
             }
             if nudge_at == Some(turn) {
                 self.messages.push(json!({ "role": "user", "content": format!(
@@ -1038,6 +1058,41 @@ const MAX_REPAIRS: usize = 3;
 
 /// Pure — unit-tested. Whether a tool error is one the model can act on: not
 /// a call to a tool that does not exist (SwiftAgentKit leaves those out too).
+/// A time left, said plainly: "12 minutes", "1 minute", "under a minute".
+fn minutes(left: Duration) -> String {
+    match left.as_secs() / 60 {
+        0 => "under a minute".to_string(),
+        1 => "1 minute".to_string(),
+        n => format!("{n} minutes"),
+    }
+}
+
+/// The note for the model once 70% and then 90% of the time is used, each
+/// once (`warned` is the share last warned about). Pure — unit-tested.
+fn time_note(elapsed: Duration, limit: Duration, warned: &mut f64) -> Option<String> {
+    if limit.is_zero() {
+        return None;
+    }
+    let used = elapsed.as_secs_f64() / limit.as_secs_f64();
+    let left = minutes(limit.saturating_sub(elapsed));
+    if used >= 0.9 && *warned < 0.9 {
+        *warned = 0.9;
+        Some(format!(
+            "[time note] Only {left} left. Start nothing new: make sure the files and outputs the task asks for \
+             are in place now, then give your summary."
+        ))
+    } else if used >= 0.7 && *warned < 0.7 {
+        *warned = 0.7;
+        Some(format!(
+            "[time note] About {left} of {} left. Finish the essential work now; skip extras and further checks \
+             of what already works.",
+            minutes(limit)
+        ))
+    } else {
+        None
+    }
+}
+
 fn repairable(error: &str) -> bool {
     !error.starts_with("There is no tool named")
 }
@@ -1065,12 +1120,16 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
          The project folder is {}. Relative paths resolve there.\n\
          Look before you change: list and read files first. Make focused edits.\n\
          After changing code, build or test it with run_shell when that makes sense.\n\
+         Save steps: make independent tool calls together in one reply, and put related shell commands in one \
+         run_shell call (a && b) instead of one call each.\n\
          Answer concisely; Markdown is fine (headings, bullets, code).\n\
          Make the code pass the tests, never the tests pass the code: don't edit or delete a test you were \
          asked to make pass; adding a test is fine. If a test looks wrong, say so and stop.\n\
          Report only what happened: say you ran, tested or verified something only if a command you ran in this \
          conversation did it, and say whether it passed. A screenshot or log you have not looked at checks nothing. \
          Say plainly what you could not check, and why.\n\
+         Before you answer, read the request again and check each thing it asks for against what you made: \
+         names, paths, formats, and the cases it mentions. Fix what is missing.\n\
          Know when you are done: once what was asked works and you have checked it, stop and answer. Don't take \
          on work nobody asked for (speed-ups, extra cases, polish, deeper tests of what already passes); name it \
          in your summary as a possible next step instead.\n\
@@ -1162,6 +1221,37 @@ mod tests {
         assert!(notes.iter().any(|n| n.starts_with("[budget note]")), "warned at three quarters");
         assert!(notes.last().unwrap().contains("Do not call any tools"));
         assert!(s.seen.borrow().last().is_some(), "the last call went out");
+    }
+
+    #[test]
+    fn time_notes_come_at_seventy_and_ninety_percent_once_each() {
+        let limit = Duration::from_secs(1000);
+        let mut warned = 0.0;
+        assert_eq!(time_note(Duration::from_secs(600), limit, &mut warned), None);
+        let first = time_note(Duration::from_secs(700), limit, &mut warned).unwrap();
+        assert!(first.starts_with("[time note] About 5 minutes of 16 minutes left"), "{first}");
+        assert_eq!(time_note(Duration::from_secs(800), limit, &mut warned), None, "70% is said once");
+        let second = time_note(Duration::from_secs(950), limit, &mut warned).unwrap();
+        assert!(second.starts_with("[time note] Only under a minute left"), "{second}");
+        assert_eq!(time_note(Duration::from_secs(990), limit, &mut warned), None, "90% is said once");
+        // Late from the start: only the more urgent note.
+        let mut late = 0.0;
+        assert!(time_note(Duration::from_secs(950), limit, &mut late).unwrap().starts_with("[time note] Only"));
+        assert_eq!(time_note(Duration::from_secs(960), limit, &mut late), None);
+    }
+
+    #[test]
+    fn a_run_with_a_time_limit_says_so_in_the_task_and_warns_near_the_end() {
+        let list = || Ok(call("list_dir", json!({ "path": "." })));
+        let mut s = setup("time", vec![list(), Ok(text("done"))], 10);
+        // 95% of ten minutes is already gone.
+        let start = Instant::now() - Duration::from_secs(570);
+        s.agent.time_limit = Some((start, Duration::from_secs(600)));
+        assert_eq!(s.agent.run("explore").outcome, Outcome::Done);
+        let notes: Vec<String> =
+            s.agent.history().iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str().map(str::to_string)).collect();
+        assert!(notes[0].starts_with("explore\n\n[time note] You have under a minute for this task"), "{}", notes[0]);
+        assert!(notes[1].starts_with("[time note] Only"), "{}", notes[1]);
     }
 
     /// Records how calls reached it: together, in batches, or one by one.

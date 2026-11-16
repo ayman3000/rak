@@ -3,7 +3,10 @@
 Installs a pinned rak release in the task's container with rak's own
 install.sh and runs one unattended request:
 
-    rak -y --json --base-url URL -m MODEL "<task>"
+    rak -y --json --base-url URL -m MODEL --time-limit SECS -- "<task>"
+
+--time-limit is the task's own agent timeout, read from its task.toml, so
+the model knows how long it has and is warned before Harbor stops it.
 
 An unattended run (one request with -y) has no turn limit, keeps nothing for
 later sessions and writes no files of its own into the project. The model is
@@ -21,6 +24,8 @@ Written for Harbor 0.26 (BaseInstalledAgent with ModelConnectionSpec).
 
 import json
 import shlex
+import tomllib
+from pathlib import Path
 from typing import Annotated, override
 
 from pydantic import Field
@@ -33,7 +38,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.model_api_format import ModelApiFormat
 
-RAK_DEFAULT_VERSION = "v0.1.0-alpha.15"
+RAK_DEFAULT_VERSION = "v0.1.0-alpha.16"
 RAK_INSTALL_URL = "https://raw.githubusercontent.com/ayman3000/rak/main/install.sh"
 PATH_PREFIX = 'export PATH="$HOME/.local/bin:$PATH"'
 
@@ -87,12 +92,18 @@ class RakAgent(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
-        # rak's install.sh downloads with curl or wget. An image that already
-        # has wget needs no package install (qemu-alpine-ssh's Debian 11 image
-        # cannot install curl: the security archive answers 404).
-        has_wget = await environment.exec(command="command -v wget >/dev/null 2>&1", user="root")
-        needs = ("tar",) if has_wget.return_code == 0 else ("curl", "tar")
-        await self.ensure_system_dependencies(environment, needs)
+        # rak's install.sh downloads with curl or wget. curl is tried first:
+        # wget alone once failed a release download (exit 5, TLS) on
+        # mteb-leaderboard's image. An image that cannot install curl but has
+        # wget (qemu-alpine-ssh's Debian 11: the security archive answers 404)
+        # goes on with wget.
+        try:
+            await self.ensure_system_dependencies(environment, ("curl", "tar"))
+        except Exception:
+            has_wget = await environment.exec(command="command -v wget >/dev/null 2>&1", user="root")
+            if has_wget.return_code != 0:
+                raise
+            await self.ensure_system_dependencies(environment, ("tar",))
         fetch = (
             f"{{ curl -fsSL {RAK_INSTALL_URL} 2>/dev/null || wget -qO- {RAK_INSTALL_URL}; }}"
         )
@@ -125,6 +136,9 @@ class RakAgent(BaseInstalledAgent):
             flags += ["--base-url", shlex.quote(base_url)]
         if self.model_name:
             flags += ["-m", shlex.quote(self._model())]
+        limit = self._time_limit()
+        if limit:
+            flags += ["--time-limit", str(limit)]
         extra = self.build_cli_flags()
         if extra:
             flags.append(extra)
@@ -142,6 +156,31 @@ class RakAgent(BaseInstalledAgent):
             ),
             env=env,
         )
+
+    def _time_limit(self) -> int | None:
+        # Harbor stops the agent at the task's timeout but does not tell an
+        # installed agent what it is. The trial's config.json (next to the
+        # agent's logs) names the task; its task.toml, in Harbor's task cache
+        # or the task's own folder, has [agent] timeout_sec. Any doubt: None,
+        # and rak runs without a limit as before.
+        try:
+            config = json.loads((self.logs_dir.parent / "config.json").read_text())
+            task = config["task"]
+            if task.get("path"):
+                toml_file = Path(task["path"]) / "task.toml"
+            else:
+                digest = task["ref"].split(":", 1)[1]
+                toml_file = Path.home() / ".cache/harbor/tasks/packages" / task["name"] / digest / "task.toml"
+            seconds = tomllib.loads(toml_file.read_text())["agent"]["timeout_sec"]
+            agent = config.get("agent") or {}
+            if agent.get("override_timeout_sec"):
+                seconds = agent["override_timeout_sec"]
+            if agent.get("max_timeout_sec"):
+                seconds = min(seconds, agent["max_timeout_sec"])
+            multiplier = config.get("agent_timeout_multiplier") or config.get("timeout_multiplier") or 1.0
+            return int(seconds * multiplier) or None
+        except (OSError, ValueError, KeyError, IndexError, TypeError, tomllib.TOMLDecodeError):
+            return None
 
     def _summary_from_log(self) -> dict | None:
         # A run Harbor stopped at its time limit never prints its summary;

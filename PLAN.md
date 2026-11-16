@@ -1,15 +1,32 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-15, after releasing v0.1.0-alpha.15. A working plan for picking the work up on another machine.
+Updated 2026-11-16, after releasing v0.1.0-alpha.16. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.15** (2026-11-15). It has everything
+- The newest release is **v0.1.0-alpha.16** (2026-11-16). It has everything
   below; `main` and the release match.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.16
+
+From the full FrontierHarness run with DeepSeek (below):
+- `--time-limit SECS`: the run's time, counted from start. The task tells
+  the model how long it has, and at 70% and 90% it is told what is left and
+  to finish the essentials and save its outputs (`time_note` in agent.rs,
+  added after the tool results, so the cache holds). 5 of 62 tasks ran out
+  of time on alpha.15 without knowing their limit.
+- The system prompt asks the model to re-read the request and check each
+  thing it asks for before answering (8 of the 15 wrong answers passed most
+  hidden tests and missed a detail), and to batch independent tool calls and
+  related shell commands (tool calls and model calls were about 1:1).
+- The Harbor adapter passes the task's own timeout (from its task.toml in
+  Harbor's cache) as `--time-limit`, passes the task after `--`, and tries
+  to install curl before falling back to wget. install.sh retries wget
+  downloads.
 
 ### In v0.1.0-alpha.15
 
@@ -62,8 +79,16 @@ frontierharness@runta.com (the owner's step).
       checks after the samplers already worked. rak doesn't know a task's
       time limit; worth a look whether a lower `--effort` or a hint about
       time would help, without hurting the rest.
-- [ ] All 62 with deepseek-v4.1-flash (job 2026-11-15__16-45-02, alpha.15,
-      4 at a time, `run-tasks.sh all`); at 44/62 the pass rate was 60.5%.
+- [x] All 62 with deepseek-v4.1-flash (job 2026-11-15__16-45-02, alpha.15,
+      4 at a time, `run-tasks.sh all`, 7 h 58 min): **36/61 scored (59%)**,
+      36/56 (64%) without the 5 below that were not the model's. 15 wrong
+      answers, all with rak saying done; 8 of them passed most hidden tests
+      (wal-recovery-ordering 95/97, glycan 11/12, foodstuff 11/13,
+      cargo-flight-dispatch 22/27, vpp 4/5, install-windows 3/4, roy 2/3,
+      bun-sourcemap-leak 25/36). 7 timeouts, 2 of which passed anyway. Some
+      failures ran very long (vpp-loss-divergence 396 turns, 3.8 h). 228M
+      tokens in, 8.4M out; about $18 at list prices with cache read at a
+      tenth, $78 with every input token at full price.
       Not the model's fault: 4 tasks hit Ollama's session usage limit (429)
       at the same moment (batched-eval-parity, sam-cell-seg,
       session-window-debug, video-processing); pytorch-model-recovery's
@@ -77,7 +102,9 @@ frontierharness@runta.com (the owner's step).
   counted, output is 70-80% of the cost. Trimming old thinking would break
   the cache, so the levers to try are fewer model calls (several commands
   per call) and a lower `--effort`, A/B tested on hard tasks.
-- [ ] Look at mteb-leaderboard's install (wget TLS) in the adapter.
+- [x] mteb-leaderboard's install: the adapter now installs curl when it can.
+- [ ] Rerun the 5 lost tasks and mteb-leaderboard on alpha.16, then the
+      failures, to see whether the alpha.16 changes help.
 - [ ] Submit (the owner's step): the job folders, and ask whether they need
       a Kimi K3 run from us and whether cost counts cached tokens.
 - Kimi K3 for all 62 if needed: `run-tasks.sh batch 1` to `batch 4`
