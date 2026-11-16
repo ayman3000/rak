@@ -38,7 +38,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.model_api_format import ModelApiFormat
 
-RAK_DEFAULT_VERSION = "v0.1.0-alpha.18"
+RAK_DEFAULT_VERSION = "v0.1.0-alpha.19"
 RAK_INSTALL_URL = "https://raw.githubusercontent.com/ayman3000/rak/main/install.sh"
 PATH_PREFIX = 'export PATH="$HOME/.local/bin:$PATH"'
 

@@ -1,10 +1,10 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-16, after releasing v0.1.0-alpha.18. A working plan for picking the work up on another machine.
+Updated 2026-11-16, after releasing v0.1.0-alpha.19. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.18** (2026-11-16). It has everything
+- The newest release is **v0.1.0-alpha.19** (2026-11-16). It has everything
   below; `main` and the release match. The Harbor adapter installs it.
 - Rerun of the 6 lost benchmark tasks on alpha.16 (2026-11-16): mteb-leaderboard
   and sam-cell-seg passed, pytorch-model-recovery and session-window-debug got
@@ -25,7 +25,7 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.18. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
-### On main, not released
+### In v0.1.0-alpha.19
 
 - Review before the answer: a one-off run (not a chat) that changed
   something is sent back once, at its first final answer, to list each
@@ -38,7 +38,7 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.18. A working plan for picking 
   DESIGN.md has the rules and the code's comments argue for the bugs (the
   shape of session-window-debug in another domain). Checked locally: the
   unfixed code passes 3/8 checks, the reference fix 8/8.
-- To try on release: DeepSeek on the 6 probes and the two tasks, then Kimi K3
+- To try: DeepSeek on the 6 probes and the two tasks, then Kimi K3
   on queue-rules and session-window-debug, 2 attempts each.
 
 ### In v0.1.0-alpha.18
