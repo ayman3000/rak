@@ -110,11 +110,19 @@ pub struct Ctx {
     seen: Mutex<HashMap<PathBuf, Option<SystemTime>>>,
     /// Set by Ctrl-C: a running command is killed and the request ends.
     pub stop: crate::interrupt::Stop,
+    /// Commands run_shell started in the background (servers), for /jobs.
+    pub jobs: shell::Jobs,
 }
 
 impl Ctx {
     pub fn new(cwd: &Path, any_path: bool) -> Arc<Self> {
-        Arc::new(Ctx { cwd: real_path(cwd), any_path, seen: Mutex::new(HashMap::new()), stop: Default::default() })
+        Arc::new(Ctx {
+            cwd: real_path(cwd),
+            any_path,
+            seen: Mutex::new(HashMap::new()),
+            stop: Default::default(),
+            jobs: Default::default(),
+        })
     }
 
     /// `~` expanded, relative paths joined to the project folder, `.` and `..`

@@ -96,6 +96,7 @@ Started without a task, rak opens a chat:
 | `/resume [N]` | This folder's saved chats, newest first; `/resume N` picks one up. |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens, tool calls, the context used and the window, fallbacks. |
+| `/jobs` | The servers the agent started in the background (run_shell's background mode; `npm run dev`, `vite`, `flask run` and the like go there by themselves): running or ended, how long, pid, command and log. `/jobs stop N` stops one with everything it started, `/jobs stop all` every running one. When a chat ends with some still running, rak asks whether to stop them; left running, they keep going after rak quits (and in a one-off run they are always left running, so a service stays up for whatever checks it). |
 | `/clear` | Start a fresh conversation. The last one stays saved. |
 | `/help`, `/exit` | The list of commands; quit (or Ctrl-D). |
 

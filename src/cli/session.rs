@@ -72,6 +72,8 @@ pub struct Session {
     /// and whether the main model sees (None: the server didn't say).
     pub vision: Option<std::sync::Arc<std::sync::Mutex<rak::vision::Vision>>>,
     pub main_sees: Option<bool>,
+    /// The tools' shared state: the background jobs (/jobs) live here.
+    pub ctx: std::sync::Arc<Ctx>,
 }
 
 impl Session {
@@ -595,6 +597,7 @@ pub fn run(mut o: Options) -> i32 {
         asker,
         vision,
         main_sees,
+        ctx: ctx.clone(),
     };
 
     if session.o.continue_last {

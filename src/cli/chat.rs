@@ -123,7 +123,91 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
         println!();
         run_one(s, &input);
     }
+    offer_to_stop_jobs(s);
     println!("{}", paint(color, Style::Dim, "bye"));
+}
+
+/// Pure — unit-tested. The background jobs as /jobs lists them, numbered.
+pub fn job_lines(jobs: &[rak::tools::shell::JobInfo], home: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (i, job) in jobs.iter().enumerate() {
+        let state = if job.running { format!("running {} min", job.minutes) } else { "ended".to_string() };
+        lines.push(format!("  {}. {state} · pid {} · {}", i + 1, job.pid, one_line(&job.command, 70)));
+        lines.push(format!("     log: {}", welcome::short_path(&job.log.to_string_lossy(), home, 90)));
+    }
+    lines
+}
+
+/// /jobs: the servers rak started in the background; /jobs stop N or all.
+fn jobs_command(s: &mut Session, args: &str) {
+    let color = s.ui.borrow().out_color;
+    let jobs = s.ctx.jobs.list();
+    let mut words = args.split_whitespace();
+    match (words.next(), words.next()) {
+        (None, _) => {
+            if jobs.is_empty() {
+                println!("No background jobs in this chat. Servers the agent starts with run_shell's background mode show here.");
+                return;
+            }
+            for line in job_lines(&jobs, &home()) {
+                println!("{line}");
+            }
+            println!(
+                "{}",
+                paint(color, Style::Dim, "/jobs stop N stops one (and what it started); /jobs stop all stops every running one.")
+            );
+        }
+        (Some("stop"), Some(which)) => {
+            let chosen: Vec<&rak::tools::shell::JobInfo> = if which == "all" {
+                jobs.iter().filter(|j| j.running).collect()
+            } else {
+                match which.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| jobs.get(i)) {
+                    Some(job) => vec![job],
+                    None => {
+                        println!("No job {which}: /jobs lists them with their numbers.");
+                        return;
+                    }
+                }
+            };
+            if chosen.is_empty() {
+                println!("No background job is running.");
+            }
+            for job in chosen {
+                match s.ctx.jobs.stop(job.pid) {
+                    Ok(()) => println!("Stopped pid {} ({}).", job.pid, one_line(&job.command, 60)),
+                    Err(why) => println!("{}", paint(color, Style::Yellow, &format!("Couldn't stop pid {}: {why}", job.pid))),
+                }
+            }
+        }
+        _ => println!("Usage: /jobs, /jobs stop N, /jobs stop all"),
+    }
+}
+
+/// When a chat ends with servers it started still running: asks whether to
+/// stop them. Left running, they keep going after rak quits.
+fn offer_to_stop_jobs(s: &Session) {
+    let running = s.ctx.jobs.running();
+    if running.is_empty() || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return;
+    }
+    let color = s.ui.borrow().out_color;
+    let count = running.len();
+    println!("{} still running:", if count == 1 { "1 background job is".to_string() } else { format!("{count} background jobs are") });
+    for line in job_lines(&running, &home()) {
+        println!("{line}");
+    }
+    print!("Stop {}? [y/N] ", if count == 1 { "it" } else { "them" });
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let mut answer = String::new();
+    let _ = std::io::stdin().read_line(&mut answer);
+    if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        for job in &running {
+            let _ = s.ctx.jobs.stop(job.pid);
+        }
+        println!("Stopped.");
+    } else {
+        println!("{}", paint(color, Style::Dim, "Left running: they keep going after rak quits."));
+    }
 }
 
 /// Lists the server's models, numbered. None when the server wouldn't say.
@@ -412,6 +496,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 println!("Auto-approve off: rak asks before edits and shell commands.");
             }
         }
+        "jobs" => jobs_command(s, args),
         "usage" | "cost" => {
             println!("  model          {} ({})", s.model, welcome::server_name(&s.backend.base_url));
             println!("  requests       {}", s.requests);
@@ -470,5 +555,41 @@ fn resume(s: &mut Session, args: &str, color: bool) {
     match s.resume(&chat.path) {
         Ok(count) => println!("Resumed {} ({count} messages).", paint(color, Style::Bold, &chat.title)),
         Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rak::tools::shell::JobInfo;
+    use std::path::PathBuf;
+
+    #[test]
+    fn jobs_are_listed_numbered_with_state_pid_command_and_log() {
+        let jobs = [
+            JobInfo {
+                pid: 4182,
+                command: "npx vite --port 5199".into(),
+                log: PathBuf::from("/home/me/.cache/rak/run_shell-1-0.log"),
+                running: true,
+                minutes: 12,
+            },
+            JobInfo {
+                pid: 4200,
+                command: "python3 -m http.server".into(),
+                log: PathBuf::from("/tmp/run_shell-1-1.log"),
+                running: false,
+                minutes: 3,
+            },
+        ];
+        assert_eq!(
+            job_lines(&jobs, "/home/me"),
+            [
+                "  1. running 12 min · pid 4182 · npx vite --port 5199",
+                "     log: ~/.cache/rak/run_shell-1-0.log",
+                "  2. ended · pid 4200 · python3 -m http.server",
+                "     log: /tmp/run_shell-1-1.log",
+            ]
+        );
     }
 }

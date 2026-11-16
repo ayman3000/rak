@@ -331,13 +331,104 @@ impl RunShell {
         }
         // Reaped when it ends, so it does not linger as a zombie while rak runs.
         let ended = Arc::new(AtomicBool::new(false));
-        self.logs.lock().unwrap().push((log_path, ended.clone()));
+        self.logs.lock().unwrap().push((log_path.clone(), ended.clone()));
+        self.ctx.jobs.add(Job { pid: child.id(), command: command.to_string(), log: log_path, started, ended: ended.clone() });
         std::thread::spawn(move || {
             let _ = child.wait();
             ended.store(true, Ordering::SeqCst);
         });
         ToolResult::ok(header)
     }
+}
+
+/// A command run_shell started in the background (a dev server, say).
+pub struct Job {
+    /// Also its process group: the job runs in a group of its own.
+    pub pid: u32,
+    pub command: String,
+    pub log: PathBuf,
+    pub started: Instant,
+    /// Set when it exits (its reaper thread sees it end).
+    pub ended: Arc<AtomicBool>,
+}
+
+/// The background jobs of this run, in the order started: what /jobs lists
+/// and stops, and what a chat offers to stop when it ends. They are left
+/// running otherwise: a server the agent started outlives rak on purpose.
+#[derive(Default)]
+pub struct Jobs(Mutex<Vec<Job>>);
+
+/// One job as /jobs shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobInfo {
+    pub pid: u32,
+    pub command: String,
+    pub log: PathBuf,
+    pub running: bool,
+    pub minutes: u64,
+}
+
+impl Jobs {
+    pub fn add(&self, job: Job) {
+        self.0.lock().unwrap().push(job);
+    }
+
+    /// Every job, oldest first.
+    pub fn list(&self) -> Vec<JobInfo> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|j| JobInfo {
+                pid: j.pid,
+                command: j.command.clone(),
+                log: j.log.clone(),
+                running: !j.ended.load(Ordering::SeqCst),
+                minutes: j.started.elapsed().as_secs() / 60,
+            })
+            .collect()
+    }
+
+    /// The jobs still running.
+    pub fn running(&self) -> Vec<JobInfo> {
+        self.list().into_iter().filter(|j| j.running).collect()
+    }
+
+    /// Stops a job and everything it started: asked to end (SIGTERM to its
+    /// group), then made to (SIGKILL) if it is still there after two seconds.
+    pub fn stop(&self, pid: u32) -> Result<(), String> {
+        let ended = {
+            let jobs = self.0.lock().unwrap();
+            let job = jobs.iter().find(|j| j.pid == pid).ok_or(format!("no background job with pid {pid}"))?;
+            if job.ended.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            job.ended.clone()
+        };
+        signal_group(pid, false);
+        let asked = Instant::now();
+        while !ended.load(Ordering::SeqCst) && asked.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !ended.load(Ordering::SeqCst) {
+            signal_group(pid, true);
+        }
+        Ok(())
+    }
+}
+
+/// Ends a process group: politely, or by force.
+#[cfg(unix)]
+fn signal_group(pid: u32, force: bool) {
+    // SAFETY: killpg only sends a signal; a gone group just fails.
+    unsafe {
+        libc::killpg(pid as libc::pid_t, if force { libc::SIGKILL } else { libc::SIGTERM });
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_group(pid: u32, _force: bool) {
+    let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).output();
 }
 
 /// The end of a log, at most `max_chars` characters, without reading the
@@ -472,6 +563,28 @@ mod tests {
         let r = s.run(&json!({ "command": "echo listening; sleep 20", "background": true }));
         assert!(r.text.starts_with("started in background (pid "), "{}", r.text);
         assert!(r.text.contains("listening"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_jobs_are_listed_and_stopped_with_what_they_started() {
+        let ctx = Ctx::new(&temp_dir("jobs"), false);
+        let mut s = RunShell::new(ctx.clone());
+        s.background_grace = Duration::from_millis(400);
+        // A server that starts a child of its own, as `npm run dev` starts node.
+        s.run(&json!({ "command": "sleep 30 & echo listening; wait", "background": true }));
+        let jobs = ctx.jobs.running();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].command, "sleep 30 & echo listening; wait");
+        assert!(jobs[0].log.exists());
+        ctx.jobs.stop(jobs[0].pid).unwrap();
+        let gone = Instant::now();
+        while !ctx.jobs.running().is_empty() && gone.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(ctx.jobs.running().is_empty(), "stopped");
+        assert!(!ctx.jobs.list()[0].running, "still listed, as ended");
+        assert!(ctx.jobs.stop(1).is_err(), "not one of ours");
     }
 
     #[test]

@@ -25,6 +25,13 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.23. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### On main, not released
+
+- /jobs lists the servers run_shell started in the background (state,
+  minutes, pid, command, log); /jobs stop N|all stops one with its process
+  group (SIGTERM, then SIGKILL after 2 s). A chat that ends with some still
+  running asks whether to stop them; a one-off run leaves them running.
+
 ### Kimi K3 batch 1 (2026-11-16, alpha.23, 1 attempt each)
 
 - 7 of 10 ran: passed log-summary-date-ranges, merge-diff-arc-agi-task,
