@@ -1,13 +1,19 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-16, after releasing v0.1.0-alpha.16. A working plan for picking the work up on another machine.
+Updated 2026-11-16, after releasing v0.1.0-alpha.17. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.16** (2026-11-16). It has everything
-  below; `main` and the release match.
+- The newest release is **v0.1.0-alpha.17** (2026-11-16). It has everything
+  below; `main` and the release match. The Harbor adapter installs it.
+- Rerun of the 6 lost benchmark tasks on alpha.16 (2026-11-16): mteb-leaderboard
+  and sam-cell-seg passed, pytorch-model-recovery and session-window-debug got
+  wrong answers (not looked at yet), batched-eval-parity and video-processing
+  hit a Runta "upstream internal error" (not scored).
+- Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
+  key is available.
 
-### On main, not released
+### In v0.1.0-alpha.17
 
 - Plan first: for a task with several steps the model starts with a short
   plan in `todo`, each step a checkable requirement of the request, with
@@ -16,8 +22,7 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.16. A working plan for picking 
   stopping, time, thinking) with `report.py`, for comparing setups (a15,
   a16, a16 with `--effort low`, a17) without tuning on the benchmark's
   tasks. Oracle passes all five and nop fails them, on Runta. The adapter
-  skips `--time-limit` for releases before alpha.16. Not run with a model
-  yet: needs the Ollama key (`~/rak-frontier/run-probes.sh SETUP`).
+  skips `--time-limit` for releases before alpha.16.
 - Probe results (2026-11-16, deepseek-v4.1-flash, 2 attempts each). The
   first version was too easy (10/10 on a15 in under a minute each), so
   config-keys grew to 57 files, invoice-cli to 19 checks, the puzzle to a
