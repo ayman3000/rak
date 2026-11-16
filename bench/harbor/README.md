@@ -9,7 +9,7 @@ Status: written for Harbor 0.26 and run on 10 Terminal-Bench 2.1 tasks (2026-11-
 - Docker running. On a Mac, [OrbStack](https://orbstack.dev) works (`brew install --cask orbstack`, then pick Docker in its welcome screen).
 - Harbor: `uv tool install harbor`.
 - A model endpoint that speaks Chat Completions. Ollama on the host works: the container reaches it at `http://host.docker.internal:11434/v1`, with no key. For a provider that needs one, export `RAK_API_KEY` in the shell that runs Harbor.
-- A rak release: the adapter installs v0.1.0-alpha.23 (long shell output keeps its end since alpha.11; the task's time limit is passed to rak since alpha.16; the plan-first todo since alpha.17; the contract and symptom check since alpha.18; the review before the answer since alpha.19, opt-in with --ak review=true since alpha.20).
+- A rak release: the adapter installs v0.1.0-alpha.24 (long shell output keeps its end since alpha.11; the task's time limit is passed to rak since alpha.16; the plan-first todo since alpha.17; the contract and symptom check since alpha.18; the review before the answer since alpha.19, opt-in with --ak review=true since alpha.20).
 
 ## Running a few Terminal-Bench 2.1 tasks
 
