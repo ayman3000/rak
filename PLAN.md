@@ -25,6 +25,21 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.23. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### Kimi K3 batch 1 (2026-11-16, alpha.23, 1 attempt each)
+
+- 7 of 10 ran: passed log-summary-date-ranges, merge-diff-arc-agi-task,
+  sqlite-db-truncate, cancel-async-tasks; failed cargo-flight-dispatch
+  19/27, bun-sourcemap-leak 23/36, make-doom-for-mips 0/3. The same 4/7 as
+  DeepSeek on these. bun and doom ended sure of themselves ("fully
+  verified", "Done") while failing. Stopped by hand before the 5-hour limit:
+  gsea-proteomics, polyglot-c-py, tune-mjcf did not run
+  (~/rak-frontier/batches/k1-left.txt).
+- Quota (Ollama Pro meter): ~200 Kimi K3 requests in 16 minutes took the
+  5-hour window to 85%, about 0.43% a request (~235 a window); the week went
+  15.8% -> 31% (~1,300 Kimi K3 requests a week). On long tasks Kimi K3 made
+  70-85% as many calls as DeepSeek. The full 62 would take ~2,500-3,000
+  requests: ~11 windows, 2+ weeks of the weekly allowance.
+
 ### In v0.1.0-alpha.23
 
 - MCP images: a tool's image (chrome-devtools take_screenshot) was dropped
