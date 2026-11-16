@@ -32,6 +32,13 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.20. A working plan for picking 
   for alpha.19). Open: queue-rules without the review, 2 runs, to see
   whether the review is what made it pass.
 
+- First Kimi K3 runs (2026-11-16, alpha.20, 1 attempt each): rak works on
+  it, no errors or rate limits. pytorch-model-recovery passed (4 calls,
+  1.3 min, 4K output; DeepSeek took 11-20 calls). wal-recovery-ordering
+  89/97, not passed (DeepSeek: 95/97): 27 calls, 10 min, 42K output, 0.52M
+  input of which 0.48M cached (DeepSeek: 68 calls, 140K output, 2.2M input).
+  Kimi K3 is leaner but finished sure of itself with 8 checks failing.
+
 ### In v0.1.0-alpha.19
 
 - Review before the answer: a one-off run (not a chat) that changed
