@@ -98,6 +98,36 @@ const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(8);
 const LOOP_WARN: usize = 3;
 /// …and this many ends the request.
 const LOOP_STOP: usize = 6;
+/// Fetches of one public URL in a request (fetch_url, curl, wget) from which
+/// each draws a note to change approach: the calls differ, so the loop check
+/// above misses them.
+const REFETCH_WARN: usize = 5;
+
+/// Pure — unit-tested. The public URL a call fetches: fetch_url's `url`, or
+/// the first http(s) address in a run_shell command that uses curl or wget.
+/// Normalized (no fragment, no trailing `/` or `index.html`) so variants
+/// count as one. Local addresses are left out: testing a server you are
+/// building means fetching it many times.
+fn fetched_url(tool: &str, args: &Value) -> Option<String> {
+    let raw = match tool {
+        "fetch_url" => args["url"].as_str()?.trim().to_string(),
+        "run_shell" => {
+            let command = args["command"].as_str()?;
+            let words: Vec<&str> = command.split(|c: char| c.is_whitespace() || c == '|' || c == ';' || c == '&').collect();
+            if !words.iter().any(|w| matches!(*w, "curl" | "wget")) {
+                return None;
+            }
+            let start = command.find("http://").or_else(|| command.find("https://"))?;
+            command[start..].split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '|' | ';' | ')')).next()?.to_string()
+        }
+        _ => return None,
+    };
+    let url = raw.split('#').next()?.trim_end_matches("index.html").trim_end_matches('/').to_string();
+    let host = url.split_once("://")?.1.split(['/', '?']).next()?.to_ascii_lowercase();
+    let host = host.rsplit_once(':').filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit())).map_or(host.as_str(), |(h, _)| h);
+    let local = host == "localhost" || host.ends_with(".localhost") || host.starts_with("127.") || host == "0.0.0.0" || host == "[::1]";
+    (!local && !host.is_empty()).then_some(url)
+}
 /// Tool results in the most recent messages are never dropped.
 const KEEP_RECENT: usize = 8;
 /// Characters counted as one token when sizing the conversation against the
@@ -476,6 +506,7 @@ impl Agent {
         let input_at_start = self.usage.input;
         let mut budget_warned = false;
         let mut repeated: (String, usize) = (String::new(), 0);
+        let mut fetches: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let mut empty_replies = 0;
         // Tool errors from the latest step, and how often the model was asked
         // about them (SwiftAgentKit's repair retry).
@@ -643,6 +674,22 @@ impl Agent {
                          not change anything — try a different approach, or finish with what you have.]",
                         repeated.1
                     ));
+                }
+                // One page fetched again and again in different ways: what is
+                // needed is probably not on it.
+                let fetched = serde_json::from_str::<Value>(&call.arguments).ok().and_then(|args| fetched_url(&call.name, &args));
+                if let Some(url) = fetched {
+                    let count = fetches.entry(url.clone()).or_insert(0);
+                    *count += 1;
+                    if *count >= REFETCH_WARN {
+                        (self.on_event)(&Event::Note("the same page was fetched again and again: told the model"));
+                        result.1.push_str(&format!(
+                            "\n[You have fetched {url} {count} times in this request. What you need is probably not \
+                             on it as fetched: it may load from a script or a frame the page names, or be on \
+                             another page (a print or single-page view, a sitemap, an API). Change approach \
+                             instead of fetching it again.]"
+                        ));
+                    }
                 }
                 if !result.0 && refused.is_none() && !self.stop.requested() && repairable(&result.1) {
                     failed.push((call.name.clone(), result.1.clone()));
@@ -1286,6 +1333,24 @@ mod tests {
             s.agent.history().iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str().map(str::to_string)).collect();
         assert!(notes[0].starts_with("explore\n\n[time note] You have under a minute for this task"), "{}", notes[0]);
         assert!(notes[1].starts_with("[time note] Only"), "{}", notes[1]);
+    }
+
+    #[test]
+    fn fetches_of_one_public_page_count_as_one_whatever_the_form() {
+        let shell = |c: &str| fetched_url("run_shell", &json!({ "command": c }));
+        let book = Some("https://doc.rust-lang.org/stable/book".to_string());
+        assert_eq!(fetched_url("fetch_url", &json!({ "url": "https://doc.rust-lang.org/stable/book/" })), book);
+        assert_eq!(shell("curl -s https://doc.rust-lang.org/stable/book/index.html | grep -o 'href=\"[^\"]*\"'"), book);
+        assert_eq!(shell("wget -qO- 'https://doc.rust-lang.org/stable/book/#intro' && echo done"), book);
+        assert_eq!(
+            shell("curl -s https://doc.rust-lang.org/stable/book/ch01-01-installation.html"),
+            Some("https://doc.rust-lang.org/stable/book/ch01-01-installation.html".into())
+        );
+        // Not a fetch, or a local server being tested: not counted.
+        assert_eq!(shell("echo https://example.com"), None);
+        assert_eq!(shell("curl -s http://localhost:8000/api"), None);
+        assert_eq!(shell("curl http://127.0.0.1:5000/"), None);
+        assert_eq!(fetched_url("read_file", &json!({ "path": "https://x.com" })), None);
     }
 
     fn user_notes(agent: &Agent) -> Vec<String> {

@@ -25,7 +25,20 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.20. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
-### In v0.1.0-alpha.20
+### On main, not released
+
+- From a user run (gemma4:31b, alpha.13) extracting the Rust book's code: the
+  chapter list loads from `toc-*.js` (and a `toc.html` frame), so fetch_url
+  and curl saw one chapter link; the model curled the index ~20 times, ran
+  out of turns, then guessed the list and reported empty files as done.
+  - fetch_url now names what it dropped but a browser loads: "Frames on this
+    page: toc.html" and "Scripts on this page (not run; ...): toc-....js, ...",
+    analytics left out, 8 of each at most.
+  - The 5th and later fetch of one public URL in a request (fetch_url, or
+    curl/wget in run_shell; fragment, trailing / and index.html ignored;
+    localhost left out) gets a note to change approach: the loop check only
+    caught identical calls with identical results.
+
 
 - The review before the answer is opt-in (`--review`); `--no-review` is
   still accepted. The adapter has `--ak review=true` (and `no_review=true`

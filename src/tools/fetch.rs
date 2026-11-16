@@ -217,6 +217,21 @@ impl Tool for FetchUrl {
         if format != "html" && html_like && content.trim().chars().count() < 200 {
             head.push_str("\n(almost no text: this page is likely built by JavaScript, which this tool does not run)");
         }
+        // What the rendering dropped but a browser would load: navigation and
+        // content often come from these (a docs sidebar from a script, a
+        // table of contents in a frame). Named so the model can fetch them.
+        if format != "html" && html_like {
+            let (scripts, frames) = loaded_from(&body);
+            if !frames.is_empty() {
+                head.push_str(&format!("\nFrames on this page (fetch one to read it): {}", frames.join(", ")));
+            }
+            if !scripts.is_empty() {
+                head.push_str(&format!(
+                    "\nScripts on this page (not run; links or content such as a sidebar may load from them): {}",
+                    scripts.join(", ")
+                ));
+            }
+        }
         ToolResult::ok(format!("{head}\n\n{content}"))
     }
 }
@@ -380,6 +395,28 @@ pub fn to_text(html: &str, markdown: bool) -> String {
 }
 
 /// The value of attribute `name` in a tag's inside, quoted or not.
+/// Pure — unit-tested. The `src` of the page's own scripts and frames, in
+/// order, each once, at most 8 of each; analytics and ad scripts left out.
+pub fn loaded_from(html: &str) -> (Vec<String>, Vec<String>) {
+    const NOISE: &[&str] = &["googletagmanager", "google-analytics", "gtag/js", "doubleclick", "analytics.js", "plausible", "hotjar"];
+    let lower = html.to_ascii_lowercase();
+    let mut found = (Vec::new(), Vec::new());
+    for (tag, list) in [("<script", &mut found.0), ("<iframe", &mut found.1)] {
+        let mut from = 0;
+        while let Some(at) = lower[from..].find(tag).map(|a| from + a) {
+            let end = lower[at..].find('>').map_or(lower.len(), |e| at + e);
+            from = end.max(at + tag.len());
+            let Some(src) = attribute(&html[at + tag.len()..end], "src").map(|s| s.trim().to_string()) else { continue };
+            let src_lower = src.to_ascii_lowercase();
+            if src.is_empty() || NOISE.iter().any(|n| src_lower.contains(n)) || list.contains(&src) || list.len() >= 8 {
+                continue;
+            }
+            list.push(src);
+        }
+    }
+    found
+}
+
 fn attribute(inner: &str, name: &str) -> Option<String> {
     let lower = inner.to_ascii_lowercase();
     let mut from = 0;
@@ -472,6 +509,23 @@ pub fn decode_entities(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scripts_and_frames_a_browser_would_load_are_named_without_analytics() {
+        // An mdBook page: the chapter list is in toc-*.js and, for no-JS
+        // readers, in a frame.
+        let html = r#"<html><head><script src="toc-0e4ce700.js"></script>
+            <script async src="https://www.googletagmanager.com/gtag/js?id=X"></script>
+            <script>var inline = 1;</script></head><body>
+            <noscript><iframe class="sidebar-iframe-outer" src='toc.html'></iframe></noscript>
+            <script src="toc-0e4ce700.js"></script><SCRIPT SRC="book-a1b2.js" defer></SCRIPT></body></html>"#;
+        let (scripts, frames) = loaded_from(html);
+        assert_eq!(scripts, ["toc-0e4ce700.js", "book-a1b2.js"]);
+        assert_eq!(frames, ["toc.html"]);
+        assert_eq!(loaded_from("<p>no scripts</p><script>x()</script>"), (vec![], vec![]));
+        let many: String = (0..20).map(|i| format!("<script src=\"s{i}.js\"></script>")).collect();
+        assert_eq!(loaded_from(&many).0.len(), 8);
+    }
 
     #[test]
     fn private_and_reserved_addresses_are_refused() {
