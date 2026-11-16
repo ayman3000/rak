@@ -25,6 +25,19 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.21. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### On main, not released
+
+- A pasted image shows as `[image N]` in the line (its path goes with the
+  request), not the long temp path.
+- Whether a model sees, for servers that don't say (not Ollama): known
+  families see (Gemini, GPT-4o/4.1/5, o1/o3/o4, Claude, Gemma 3/4, Llama 4,
+  VL/vision/llava/pixtral); DeepSeek's text models don't; others unknown.
+  So a Gemini or GPT model gets images itself, not through the vision model.
+- First real use (2026-11-16): Ctrl+V pasted a screenshot and
+  gemma4:31b-cloud (sees) read it directly. A vision model on ollama-cloud
+  needs the name without `-cloud` (gemma4:31b); `-cloud` is the local Ollama
+  app's name for forwarded models.
+
 ### In v0.1.0-alpha.21
 
 - A vision model for a main model that can't see (Naseem's "describe" mode):

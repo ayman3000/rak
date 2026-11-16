@@ -94,6 +94,38 @@ pub trait Model {
     }
 }
 
+/// Pure — unit-tested. Whether a model reads images, from its name, for
+/// servers that don't say: Some(true) for families known to (Gemini, GPT-4o
+/// and later, the o-series, Claude, Gemma 3 and 4, Llama 4, and any VL or
+/// vision model), Some(false) for DeepSeek's text models, None otherwise.
+pub fn known_to_see(model: &str) -> Option<bool> {
+    let lower = model.to_ascii_lowercase();
+    // "models/gemini-…", "google/gemini-…", "openai/gpt-5": the name after the last "/".
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    let has = |part: &str| name.contains(part);
+    if has("embed") || has("tts") || has("whisper") || has("image-gen") {
+        return None;
+    }
+    let vision_marked = has("-vl")
+        || has("vl-")
+        || has("vl:")
+        || name.ends_with("vl")
+        || has("vision")
+        || has("llava")
+        || has("pixtral")
+        || has("minicpm-v")
+        || has("moondream");
+    let families = ["gemini", "gpt-4o", "gpt-4.1", "gpt-5", "claude", "gemma3", "gemma-3", "gemma4", "gemma-4", "llama4", "llama-4"];
+    let o_series = ["o1", "o3", "o4"].iter().any(|o| name == *o || name.starts_with(&format!("{o}-")));
+    if vision_marked || o_series || families.iter().any(|f| name.starts_with(f) || has(&format!("-{f}"))) {
+        return Some(true);
+    }
+    if name.starts_with("deepseek") {
+        return Some(false);
+    }
+    None
+}
+
 /// What the person sees when they stop a request mid-answer.
 pub const STOPPED: &str = "stopped";
 
@@ -231,11 +263,15 @@ impl Model for OpenAICompatible {
         self.ollama_window()
     }
 
-    /// Ollama lists a model's capabilities; "vision" means it reads images.
+    /// Ollama lists a model's capabilities ("vision" means it reads images);
+    /// other servers don't say, so the model's family decides when it is
+    /// known (`known_to_see`).
     fn sees_images(&self) -> Option<bool> {
-        let show = self.ollama_show()?;
-        let capabilities = show["capabilities"].as_array()?;
-        Some(capabilities.iter().any(|c| c == "vision"))
+        let listed = self.ollama_show().and_then(|show| {
+            let capabilities = show["capabilities"].as_array()?;
+            Some(capabilities.iter().any(|c| c == "vision"))
+        });
+        listed.or_else(|| known_to_see(&self.model))
     }
 
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Reply, ModelError> {
@@ -444,6 +480,39 @@ pub fn openai_usage(usage: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_families_known_to_read_images_are_recognised() {
+        for sees in [
+            "models/gemini-4-hydrogen",
+            "gemini-2.5-flash",
+            "google/gemini-3-pro",
+            "gpt-4o-mini",
+            "gpt-5",
+            "openai/gpt-4.1",
+            "o3",
+            "o4-mini",
+            "claude-sonnet-5-5",
+            "gemma3:27b",
+            "gemma4:31b",
+            "qwen2.5vl:7b",
+            "qwen3-vl-235b",
+            "llama3.2-vision",
+            "meta-llama/llama-4-maverick",
+            "llava:13b",
+            "pixtral-large",
+            "deepseek-vl2",
+        ] {
+            assert_eq!(known_to_see(sees), Some(true), "{sees}");
+        }
+        for blind in ["deepseek-v4.1-flash", "deepseek-chat", "deepseek-reasoner"] {
+            assert_eq!(known_to_see(blind), Some(false), "{blind}");
+        }
+        // Unknown, or not a chat model: the server decides.
+        for unknown in ["kimi-k3", "glm-5.2", "qwen3-coder", "mistral-large", "gpt-oss:120b", "text-embedding-3-large", "olmo-3"] {
+            assert_eq!(known_to_see(unknown), None, "{unknown}");
+        }
+    }
 
     #[test]
     fn reads_text_tool_calls_and_usage() {

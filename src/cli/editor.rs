@@ -130,6 +130,18 @@ fn after_escape(next: &mut dyn FnMut(Option<i32>) -> Option<u8>) -> Key {
     }
 }
 
+/// Pure — unit-tested. The line as sent: each `[image N]` that stands for a
+/// pasted image becomes `[image: PATH]`, which the request reads (vision.rs).
+/// The line shows the short form; numbers with no pasted image stay as typed.
+pub fn expand_pasted(text: &str, pasted: &[String]) -> String {
+    let mut out = text.to_string();
+    // Highest first, so "[image 1]" never matches inside "[image 12]".
+    for (i, path) in pasted.iter().enumerate().rev() {
+        out = out.replace(&format!("[image {}]", i + 1), &format!("[image: {path}]"));
+    }
+    out
+}
+
 /// The line being edited.
 #[derive(Default, Debug, PartialEq)]
 pub struct Buffer {
@@ -351,6 +363,8 @@ impl Editor {
         let mut browsing: Option<usize> = None;
         let mut draft = String::new();
         let mut pasting = false;
+        // Images pasted into this line with Ctrl+V, shown as [image N].
+        let mut pasted: Vec<String> = Vec::new();
 
         let result = loop {
             let text = buffer.text();
@@ -432,7 +446,7 @@ impl Editor {
                     if let Some(command) = matches.get(selected).filter(|_| buffer.at_end()) {
                         buffer.set(&command.name);
                     }
-                    break Some(buffer.text());
+                    break Some(expand_pasted(&buffer.text(), &pasted));
                 }
                 Key::CtrlD if buffer.chars.is_empty() => break None,
                 Key::CtrlD | Key::Delete => buffer.delete(),
@@ -460,8 +474,8 @@ impl Editor {
                 Key::PasteStart => pasting = true,
                 Key::PasteImage => match super::clipboard::save_image() {
                     Ok(path) => {
-                        let token = format!("[image: {}] ", path.display());
-                        token.chars().for_each(|c| buffer.insert(c));
+                        pasted.push(path.display().to_string());
+                        format!("[image {}] ", pasted.len()).chars().for_each(|c| buffer.insert(c));
                     }
                     Err(why) => {
                         let (bytes, _) = frame(&prompt, prompt_width, &buffer, false, &[], cols, row);
@@ -565,6 +579,18 @@ mod tests {
         assert_eq!(keys(b"\x1b"), [Key::Esc]);
         // Ctrl+V, and Alt+V for terminals where Ctrl+V pastes text: an image.
         assert_eq!(keys(b"\x16\x1bv"), [Key::PasteImage, Key::PasteImage]);
+    }
+
+    #[test]
+    fn pasted_images_show_short_and_go_out_with_their_paths() {
+        let pasted = ["/tmp/rak-pasted/paste-1.png".to_string(), "/tmp/rak-pasted/paste-2.png".to_string()];
+        assert_eq!(
+            expand_pasted("[image 1] [image 2] what differs?", &pasted),
+            "[image: /tmp/rak-pasted/paste-1.png] [image: /tmp/rak-pasted/paste-2.png] what differs?"
+        );
+        // Typed by hand, with nothing pasted: left alone.
+        assert_eq!(expand_pasted("see [image 3]", &pasted), "see [image 3]");
+        assert_eq!(expand_pasted("[image 1]", &[]), "[image 1]");
         // A sequence this editor doesn't use is swallowed whole, not typed.
         assert_eq!(keys(b"\x1b[15~a"), [Key::Other, Key::Char('a')]);
     }

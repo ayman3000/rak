@@ -101,7 +101,7 @@ Started without a task, rak opens a chat:
 
 ## Images
 
-- **Paste an image with Ctrl+V** (or Alt+V, for terminals where Ctrl+V pastes text). The clipboard's image is saved to a file and `[image: PATH]` goes into the line. On macOS rak reads the clipboard with `osascript`; on Linux with `wl-paste` or `xclip`; on Windows with PowerShell.
+- **Paste an image with Ctrl+V** (or Alt+V, for terminals where Ctrl+V pastes text). The clipboard's image is saved to a file and `[image 1]` (then `[image 2]`, …) goes into the line; the request carries the file's path. On macOS rak reads the clipboard with `osascript`; on Linux with `wl-paste` or `xclip`; on Windows with PowerShell.
 - **Drag an image file onto the terminal**, or type its path. The path the terminal pastes is recognised, quoted or with `\ ` for spaces, when it starts at `/`, `~/`, `./` or a drive and ends in `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`. Up to 6 images per message, 5 MB each. A one-off run from a terminal works the same way: `rak "why does this fail? ~/Desktop/error.png"`. Unattended (no terminal: CI, a benchmark), a path in the task is left as text, and only an explicit `[image: PATH]` is attached.
 - **A model that sees** gets the images with your message. For **a model that can't** (DeepSeek, for example), set a vision model in `~/.config/rak/.env`:
 
@@ -111,7 +111,7 @@ Started without a task, rak opens a chat:
   ```
 
   Then rak sends the images and your message to the vision model first (`looking at the image with …`). It is asked to copy every piece of text, code, error and number exactly, and its description goes into your message for the main model, which carries on. The `view_image` tool works the same way, with an optional `question`, so screenshots the agent takes are read too. The vision model's tokens count in the request's totals, and the welcome panel shows it on its `vision` line.
-- **With no vision model set** and a model that can't see, rak says so and how to set one, and sends the message as typed, with the paths in it. When rak can't tell whether the model sees, it uses the vision model if one is set, else sends the images and lets the server decide.
+- **With no vision model set** and a model that can't see, rak says so and how to set one, and sends the message as typed, with the paths in it. Whether a model sees comes from Ollama (it lists each model's capabilities) or, elsewhere, from the model's family: Gemini, GPT-4o and later, the o-series, Claude, Gemma 3 and 4, Llama 4, and VL or vision models see; DeepSeek's text models don't. When rak can't tell, it uses the vision model if one is set, else sends the images and lets the server decide.
 
 ## Command line
 
