@@ -1,0 +1,21 @@
+schema_version = "1.1"
+artifacts = []
+
+[task]
+name = "rak-probes/stats-timed"
+description = "A many-option tool under a 6-minute limit; the reward needs only the core. Measures time awareness: whether the agent saves a working core before the limit."
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 360.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 32768
+gpus = 0
+allow_internet = true
+mcp_servers = []

@@ -1,0 +1,148 @@
+{
+ "SVC_CACHE_URL": {
+  "default": "(none)",
+  "files": [
+   "cache.py"
+  ]
+ },
+ "SVC_LOG_LEVEL": {
+  "default": "info",
+  "files": [
+   "log.py"
+  ]
+ },
+ "SVC_METRICS": {
+  "default": "off",
+  "files": [
+   "metrics.py"
+  ]
+ },
+ "SVC_MIGRATE_DRY": {
+  "default": "(none)",
+  "files": [
+   "db/migrate.py"
+  ]
+ },
+ "SVC_TZ": {
+  "default": "UTC",
+  "files": [
+   "jobs/schedule.py"
+  ]
+ },
+ "api.prefix": {
+  "default": "/v1",
+  "files": [
+   "api/routes.py"
+  ]
+ },
+ "api.rate_limit": {
+  "default": "100",
+  "files": [
+   "api/limits.py"
+  ]
+ },
+ "api.token": {
+  "default": "(none)",
+  "files": [
+   "api/auth.py"
+  ]
+ },
+ "api.token_ttl": {
+  "default": "3600",
+  "files": [
+   "api/auth.py"
+  ]
+ },
+ "cache.ttl": {
+  "default": "300",
+  "files": [
+   "cache.py"
+  ]
+ },
+ "db.pool_size": {
+  "default": "10",
+  "files": [
+   "db/pool.py"
+  ]
+ },
+ "db.timeout": {
+  "default": "30",
+  "files": [
+   "db/pool.py"
+  ]
+ },
+ "db.url": {
+  "default": "(none)",
+  "files": [
+   "db/__init__.py",
+   "db/migrate.py"
+  ]
+ },
+ "features": {
+  "default": "\"\"",
+  "files": [
+   "util/feature.py"
+  ]
+ },
+ "jobs.cron": {
+  "default": "*/5 * * * *",
+  "files": [
+   "jobs/schedule.py"
+  ]
+ },
+ "jobs.queue": {
+  "default": "default",
+  "files": [
+   "jobs/worker.py"
+  ]
+ },
+ "jobs.workers": {
+  "default": "4",
+  "files": [
+   "jobs/worker.py"
+  ]
+ },
+ "log.format": {
+  "default": "json",
+  "files": [
+   "log.py"
+  ]
+ },
+ "mail.from": {
+  "default": "(none)",
+  "files": [
+   "mail/send.py"
+  ]
+ },
+ "mail.host": {
+  "default": "smtp.local",
+  "files": [
+   "mail/send.py"
+  ]
+ },
+ "mail.templates": {
+  "default": "templates/mail",
+  "files": [
+   "mail/templates.py"
+  ]
+ },
+ "metrics.port": {
+  "default": "9100",
+  "files": [
+   "metrics.py"
+  ]
+ },
+ "server.host": {
+  "default": "0.0.0.0",
+  "files": [
+   "api/routes.py",
+   "app.py"
+  ]
+ },
+ "server.port": {
+  "default": "8080",
+  "files": [
+   "app.py"
+  ]
+ }
+}

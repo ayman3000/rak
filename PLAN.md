@@ -9,7 +9,15 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.16. A working plan for picking 
 
 ### On main, not released
 
-Nothing yet.
+- Plan first: for a task with several steps the model starts with a short
+  plan in `todo`, each step a checkable requirement of the request, with
+  short thinking; todo updates go in the same reply as other tool calls.
+- `bench/harbor/probes/`: 5 tasks of our own (batching, near misses,
+  stopping, time, thinking) with `report.py`, for comparing setups (a15,
+  a16, a16 with `--effort low`, a17) without tuning on the benchmark's
+  tasks. Oracle passes all five and nop fails them, on Runta. The adapter
+  skips `--time-limit` for releases before alpha.16. Not run with a model
+  yet: needs the Ollama key (`~/rak-frontier/run-probes.sh SETUP`).
 
 ### In v0.1.0-alpha.16
 

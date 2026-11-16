@@ -136,7 +136,7 @@ class RakAgent(BaseInstalledAgent):
             flags += ["--base-url", shlex.quote(base_url)]
         if self.model_name:
             flags += ["-m", shlex.quote(self._model())]
-        limit = self._time_limit()
+        limit = self._time_limit() if self._has_time_limit() else None
         if limit:
             flags += ["--time-limit", str(limit)]
         extra = self.build_cli_flags()
@@ -156,6 +156,17 @@ class RakAgent(BaseInstalledAgent):
             ),
             env=env,
         )
+
+    def _has_time_limit(self) -> bool:
+        # --time-limit came in v0.1.0-alpha.16; an older release (for a
+        # before/after comparison) would stop at the unknown option.
+        release = self._release()
+        if "-alpha." not in release:
+            return True
+        try:
+            return int(release.rsplit(".", 1)[1]) >= 16
+        except ValueError:
+            return True
 
     def _time_limit(self) -> int | None:
         # Harbor stops the agent at the task's timeout but does not tell an

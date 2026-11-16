@@ -1,0 +1,21 @@
+schema_version = "1.1"
+artifacts = []
+
+[task]
+name = "rak-probes/pager-fix"
+description = "A one-line fix with visible tests. Measures stopping: how many steps the agent takes after the tests first pass."
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 32768
+gpus = 0
+allow_internet = true
+mcp_servers = []

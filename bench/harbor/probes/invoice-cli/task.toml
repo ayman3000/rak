@@ -1,0 +1,21 @@
+schema_version = "1.1"
+artifacts = []
+
+[task]
+name = "rak-probes/invoice-cli"
+description = "A CLI with many small, exact requirements checked by hidden tests. Measures near misses: whether the agent checks each requirement before finishing."
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 32768
+gpus = 0
+allow_internet = true
+mcp_servers = []

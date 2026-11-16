@@ -78,8 +78,10 @@ impl Tool for Todo {
         "todo"
     }
     fn description(&self) -> &str {
-        "Your task list, for work with three or more steps. Send the whole list each time: at the start, and whenever \
-         a step starts or is done. One step in_progress at a time. Skip it for small tasks."
+        "Your plan, for work with three or more steps: 3-7 steps, each naming something the request asks for that \
+         can be checked (\"output sorted newest first\", not \"write the code\"). Send the whole list each time: at the \
+         start, and when steps start or finish, in the same reply as your other tool calls, not on its own. One step \
+         in_progress at a time. Skip it for small tasks."
     }
     fn parameters(&self) -> Value {
         json!({
