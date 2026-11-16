@@ -196,8 +196,10 @@ pub fn latest_task_list(middle: &[Value]) -> Option<String> {
 pub fn plain_summary(middle: &[Value]) -> String {
     let requests: Vec<String> = middle
         .iter()
-        .filter(|m| m["role"] == "user" && m["content"].is_string())
-        .map(|m| format!("- {}", cut(m["content"].as_str().unwrap_or(""), 1_000)))
+        .filter(|m| m["role"] == "user")
+        // A request's text (its images left out), not view_image's pictures.
+        .filter_map(|m| crate::text::message_text(&m["content"]).filter(|t| m["content"].is_string() || !t.starts_with("The image")))
+        .map(|text| format!("- {}", cut(&text, 1_000)))
         .collect();
     let calls: Vec<String> = call_index(middle).into_values().map(|(name, target)| format!("{name} {target}").trim().to_string()).collect();
     let mut out = String::from("No summary could be written; this is what the removed part held.");

@@ -99,6 +99,20 @@ Started without a task, rak opens a chat:
 | `/clear` | Start a fresh conversation. The last one stays saved. |
 | `/help`, `/exit` | The list of commands; quit (or Ctrl-D). |
 
+## Images
+
+- **Paste an image with Ctrl+V** (or Alt+V, for terminals where Ctrl+V pastes text). The clipboard's image is saved to a file and `[image: PATH]` goes into the line. On macOS rak reads the clipboard with `osascript`; on Linux with `wl-paste` or `xclip`; on Windows with PowerShell.
+- **Drag an image file onto the terminal**, or type its path. The path the terminal pastes is recognised, quoted or with `\ ` for spaces, when it starts at `/`, `~/`, `./` or a drive and ends in `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`. Up to 6 images per message, 5 MB each. A one-off run from a terminal works the same way: `rak "why does this fail? ~/Desktop/error.png"`. Unattended (no terminal: CI, a benchmark), a path in the task is left as text, and only an explicit `[image: PATH]` is attached.
+- **A model that sees** gets the images with your message. For **a model that can't** (DeepSeek, for example), set a vision model in `~/.config/rak/.env`:
+
+  ```
+  RAK_VISION_PROVIDER=ollama-cloud     # empty: the same provider as RAK_PROVIDER
+  RAK_VISION_MODEL=<a model that reads images>
+  ```
+
+  Then rak sends the images and your message to the vision model first (`looking at the image with …`). It is asked to copy every piece of text, code, error and number exactly, and its description goes into your message for the main model, which carries on. The `view_image` tool works the same way, with an optional `question`, so screenshots the agent takes are read too. The vision model's tokens count in the request's totals, and the welcome panel shows it on its `vision` line.
+- **With no vision model set** and a model that can't see, rak says so and how to set one, and sends the message as typed, with the paths in it. When rak can't tell whether the model sees, it uses the vision model if one is set, else sends the images and lets the server decide.
+
 ## Command line
 
 | Option | What it does |
@@ -123,6 +137,7 @@ Started without a task, rak opens a chat:
 | `--helper-budget N` | Input tokens one `delegate` helper may spend. Default 200000; `0` for no cap. |
 | `--time-limit SECS` | The time this run has, counted from start. The task tells the model, and it is warned at 70% and 90% to finish the essential work and save its outputs. For benchmarks and CI jobs with a timeout. |
 | `--review` | Before a one-off run (not a chat) that changed something answers, send the model back once to list each requirement, rule and symptom in the request and the docs it points to, quote it, and name the check it ran for it. Skipped with under 15% of `--time-limit` left. Off by default: it costs more model calls (on alpha.19, where it was on, it fixed nothing measured). |
+| `--vision-provider P`, `--vision-model M` | The model that reads images for a main model that can't (see Images). Default: `RAK_VISION_PROVIDER` and `RAK_VISION_MODEL`. |
 | `--json` | Print one JSON object: answer, outcome, turns, tool calls, tokens, seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |

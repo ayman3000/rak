@@ -57,8 +57,8 @@ pub fn title(history: &[Value]) -> String {
     history
         .iter()
         .find(|m| m["role"] == "user")
-        .and_then(|m| m["content"].as_str())
-        .map(|text| one_line(text, 70))
+        .and_then(|m| crate::text::message_text(&m["content"]))
+        .map(|text| one_line(&text, 70))
         .unwrap_or_else(|| "(empty)".to_string())
 }
 

@@ -27,6 +27,19 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.20. A working plan for picking 
 
 ### On main, not released
 
+- A vision model for a main model that can't see (Naseem's "describe" mode):
+  RAK_VISION_PROVIDER / RAK_VISION_MODEL in the .env (or --vision-provider,
+  --vision-model). Images pasted with Ctrl+V (Alt+V too; osascript, wl-paste
+  or xclip, PowerShell) or dragged in as paths go to it with the message, and
+  its description goes into the message for the main model; view_image
+  (with an optional `question`) routes the same way. A model that sees gets
+  the images itself. With none set and a model that can't see, a hint and the
+  message as typed. Bare paths attach only with someone at a terminal, so an
+  unattended task naming an image is unchanged. The welcome panel has a
+  `vision` line; `rak keys` and the template know the two settings. Tested
+  with unit tests and a scripted vision model; not yet with a real one, and
+  Ctrl+V with an image on the clipboard not tried (the script runs and says
+  when there is none).
 - From a user run (gemma4:31b, alpha.13) extracting the Rust book's code: the
   chapter list loads from `toc-*.js` (and a `toc.html` frame), so fetch_url
   and curl saw one chapter link; the model curled the index ~20 times, ran

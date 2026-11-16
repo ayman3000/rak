@@ -13,6 +13,7 @@
 //!   setup        first-run setup and rak setup: provider, key, model
 //!   trust        a project folder's own .rak/ and .env, used once trusted
 //!   signals      Ctrl-C
+//!   clipboard    Ctrl+V: an image on the clipboard saved for the request
 //!   editor, menu, markdown, welcome, style, term, commands
 //!                the interface's parts, each pure where it can be
 
@@ -20,6 +21,7 @@ pub mod approval;
 pub mod args;
 pub mod chain;
 pub mod chat;
+pub mod clipboard;
 pub mod commands;
 pub mod editor;
 pub mod keys_command;

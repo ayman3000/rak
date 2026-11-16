@@ -45,6 +45,7 @@ pub fn banner(s: &Session) {
                 let count = s.skills.read().unwrap().len();
                 (count > 0).then(|| ("skills".to_string(), format!("{count} (/skills)")))
             })
+            .chain(vision_note(s).map(|note| ("vision".to_string(), note)))
             .collect(),
         tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
         tool_count: s.agent.tool_names().len(),
@@ -52,6 +53,27 @@ pub fn banner(s: &Session) {
     };
     for line in welcome::panel(&info, term::size().0, s.ui.borrow().out_color) {
         println!("{line}");
+    }
+}
+
+/// The welcome panel's vision line: the model that looks at images for one
+/// that can't, or, for a model that can't see with none set, how to set one.
+fn vision_note(s: &Session) -> Option<String> {
+    match (&s.vision, s.main_sees) {
+        (Some(vision), Some(true)) => Some(format!("{} (unused: the model sees)", short_name(&vision.lock().ok()?.name))),
+        (Some(vision), _) => Some(short_name(&vision.lock().ok()?.name)),
+        (None, Some(false)) => Some("none: set RAK_VISION_MODEL".to_string()),
+        (None, _) => None,
+    }
+}
+
+/// "provider/model" cut to fit the panel's left column.
+fn short_name(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() <= 24 {
+        name.to_string()
+    } else {
+        format!("…{}", chars[chars.len() - 23..].iter().collect::<String>())
     }
 }
 
@@ -240,6 +262,11 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     let color = s.ui.borrow().out_color;
     let provider = make_provider(&o, &backend, model, &s.stop);
     (s.window, s.window_source) = window_for(&o, provider.as_ref());
+    // A model that sees takes images itself; one that can't, through the vision model.
+    s.main_sees = provider.sees_images();
+    if let Some(Ok(mut vision)) = s.vision.as_ref().map(|v| v.lock()) {
+        vision.active = s.main_sees != Some(true);
+    }
     s.agent.set_context_window(s.window);
     s.agent.set_model(provider);
     s.o = o;
@@ -276,7 +303,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             for (usage, about) in commands::HELP {
                 println!("  {} {about}", paint(color, Style::Cyan, &pad(usage, 16)));
             }
-            println!("{}", dim("\n  Ctrl-C stops a running request · ↑/↓ history · Tab completes a command\n  Multi-line: end a line with \\ to continue it, or paste"));
+            println!("{}", dim("\n  Ctrl-C stops a running request · ↑/↓ history · Tab completes a command\n  Multi-line: end a line with \\ to continue it, or paste · Ctrl+V (or Alt+V) pastes an image"));
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
         "provider" if !args.is_empty() => switch_provider(s, args),

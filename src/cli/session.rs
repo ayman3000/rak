@@ -68,6 +68,10 @@ pub struct Session {
     /// Where the fallback chain stands, and what its hook needs.
     pub chain: Rc<RefCell<chain::State>>,
     pub asker: chain::Asker,
+    /// The model that looks at images for a main model that can't (vision.rs),
+    /// and whether the main model sees (None: the server didn't say).
+    pub vision: Option<std::sync::Arc<std::sync::Mutex<rak::vision::Vision>>>,
+    pub main_sees: Option<bool>,
 }
 
 impl Session {
@@ -239,6 +243,24 @@ pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -
     Box::new(provider)
 }
 
+/// The vision model from --vision-model / RAK_VISION_MODEL, on
+/// --vision-provider / RAK_VISION_PROVIDER, else on the main provider. None
+/// when no vision model is named; an error when it can't be reached (no key).
+pub fn make_vision(o: &Options, stop: &Stop) -> Result<Option<rak::vision::Vision>, String> {
+    let Some(model) = o.vision_model.clone() else { return Ok(None) };
+    let mut vo = o.clone();
+    if let Some(provider) = &o.vision_provider {
+        vo.provider = Some(provider.clone());
+        vo.base_url = None;
+    }
+    // A description wants no reasoning budget or reply cap from the main model.
+    vo.effort = None;
+    vo.max_tokens = None;
+    let backend = backend(&vo, Some(&model))?;
+    let name = format!("{}/{model}", backend.provider.as_deref().unwrap_or(backend.base_url.as_str()));
+    Ok(Some(rak::vision::Vision::new(make_provider(&vo, &backend, &model, stop), name)))
+}
+
 /// --context wins; then what the server says; then a guess.
 pub fn window_for(o: &Options, provider: &dyn Model) -> (usize, &'static str) {
     // Asking the server is a request: only when --context didn't say.
@@ -283,6 +305,8 @@ pub fn run(mut o: Options) -> i32 {
     o.model = o.model.or_else(|| key("RAK_MODEL"));
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
     o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
+    o.vision_model = o.vision_model.or_else(|| key("RAK_VISION_MODEL")).filter(|m| !m.trim().is_empty());
+    o.vision_provider = o.vision_provider.or_else(|| key("RAK_VISION_PROVIDER")).filter(|p| !p.trim().is_empty());
 
     let stdin_tty = std::io::stdin().is_terminal();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -411,9 +435,22 @@ pub fn run(mut o: Options) -> i32 {
     if !o.no_memory && keeps {
         tools.push(Box::new(rak::memory::Remember { project_file: memory_file.clone(), user_file: user_memory_file.clone() }));
     }
-    // view_image, unless the server says the model can't see.
-    if provider.sees_images() != Some(false) {
-        tools.push(Box::new(rak::tools::image::ViewImage(ctx.clone())));
+    // Images: a model that sees gets them itself; one that can't goes
+    // through the vision model when one is set (vision.rs).
+    let main_sees = provider.sees_images();
+    let vision = match make_vision(&o, &stop) {
+        Ok(vision) => vision.map(|mut v| {
+            v.active = main_sees != Some(true);
+            std::sync::Arc::new(std::sync::Mutex::new(v))
+        }),
+        Err(why) => {
+            eprintln!("{}", paint(err_color, Style::Yellow, &format!("The vision model can't be used: {why}")));
+            None
+        }
+    };
+    // view_image, unless nothing can see.
+    if main_sees != Some(false) || vision.is_some() {
+        tools.push(Box::new(rak::tools::image::ViewImage(ctx.clone(), vision.clone())));
     }
     // delegate: a helper agent with read-only tools and a fresh context, on
     // the chat's current model (`helper_model`, kept up to date by /model).
@@ -554,6 +591,8 @@ pub fn run(mut o: Options) -> i32 {
         helper_calls_total: 0,
         chain: Rc::new(RefCell::new(chain::State::default())),
         asker,
+        vision,
+        main_sees,
     };
 
     if session.o.continue_last {
@@ -771,6 +810,51 @@ fn settle_fallback(s: &mut Session) {
     ui.progress(Some(Style::Yellow), &note);
 }
 
+/// The images a request names (pasted with Ctrl+V, or dragged in as paths),
+/// made ready for the model: the request's text with each as `[image N]`, and
+/// the images for a model that sees them; for one that can't, the vision
+/// model's description is in the text instead. With no model that can see
+/// them, the hint is shown and the request goes as typed. An error when the
+/// vision model failed.
+fn attach_images(s: &mut Session, task: &str) -> Result<(String, Vec<rak::tools::Image>), String> {
+    let cwd = s.cwd.clone();
+    let resolve = |p: &str| if Path::new(p).is_absolute() { PathBuf::from(p) } else { cwd.join(p) };
+    let home = super::settings::home();
+    // Paths in the text count when someone is at a terminal (dragged in);
+    // unattended, only an explicit [image: PATH].
+    let bare = s.ui.borrow().chat || s.asker.interactive;
+    let (text, paths) = rak::vision::attachments(task, &home, bare, &|p| resolve(p).is_file());
+    if paths.is_empty() {
+        return Ok((task.to_string(), Vec::new()));
+    }
+    let mut images = Vec::new();
+    for (i, path) in paths.iter().enumerate() {
+        match rak::tools::image::load(&resolve(path), path) {
+            Ok((image, _)) => images.push(image),
+            Err(why) => s.ui.borrow_mut().progress(Some(Style::Yellow), &format!("  [image {}] left out: {why}", i + 1)),
+        }
+    }
+    if images.is_empty() {
+        return Ok((text, Vec::new()));
+    }
+    s.log.write(json!({ "event": "images", "count": images.len() }));
+    match rak::vision::route(s.main_sees, s.vision.is_some()) {
+        rak::vision::Route::Direct => Ok((text, images)),
+        rak::vision::Route::Hint => {
+            s.ui.borrow_mut().progress(Some(Style::Yellow), rak::vision::HINT);
+            Ok((task.to_string(), Vec::new()))
+        }
+        rak::vision::Route::Describe => {
+            let vision = s.vision.clone().expect("Describe is chosen only with a vision model");
+            let mut vision = vision.lock().map_err(|_| "the vision model is not available".to_string())?;
+            let what = if images.len() == 1 { "the image".to_string() } else { format!("{} images", images.len()) };
+            s.ui.borrow_mut().progress(Some(Style::Dim), &format!("  looking at {what} with {}", vision.name));
+            let description = vision.describe(&images, &text).map_err(|why| format!("The vision model could not look at {what}: {why}"))?;
+            Ok((rak::vision::described_task(&text, images.len(), &vision.name, &description), Vec::new()))
+        }
+    }
+}
+
 pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let started = Instant::now();
     let (usage_before, calls_before) = (s.agent.usage, s.agent.tool_calls);
@@ -781,13 +865,20 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     prepare_fallback(s);
     let switches_before = s.agent.switches.len();
     signals::set_running(true);
-    let RunResult { outcome, answer, turns } = s.agent.run(task);
+    let RunResult { outcome, answer, turns } = match attach_images(s, task) {
+        Ok((text, images)) if images.is_empty() => s.agent.run(&text),
+        Ok((text, images)) => s.agent.run_with_images(&text, images),
+        Err(why) => RunResult { outcome: Outcome::Failed(why), answer: String::new(), turns: 0 },
+    };
     let fell_back_to: Vec<String> = s.agent.switches[switches_before..].to_vec();
     settle_fallback(s);
     update_notes(s, task, &answer, &outcome);
-    // What delegate's helpers spent counts as this request's too.
+    // What delegate's helpers and the vision model spent counts as this request's too.
     let helpers = s.helper_usage.take();
     s.agent.usage.add(helpers);
+    if let Some(vision) = s.vision.as_ref().and_then(|v| v.lock().ok().map(|mut v| v.take_usage())) {
+        s.agent.usage.add(vision);
+    }
     let helper_calls = s.helper_calls.take();
     s.helper_calls_total += helper_calls;
     signals::set_running(false);

@@ -101,7 +101,7 @@ pub fn assigned_in_order(text: &str) -> Vec<String> {
 }
 
 /// Settings whose values may be named in a note: not secrets.
-const SHOWN: &[&str] = &["RAK_PROVIDER", "RAK_MODEL", "RAK_BASE_URL"];
+const SHOWN: &[&str] = &["RAK_PROVIDER", "RAK_MODEL", "RAK_BASE_URL", "RAK_VISION_PROVIDER", "RAK_VISION_MODEL"];
 
 /// Pure — unit-tested. Names given a value more than once in a .env text:
 /// (name, how many times, the value used — the last one set).
@@ -140,12 +140,14 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("RAK_PROVIDER", "the default provider"),
     ("RAK_MODEL", "the default model"),
     ("RAK_BASE_URL", "the default provider's address, if not its usual one"),
+    ("RAK_VISION_PROVIDER", "the provider of the model that reads images"),
+    ("RAK_VISION_MODEL", "the model that reads images for one that can't"),
     ("RAK_API_KEY", "the key for a server named only by --base-url"),
 ];
 
 /// Which of `KNOWN` are settings whose values may be shown.
 pub fn shows_value(name: &str) -> bool {
-    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_BASE_URL")
+    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_BASE_URL" | "RAK_VISION_PROVIDER" | "RAK_VISION_MODEL")
 }
 
 /// rak's own key file: ~/.config/rak/.env.

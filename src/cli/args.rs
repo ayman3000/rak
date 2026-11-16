@@ -69,6 +69,9 @@ BEHAVIOUR
       --review            before a one-off run answers, send the model back once to check each
                           requirement, rule and symptom of the request and its docs (costs
                           more calls; off by default)
+      --vision-provider P the provider of the model that looks at images for a model that
+                          can't (default RAK_VISION_PROVIDER, else the main provider)
+      --vision-model M    that model (default RAK_VISION_MODEL); a model that sees needs none
 
 OUTPUT
       --json              print one JSON object with the answer and the numbers
@@ -126,6 +129,11 @@ pub struct Options {
     pub time_limit: Option<u64>,
     /// --review: a one-off run is reviewed once before its answer.
     pub review: bool,
+    /// The model that looks at images when the main one can't, and its
+    /// provider (--vision-model / RAK_VISION_MODEL, --vision-provider /
+    /// RAK_VISION_PROVIDER).
+    pub vision_model: Option<String>,
+    pub vision_provider: Option<String>,
     pub json: bool,
     pub log: Option<PathBuf>,
     pub record: Option<PathBuf>,
@@ -178,6 +186,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
         helper_budget: 200_000,
         time_limit: None,
         review: false,
+        vision_model: None,
+        vision_provider: None,
         json: false,
         log: None,
         record: None,
@@ -238,6 +248,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--helper-budget" => o.helper_budget = number::<u64>("--helper-budget", value("--helper-budget")),
             "--time-limit" => o.time_limit = Some(number::<u64>("--time-limit", value("--time-limit"))).filter(|s| *s > 0),
             "--review" => o.review = true,
+            "--vision-model" => o.vision_model = Some(value("--vision-model")),
+            "--vision-provider" => o.vision_provider = Some(value("--vision-provider")),
             // The default from alpha.20; kept so older scripts still run.
             "--no-review" => o.review = false,
             "--json" => o.json = true,
@@ -280,5 +292,7 @@ mod tests {
         assert!(o.review);
         let o = super::parse_args(["--no-review", "fix it"].map(String::from).to_vec());
         assert!(!o.review);
+        let o = super::parse_args(["--vision-provider", "ollama", "--vision-model", "qwen-vl", "look"].map(String::from).to_vec());
+        assert_eq!((o.vision_provider.as_deref(), o.vision_model.as_deref()), (Some("ollama"), Some("qwen-vl")));
     }
 }

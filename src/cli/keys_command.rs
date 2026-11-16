@@ -90,7 +90,7 @@ pub fn run(args: &[String]) -> ! {
             Some(value) if shows_value(name) => format!("{value} ({})", status(name)),
             _ => status(name),
         };
-        println!("   {name:<16} {state:<50} {purpose}");
+        println!("   {name:<19} {state:<47} {purpose}");
     }
     if default.is_none() {
         println!("\nNo RAK_PROVIDER: rak uses Ollama on this machine (or Anthropic for a claude-* model when its key is set).");

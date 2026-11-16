@@ -33,6 +33,8 @@ pub enum Key {
     KillWord,
     PasteStart,
     PasteEnd,
+    /// Ctrl+V or Alt+V: an image from the clipboard.
+    PasteImage,
     /// Something this editor has no use for.
     Other,
     /// The keyboard is gone.
@@ -58,6 +60,7 @@ pub fn read_key(next: &mut dyn FnMut(Option<i32>) -> Option<u8>) -> Key {
         14 => Key::Down,
         16 => Key::Up,
         21 => Key::KillToStart,
+        22 => Key::PasteImage,
         23 => Key::KillWord,
         27 => after_escape(next),
         0..=31 => Key::Other,
@@ -121,6 +124,7 @@ fn after_escape(next: &mut dyn FnMut(Option<i32>) -> Option<u8>) -> Key {
         b'O' => next(Some(40)).map(letter).unwrap_or(Key::Other),
         b'b' => Key::WordLeft,
         b'f' => Key::WordRight,
+        b'v' => Key::PasteImage,
         127 => Key::KillWord,
         _ => Key::Other,
     }
@@ -454,6 +458,18 @@ impl Editor {
                 Key::KillToStart => buffer.kill_to_start(),
                 Key::KillToEnd => buffer.kill_to_end(),
                 Key::PasteStart => pasting = true,
+                Key::PasteImage => match super::clipboard::save_image() {
+                    Ok(path) => {
+                        let token = format!("[image: {}] ", path.display());
+                        token.chars().for_each(|c| buffer.insert(c));
+                    }
+                    Err(why) => {
+                        let (bytes, _) = frame(&prompt, prompt_width, &buffer, false, &[], cols, row);
+                        let hint = paint(self.color, Style::Dim, &format!("(no image pasted: {why})"));
+                        let _ = out.write_all(format!("{bytes}\r\n{hint}\r\n").as_bytes());
+                        row = 0;
+                    }
+                },
                 Key::Eof => break None,
                 Key::Esc | Key::PasteEnd | Key::Other => {}
             }
@@ -547,6 +563,8 @@ mod tests {
         assert_eq!(keys(b"\x1b[1;5C\x1b[1;3D\x1bb\x1bf"), [Key::WordRight, Key::WordLeft, Key::WordLeft, Key::WordRight]);
         assert_eq!(keys(b"\x1b[200~x\x1b[201~"), [Key::PasteStart, Key::Char('x'), Key::PasteEnd]);
         assert_eq!(keys(b"\x1b"), [Key::Esc]);
+        // Ctrl+V, and Alt+V for terminals where Ctrl+V pastes text: an image.
+        assert_eq!(keys(b"\x16\x1bv"), [Key::PasteImage, Key::PasteImage]);
         // A sequence this editor doesn't use is swallowed whole, not typed.
         assert_eq!(keys(b"\x1b[15~a"), [Key::Other, Key::Char('a')]);
     }

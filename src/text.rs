@@ -1,6 +1,18 @@
 //! Small text helpers shared by the library's modules.
 
 /// `text` on one line, whitespace runs folded, cut to `max` characters with "…".
+/// Pure — unit-tested. A message's text: the string, or the text parts of a
+/// content list (a request with images), images left out.
+pub fn message_text(content: &serde_json::Value) -> Option<String> {
+    match content {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(parts) => {
+            Some(parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n")).filter(|t| !t.is_empty())
+        }
+        _ => None,
+    }
+}
+
 pub fn one_line(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() > max {
@@ -27,6 +39,16 @@ pub fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_with_images_still_has_its_text() {
+        use serde_json::json;
+        assert_eq!(message_text(&json!("plain")).as_deref(), Some("plain"));
+        let parts = json!([{ "type": "text", "text": "why [image 1]?" }, { "type": "image_url", "image_url": { "url": "data:x" } }]);
+        assert_eq!(message_text(&parts).as_deref(), Some("why [image 1]?"));
+        assert_eq!(message_text(&json!([{ "type": "image_url" }])), None);
+        assert_eq!(crate::sessions::title(&[json!({ "role": "user", "content": parts })]), "why [image 1]?");
+    }
 
     #[test]
     fn base64_matches_the_standard() {

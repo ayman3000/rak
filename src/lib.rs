@@ -27,3 +27,4 @@ pub mod skills;
 pub mod stall;
 pub mod text;
 pub mod tools;
+pub mod vision;

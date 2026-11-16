@@ -481,6 +481,12 @@ impl Agent {
     }
 
     pub fn run(&mut self, task: &str) -> RunResult {
+        self.run_with_images(task, Vec::new())
+    }
+
+    /// A request with images the person attached, for a model that sees them:
+    /// they go in the request's message, after its text.
+    pub fn run_with_images(&mut self, task: &str, images: Vec<Image>) -> RunResult {
         // Reasoning a chat-completions server sent goes back only within the
         // request it belongs to (DeepSeek's rule); a new request drops it.
         for message in self.messages.iter_mut() {
@@ -498,7 +504,14 @@ impl Agent {
             ),
             None => task.to_string(),
         };
-        self.messages.push(json!({ "role": "user", "content": task }));
+        let content = if images.is_empty() {
+            json!(task)
+        } else {
+            let mut parts = vec![json!({ "type": "text", "text": task })];
+            parts.extend(images.iter().map(|image| json!({ "type": "image_url", "image_url": { "url": image.data_url() } })));
+            Value::Array(parts)
+        };
+        self.messages.push(json!({ "role": "user", "content": content }));
         let mut time_warned = 0.0;
         let mut definitions = self.definitions();
         let limited = self.config.max_turns != usize::MAX;
