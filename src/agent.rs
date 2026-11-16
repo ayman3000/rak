@@ -223,6 +223,11 @@ pub struct Agent {
     /// in the request and its docs against a check it ran. rak sets it for a
     /// one-off run with --review, not in a chat.
     pub review: bool,
+    /// Whether the model sees images (None: unknown), and the vision model
+    /// that looks for it when it can't: a tool's image (an MCP screenshot,
+    /// say) is shown, described, or left out with a note (see `take_image`).
+    pub sees_images: Option<bool>,
+    pub vision: Option<std::sync::Arc<std::sync::Mutex<crate::vision::Vision>>>,
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,
     loaded: Vec<String>,
@@ -260,6 +265,8 @@ impl Agent {
             input_budget: None,
             time_limit: None,
             review: false,
+            sees_images: None,
+            vision: None,
             switches: Vec::new(),
             groups: Vec::new(),
             loaded: Vec::new(),
@@ -322,6 +329,30 @@ impl Agent {
         let reply = self.model.chat(&request, &[]).ok()?;
         self.usage.add(reply.usage);
         Some(reply.content)
+    }
+
+    /// A tool's image, for this model: back to be shown when it sees; when
+    /// it can't, the vision model's description added to the tool's `text`
+    /// instead, or, with no vision model, a note that it was left out.
+    fn take_image(&mut self, image: Image, text: &mut String) -> Option<Image> {
+        let vision = self.vision.clone().filter(|v| v.lock().is_ok_and(|v| v.active));
+        if let Some(vision) = vision {
+            let Ok(mut vision) = vision.lock() else { return None };
+            (self.on_event)(&Event::Note("the vision model looked at a tool's image"));
+            match vision.describe(&[image], "") {
+                Ok(description) => text.push_str(&format!(
+                    "\n[You cannot see images, so the vision model {} looked at this one for you:]\n{description}",
+                    vision.name
+                )),
+                Err(why) => text.push_str(&format!("\n[The vision model could not look at the image: {why}]")),
+            }
+            return None;
+        }
+        if self.sees_images == Some(false) {
+            text.push_str("\n[This model cannot see images, so the image was left out.]");
+            return None;
+        }
+        Some(image)
     }
 
     /// The groups loaded in this conversation.
@@ -673,8 +704,8 @@ impl Agent {
                 } else if let Some(done) = together[index].take() {
                     done
                 } else {
-                    let (ok, text, image) = self.run_tool(&call.name, &call.arguments, &mut refused);
-                    images.extend(image);
+                    let (ok, mut text, image) = self.run_tool(&call.name, &call.arguments, &mut refused);
+                    images.extend(image.and_then(|image| self.take_image(image, &mut text)));
                     (ok, text)
                 };
 
@@ -1399,6 +1430,66 @@ mod tests {
         s.agent.time_limit = Some((Instant::now() - Duration::from_secs(540), Duration::from_secs(600)));
         assert_eq!(s.agent.run("make hi.txt").answer, "done");
         assert!(!user_notes(&s.agent).iter().any(|n| n.starts_with("[review]")));
+    }
+
+    /// A tool that returns an image, as a browser's MCP screenshot does.
+    struct Camera;
+    impl Tool for Camera {
+        fn name(&self) -> &str {
+            "snap"
+        }
+        fn description(&self) -> &str {
+            "takes a picture"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn run(&self, _args: &Value) -> crate::tools::ToolResult {
+            let mut result = crate::tools::ToolResult::ok("[image saved to /tmp/rak-images/snap.png (2×3, 0 KB)]");
+            result.image = Some(Image { media_type: "image/png".into(), data: "AAAA".into() });
+            result
+        }
+    }
+
+    /// A vision model that says what it was shown.
+    struct Eyes;
+    impl Model for Eyes {
+        fn chat(&mut self, messages: &[Value], _tools: &[Value]) -> Result<Reply, ModelError> {
+            let images = messages[0]["content"].as_array().map_or(0, |p| p.iter().filter(|p| p["type"] == "image_url").count());
+            Ok(Reply { content: format!("a page with {images} image"), ..Default::default() })
+        }
+    }
+
+    fn snap_result(agent: &Agent) -> String {
+        agent.history().iter().find(|m| m["role"] == "tool").and_then(|m| m["content"].as_str()).unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn a_tool_s_image_is_shown_described_or_left_out_by_what_the_model_can_do() {
+        let snap = || Ok(call("snap", json!({})));
+        let shown_image = |agent: &Agent| agent.history().iter().any(|m| m["role"] == "user" && m["content"].is_array());
+        // A model that sees: the image follows the tool's result.
+        let mut s = setup("snap-sees", vec![snap(), Ok(text("done"))], 10);
+        s.agent.tools.push(Box::new(Camera));
+        s.agent.run("take a picture");
+        assert!(shown_image(&s.agent));
+        // A model that can't, with a vision model: its description, no image.
+        let mut s = setup("snap-vision", vec![snap(), Ok(text("done"))], 10);
+        s.agent.tools.push(Box::new(Camera));
+        s.agent.sees_images = Some(false);
+        s.agent.vision = Some(std::sync::Arc::new(std::sync::Mutex::new(crate::vision::Vision::new(Box::new(Eyes), "ollama/eyes"))));
+        s.agent.run("take a picture");
+        assert!(!shown_image(&s.agent));
+        let result = snap_result(&s.agent);
+        assert!(result.starts_with("[image saved to /tmp/rak-images/snap.png"), "{result}");
+        assert!(result.ends_with("the vision model ollama/eyes looked at this one for you:]\na page with 1 image"), "{result}");
+        // A model that can't, and no vision model: left out, said so.
+        let mut s = setup("snap-blind", vec![snap(), Ok(text("done"))], 10);
+        s.agent.tools.push(Box::new(Camera));
+        s.agent.sees_images = Some(false);
+        s.agent.run("take a picture");
+        assert!(!shown_image(&s.agent));
+        assert!(snap_result(&s.agent).ends_with("so the image was left out.]"));
     }
 
     /// Records how calls reached it: together, in batches, or one by one.

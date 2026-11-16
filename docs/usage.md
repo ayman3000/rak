@@ -80,7 +80,7 @@ Started without a task, rak opens a chat:
 
 - **The rule above the prompt** shows the model, how full its context is, the folder and branch, and the mode.
 - **Type `/`** for the commands. The list narrows as you type; ↑ and ↓ choose, Tab completes, Enter runs, Esc closes it.
-- **Answers appear as they are written**, with Markdown shown as headings, bullets, code and tables. A table is drawn with aligned columns that fit the terminal, long cells wrapping inside their column.
+- **Answers appear as they are written**, with Markdown shown as headings, bullets, code and tables, and short formulas of common symbols drawn as characters (`$\rightarrow$` as →, `$n \times m$` as n × m). A table is drawn with aligned columns that fit the terminal, long cells wrapping inside their column.
 - **Ctrl-C stops a request** (the answer being written, or a running command) and keeps the chat. A second Ctrl-C quits.
 - **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
 - **After each request** a line shows turns, tool calls (a helper's counted apart: `3 tool calls (+14 in helpers)`), tokens in and out, how many came from the cache, and the time.
@@ -111,6 +111,7 @@ Started without a task, rak opens a chat:
   ```
 
   Then rak sends the images and your message to the vision model first (`looking at the image with …`). It is asked to copy every piece of text, code, error and number exactly, and its description goes into your message for the main model, which carries on. The `view_image` tool works the same way, with an optional `question`, so screenshots the agent takes are read too. The vision model's tokens count in the request's totals, and the welcome panel shows it on its `vision` line.
+- **Images from MCP tools** (a browser's screenshot, say) are saved to a file in the system's temp folder under `rak-images/`, and the tool's result names it (`[image saved to … (1212×844, 473 KB)]`), so you can open it. The first one also goes to the model the same way: shown to a model that sees, described by the vision model for one that can't, or left out with a note when there is neither.
 - **With no vision model set** and a model that can't see, rak says so and how to set one, and sends the message as typed, with the paths in it. Whether a model sees comes from Ollama (it lists each model's capabilities) or, elsewhere, from the model's family: Gemini, GPT-4o and later, the o-series, Claude, Gemma 3 and 4, Llama 4, and VL or vision models see; DeepSeek's text models don't. When rak can't tell, it uses the vision model if one is set, else sends the images and lets the server decide.
 
 ## Command line

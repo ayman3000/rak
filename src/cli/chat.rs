@@ -264,6 +264,7 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     (s.window, s.window_source) = window_for(&o, provider.as_ref());
     // A model that sees takes images itself; one that can't, through the vision model.
     s.main_sees = provider.sees_images();
+    s.agent.sees_images = s.main_sees;
     if let Some(Ok(mut vision)) = s.vision.as_ref().map(|v| v.lock()) {
         vision.active = s.main_sees != Some(true);
     }

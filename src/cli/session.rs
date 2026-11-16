@@ -521,6 +521,8 @@ pub fn run(mut o: Options) -> i32 {
     let mut agent = Agent::new(provider, tools, config);
     agent.defer(deferred);
     // Counted from here: start-up before this takes milliseconds.
+    agent.sees_images = main_sees;
+    agent.vision = vision.clone();
     agent.time_limit = o.time_limit.map(|secs| (std::time::Instant::now(), std::time::Duration::from_secs(secs)));
     // --review: a one-off run is checked once against the request before it
     // finishes. Opt-in: on alpha.19 it cost more and fixed nothing measured.

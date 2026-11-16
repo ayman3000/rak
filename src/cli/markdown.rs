@@ -80,6 +80,17 @@ pub fn inline(text: &str) -> String {
                 continue;
             }
         }
+        // `$\rightarrow$`: a short formula of known symbols, as its characters.
+        if c == '$' {
+            if let Some(end) = find(i + 1, &['$']).filter(|&end| end > i + 1 && end - i <= 40) {
+                let inner: String = chars[i + 1..end].iter().collect();
+                if let Some(symbols) = math(&inner).filter(|_| !inner.contains('\n')) {
+                    out.push_str(&symbols);
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
         if c == '*' && chars.get(i + 1) == Some(&'*') {
             if let Some(end) = find(i + 2, &['*', '*']).filter(|&end| end > i + 2 && !chars[i + 2..end].contains(&'*')) {
                 let inner: String = chars[i + 2..end].iter().collect();
@@ -105,6 +116,110 @@ pub fn inline(text: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Pure — unit-tested. A short LaTeX formula (what is between `$…$`) as
+/// plain characters, when every command in it is a known symbol: `\rightarrow`
+/// → `→`, `x \times y` → `x × y`, `90^\circ` → `90°`. None otherwise (prices
+/// like "$5 and $10", formulas this can't draw), so it stays as written.
+pub fn math(inner: &str) -> Option<String> {
+    const SYMBOLS: &[(&str, &str)] = &[
+        ("rightarrow", "→"),
+        ("to", "→"),
+        ("leftarrow", "←"),
+        ("gets", "←"),
+        ("leftrightarrow", "↔"),
+        ("Rightarrow", "⇒"),
+        ("implies", "⇒"),
+        ("Leftarrow", "⇐"),
+        ("Leftrightarrow", "⇔"),
+        ("iff", "⇔"),
+        ("uparrow", "↑"),
+        ("downarrow", "↓"),
+        ("mapsto", "↦"),
+        ("times", "×"),
+        ("cdot", "·"),
+        ("div", "÷"),
+        ("pm", "±"),
+        ("le", "≤"),
+        ("leq", "≤"),
+        ("ge", "≥"),
+        ("geq", "≥"),
+        ("ne", "≠"),
+        ("neq", "≠"),
+        ("approx", "≈"),
+        ("equiv", "≡"),
+        ("sim", "∼"),
+        ("infty", "∞"),
+        ("in", "∈"),
+        ("notin", "∉"),
+        ("subset", "⊂"),
+        ("cup", "∪"),
+        ("cap", "∩"),
+        ("forall", "∀"),
+        ("exists", "∃"),
+        ("neg", "¬"),
+        ("land", "∧"),
+        ("lor", "∨"),
+        ("sum", "∑"),
+        ("prod", "∏"),
+        ("sqrt", "√"),
+        ("partial", "∂"),
+        ("nabla", "∇"),
+        ("ldots", "…"),
+        ("dots", "…"),
+        ("cdots", "⋯"),
+        ("checkmark", "✓"),
+        ("circ", "∘"),
+        ("degree", "°"),
+        ("alpha", "α"),
+        ("beta", "β"),
+        ("gamma", "γ"),
+        ("delta", "δ"),
+        ("Delta", "Δ"),
+        ("epsilon", "ε"),
+        ("theta", "θ"),
+        ("lambda", "λ"),
+        ("mu", "μ"),
+        ("pi", "π"),
+        ("sigma", "σ"),
+        ("Sigma", "Σ"),
+        ("tau", "τ"),
+        ("phi", "φ"),
+        ("omega", "ω"),
+        ("Omega", "Ω"),
+    ];
+    if !inner.contains('\\') {
+        return None;
+    }
+    let inner = inner.replace("^{\\circ}", "°").replace("^\\circ", "°");
+    let chars: Vec<char> = inner.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                let name: String = chars[i + 1..].iter().take_while(|c| c.is_ascii_alphabetic()).collect();
+                if name.is_empty() {
+                    // `\,` `\;` `\ ` are spaces; anything else is not ours to draw.
+                    match chars.get(i + 1) {
+                        Some(',' | ';' | ' ' | ':') => out.push(' '),
+                        _ => return None,
+                    }
+                    i += 2;
+                    continue;
+                }
+                out.push_str(SYMBOLS.iter().find(|(n, _)| *n == name)?.1);
+                i += 1 + name.chars().count();
+            }
+            '{' | '}' => i += 1,
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    Some(out.trim().to_string())
 }
 
 /// A cell's alignment, from the separator row (`:--`, `:-:`, `--:`).
@@ -361,6 +476,19 @@ mod tests {
 
     fn plain(line: &str) -> String {
         render(line, &mut State::default())
+    }
+
+    #[test]
+    fn short_latex_formulas_of_known_symbols_become_characters() {
+        assert_eq!(inline(r"Start learning $\rightarrow$"), "Start learning →");
+        assert_eq!(inline(r"size $n \times m$, angle $90^\circ$, $\alpha \le \beta$"), "size n × m, angle 90°, α ≤ β");
+        assert_eq!(math(r"\Rightarrow").as_deref(), Some("⇒"));
+        assert_eq!(math(r"a \, b").as_deref(), Some("a   b"));
+        // Prices, unknown commands and code stay as written.
+        assert_eq!(inline("costs $5 and $10"), "costs $5 and $10");
+        assert_eq!(inline(r"$\frac{1}{2}$"), r"$\frac{1}{2}$");
+        assert_eq!(math("x + y"), None, "no command: not a formula this draws");
+        assert!(inline(r"`$\rightarrow$`").contains(r"$\rightarrow$"), "code is left alone");
     }
 
     #[test]

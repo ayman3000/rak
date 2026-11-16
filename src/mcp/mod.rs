@@ -22,7 +22,7 @@ mod config;
 
 #[cfg(unix)]
 pub use client::stop_all_servers_now;
-pub use client::{result_text, tool_info, Client, ToolInfo};
+pub use client::{render, result_text, tool_info, Client, ToolInfo};
 pub use config::{add_to_file, config_files, entry_json, load, parse_config, remove_from_file, ServerConfig, Transport};
 
 use crate::agent::ToolGroup;
@@ -56,12 +56,58 @@ impl Tool for McpTool {
         !self.info.read_only
     }
     fn run(&self, args: &Value) -> ToolResult {
-        match self.client.call_tool(&self.info.name, args) {
-            Ok((false, text)) => ToolResult::ok(text),
-            Ok((true, text)) => ToolResult::err(text),
-            Err(why) => ToolResult::err(format!("The {} server gave no result: {why}.", self.client.name)),
+        let result = match self.client.call_tool(&self.info.name, args) {
+            Ok(result) => result,
+            Err(why) => return ToolResult::err(format!("The {} server gave no result: {why}.", self.client.name)),
+        };
+        // Images (a browser's screenshot, say) are saved to a file the model
+        // can name, and the first one goes on to the model to look at.
+        let mut images = Vec::new();
+        let text = render(&result, &mut |kind, mime, data| {
+            if kind != "image" {
+                return format!("[{kind} not shown: {mime}]");
+            }
+            match save_image(&self.exposed, mime, data) {
+                Ok((path, image, about)) => {
+                    images.extend(image);
+                    format!("[image saved to {} ({about})]", path.display())
+                }
+                Err(why) => format!("[image not saved: {why}]"),
+            }
+        });
+        let mut out = if result["isError"] == true { ToolResult::err(text) } else { ToolResult::ok(text) };
+        if images.len() > 1 {
+            out.text.push_str("\n(Only the first image is shown to you; view_image opens the others.)");
         }
+        out.image = images.into_iter().next();
+        out
     }
+}
+
+/// Where images MCP tools return are saved.
+pub fn image_folder() -> std::path::PathBuf {
+    std::env::temp_dir().join("rak-images")
+}
+
+/// Saves an image a tool returned (base64 `data`) to `image_folder()`, named
+/// after the tool. Returns the file, the image for the model when it is small
+/// enough to send, and its size for people ("1212×844, 473 KB").
+pub fn save_image(tool: &str, mime: &str, data: &str) -> Result<(std::path::PathBuf, Option<crate::tools::Image>, String), String> {
+    let bytes = crate::text::base64_decode(data).ok_or("its data is not valid base64")?;
+    let Some(media_type) = crate::tools::image::media_type(&bytes) else {
+        return Err(format!("{mime} is not a PNG, JPEG, GIF or WebP image"));
+    };
+    let extension = media_type.trim_start_matches("image/").replace("jpeg", "jpg");
+    let folder = image_folder();
+    std::fs::create_dir_all(&folder).map_err(|e| format!("can't make {}: {e}", folder.display()))?;
+    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let path = folder.join(format!("{tool}-{millis}.{extension}"));
+    std::fs::write(&path, &bytes).map_err(|e| format!("can't write {}: {e}", path.display()))?;
+    let size = crate::tools::image::png_size(&bytes).map(|(w, h)| format!("{w}×{h}, ")).unwrap_or_default();
+    let about = format!("{size}{} KB", bytes.len() / 1024);
+    let image = (bytes.len() <= crate::tools::image::MAX_IMAGE_BYTES)
+        .then(|| crate::tools::Image { media_type: media_type.to_string(), data: crate::text::base64(&bytes) });
+    Ok((path, image, about))
 }
 
 /// Pure — unit-tested. The name a model sees for a server's tool: letters,
@@ -208,6 +254,29 @@ mod tests {
         let group = |id: &str| ToolGroup { id: id.into(), description: String::new(), tools: vec![] };
         let connected = Connected { groups: vec![(group("small"), 900), (group("big"), DEFER_OVER_CHARS + 1)], ..Default::default() };
         assert_eq!(connected.to_defer(), [group("big")]);
+    }
+
+    #[test]
+    fn an_image_a_tool_returns_is_saved_and_named_for_the_model() {
+        // A PNG's first bytes and its header with width 2, height 3.
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec();
+        png.extend([0, 0, 0, 2, 0, 0, 0, 3]);
+        let data = crate::text::base64(&png);
+        let (path, image, about) = save_image("browser__take_screenshot", "image/png", &data).unwrap();
+        assert!(path.starts_with(image_folder()) && path.to_string_lossy().ends_with(".png"));
+        assert_eq!(std::fs::read(&path).unwrap(), png);
+        assert_eq!(about, "2×3, 0 KB");
+        assert_eq!(image.unwrap().data, data);
+        let _ = std::fs::remove_file(&path);
+        assert!(save_image("t", "image/png", "not base64!").is_err());
+        assert!(save_image("t", "image/png", &crate::text::base64(b"plain text")).unwrap_err().contains("not a PNG"));
+        // In a result, each image's text comes from the caller; audio keeps its placeholder.
+        let result = json!({ "content": [
+            { "type": "text", "text": "Took a screenshot." },
+            { "type": "image", "mimeType": "image/png", "data": data },
+            { "type": "audio", "mimeType": "audio/wav", "data": "" } ] });
+        let text = render(&result, &mut |kind, mime, d| format!("<{kind} {mime} {}>", d.len()));
+        assert_eq!(text, format!("Took a screenshot.\n<image image/png {}>\n<audio audio/wav 0>", data.len()));
     }
 
     #[test]

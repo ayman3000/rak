@@ -25,6 +25,17 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.22. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### On main, not released
+
+- MCP images: a tool's image (chrome-devtools take_screenshot) was dropped
+  as "[image not shown]", and the model claimed it showed it. Now it is saved
+  to <temp>/rak-images/<tool>-<time>.png, the result names the file and its
+  size, and the first image goes to the model like view_image's: shown,
+  described by the vision model, or left out with a note (Agent::take_image,
+  for any tool's image).
+- Short LaTeX formulas of known symbols in answers are drawn as characters
+  ($\rightarrow$ as →); prices and unknown commands stay as written.
+
 ### In v0.1.0-alpha.22
 
 - A pasted image shows as `[image N]` in the line (its path goes with the

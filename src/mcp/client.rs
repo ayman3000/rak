@@ -116,11 +116,10 @@ impl Client {
         Ok(tools)
     }
 
-    /// Runs a tool. Ok is (the server called it an error, its text); Err is
-    /// a failure to get any answer.
-    pub fn call_tool(&self, tool: &str, arguments: &Value) -> Result<(bool, String), String> {
-        let result = self.request("tools/call", json!({ "name": tool, "arguments": arguments }), self.call_timeout)?;
-        Ok((result["isError"] == true, result_text(&result)))
+    /// Runs a tool: its `tools/call` result (see `render` for its content).
+    /// Err is a failure to get any answer.
+    pub fn call_tool(&self, tool: &str, arguments: &Value) -> Result<Value, String> {
+        self.request("tools/call", json!({ "name": tool, "arguments": arguments }), self.call_timeout)
     }
 
     fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
@@ -412,14 +411,21 @@ pub fn tool_info(tool: &Value) -> Option<ToolInfo> {
     Some(ToolInfo { name, description, schema, read_only: tool["annotations"]["readOnlyHint"] == true })
 }
 
-/// Pure — unit-tested. A `tools/call` result as text for the model.
+/// Pure — unit-tested. A `tools/call` result as text for the model, images
+/// and audio as placeholders.
 pub fn result_text(result: &Value) -> String {
+    render(result, &mut |kind, mime, _data| format!("[{kind} not shown: {mime}]"))
+}
+
+/// A `tools/call` result as text for the model; `media` gives the text for
+/// each image or audio item, from its kind ("image"), type and base64 data.
+pub fn render(result: &Value, media: &mut dyn FnMut(&str, &str, &str) -> String) -> String {
     let mut parts: Vec<String> = Vec::new();
     for item in result["content"].as_array().into_iter().flatten() {
         let part = match item["type"].as_str().unwrap_or("") {
             "text" => item["text"].as_str().unwrap_or("").to_string(),
-            "image" | "audio" => {
-                format!("[{} not shown: {}]", item["type"].as_str().unwrap_or(""), item["mimeType"].as_str().unwrap_or("unknown type"))
+            kind @ ("image" | "audio") => {
+                media(kind, item["mimeType"].as_str().unwrap_or("unknown type"), item["data"].as_str().unwrap_or(""))
             }
             "resource" => match item["resource"]["text"].as_str() {
                 Some(text) => text.to_string(),
