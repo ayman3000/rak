@@ -1,10 +1,10 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-16, after releasing v0.1.0-alpha.22. A working plan for picking the work up on another machine.
+Updated 2026-11-16, after releasing v0.1.0-alpha.23. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.22** (2026-11-16). It has everything
+- The newest release is **v0.1.0-alpha.23** (2026-11-16). It has everything
   below; `main` and the release match. The Harbor adapter installs it.
 - Rerun of the 6 lost benchmark tasks on alpha.16 (2026-11-16): mteb-leaderboard
   and sam-cell-seg passed, pytorch-model-recovery and session-window-debug got
@@ -25,7 +25,7 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.22. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
-### On main, not released
+### In v0.1.0-alpha.23
 
 - MCP images: a tool's image (chrome-devtools take_screenshot) was dropped
   as "[image not shown]", and the model claimed it showed it. Now it is saved
