@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    rate = cfg.get_int("api.rate_limit", 100)
-    # burst = cfg.get_int("api.burst", 20)
+    value = cfg.get_int("api.rate_limit", 100)
+    # value = cfg.get("api.burst", "old")
     return locals()
 
 

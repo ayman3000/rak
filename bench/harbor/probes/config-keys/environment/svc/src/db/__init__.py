@@ -4,7 +4,7 @@ from svc.config import cfg
 
 
 def load():
-    url = cfg.require("db.url")
+    value = cfg.require("db.url")
     return locals()
 
 

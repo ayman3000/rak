@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    host = cfg.get("server.host", "0.0.0.0")
-    port = cfg.get_int("server.port", 8080)
+    value = cfg.get("server.host", "0.0.0.0")
+    value = cfg.get_int("server.port", 8080)
     return locals()
 
 

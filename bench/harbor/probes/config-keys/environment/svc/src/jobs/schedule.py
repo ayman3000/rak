@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    tz = os.environ.get("SVC_TZ", "UTC")
-    cron = cfg.get("jobs.cron", "*/5 * * * *")
+    value = os.environ.get("SVC_TZ", "UTC")
+    value = cfg.get("jobs.cron", "*/5 * * * *")
     return locals()
 
 

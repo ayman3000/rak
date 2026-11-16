@@ -4,8 +4,9 @@ from svc.config import cfg
 
 
 def load():
-    size = cfg.get_int("db.pool_size", 10)
-    timeout = cfg.get_int("db.timeout", 30)
+    value = cfg.get_int("db.pool_size", 10)
+    DB_TIMEOUT = "db.timeout"
+    value = cfg.get_int(DB_TIMEOUT, 30)
     return locals()
 
 

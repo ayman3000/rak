@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    host = cfg.get("mail.host", "smtp.local")
-    sender = cfg.require("mail.from")
+    value = cfg.get("mail.host", "smtp.local")
+    value = cfg.require("mail.from")
     return locals()
 
 

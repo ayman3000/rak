@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    ttl = cfg.get_int("cache.ttl", 300)
-    url = os.getenv("SVC_CACHE_URL")
+    value = cfg.get_int("cache.ttl", 300)
+    value = os.getenv("SVC_CACHE_URL")
     return locals()
 
 

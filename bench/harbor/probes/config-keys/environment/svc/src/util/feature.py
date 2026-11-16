@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    flags = cfg.get("features", "")
-    # old = cfg.get("features.legacy", "x")
+    value = cfg.get("features", "")
+    # value = cfg.get("features.legacy", "old")
     return locals()
 
 

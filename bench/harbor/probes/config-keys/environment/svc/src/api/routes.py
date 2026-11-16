@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    prefix = cfg.get("api.prefix", "/v1")
-    host = cfg.get("server.host", "0.0.0.0")
+    value = cfg.get("api.prefix", "/v1")
+    value = cfg.get("server.host", "0.0.0.0")
     return locals()
 
 

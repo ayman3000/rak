@@ -18,6 +18,23 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.16. A working plan for picking 
   tasks. Oracle passes all five and nop fails them, on Runta. The adapter
   skips `--time-limit` for releases before alpha.16. Not run with a model
   yet: needs the Ollama key (`~/rak-frontier/run-probes.sh SETUP`).
+- Probe results (2026-11-16, deepseek-v4.1-flash, 2 attempts each). The
+  first version was too easy (10/10 on a15 in under a minute each), so
+  config-keys grew to 57 files, invoice-cli to 19 checks, the puzzle to a
+  4x4 with a 54-move optimum, and stats-timed's limit to 50 s.
+  - Thinking: `--effort low` solved the puzzle 2/2 with 2.5K output tokens
+    in 0.8 min, against 29K and 4.3 min at the default (a16, 2/2) and 1/2
+    on a15 (one ran out of its 15 min). Lower output everywhere; one
+    config-keys failure on low (its table did not parse), unclear why.
+  - Time: on stats-timed both a15 runs hit the 50 s limit (the core was
+    already saved, so they passed); both a16 runs finished in time and got
+    time warnings.
+  - Batching: no change; tool calls per model call stayed about 1.0-1.1 on
+    every setup, so the prompt rule alone does not make DeepSeek batch.
+  - Near misses: no gain seen; one a16 invoice run missed the rounding of
+    shown prices (the instruction was ambiguous there and is now clearer).
+  - Stopping: one model call after the tests first passed, on every setup.
+  - Two attempts per setup is too few to call small differences.
 
 ### In v0.1.0-alpha.16
 

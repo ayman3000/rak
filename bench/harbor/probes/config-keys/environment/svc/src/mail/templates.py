@@ -4,7 +4,7 @@ from svc.config import cfg
 
 
 def load():
-    folder = cfg.get("mail.templates", "templates/mail")
+    value = cfg.get("mail.templates", "templates/mail")
     return locals()
 
 

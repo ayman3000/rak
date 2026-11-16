@@ -4,8 +4,11 @@ from svc.config import cfg
 
 
 def load():
-    workers = cfg.get_int("jobs.workers", 4)
-    queue = cfg.get("jobs.queue", "default")
+    value = cfg.get_int("jobs.workers", 4)
+    value = cfg.get(
+        "jobs.queue",
+        "default",
+    )
     return locals()
 
 

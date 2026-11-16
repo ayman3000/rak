@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    url = cfg.require("db.url")
-    dry = os.getenv("SVC_MIGRATE_DRY")
+    value = cfg.require("db.url")
+    value = os.getenv("SVC_MIGRATE_DRY")
     return locals()
 
 

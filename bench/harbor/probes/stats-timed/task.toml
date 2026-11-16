@@ -3,13 +3,13 @@ artifacts = []
 
 [task]
 name = "rak-probes/stats-timed"
-description = "A many-option tool under a 6-minute limit; the reward needs only the core. Measures time awareness: whether the agent saves a working core before the limit."
+description = "A many-option tool under a 50-second limit; the reward needs only the core. Measures time awareness: whether the agent saves a working core before the limit."
 
 [verifier]
 timeout_sec = 300.0
 
 [agent]
-timeout_sec = 360.0
+timeout_sec = 50.0
 
 [environment]
 build_timeout_sec = 600.0

@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    on = os.environ.get("SVC_METRICS", "off")
-    port = cfg.get_int("metrics.port", 9100)
+    value = os.environ.get("SVC_METRICS", "off")
+    value = cfg.get_int("metrics.port", 9100)
     return locals()
 
 

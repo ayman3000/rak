@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    token = cfg.require("api.token")
-    ttl = cfg.get_int("api.token_ttl", 3600)
+    value = cfg["api.token"]
+    value = cfg.get_int("api.token_ttl", 3600)
     return locals()
 
 

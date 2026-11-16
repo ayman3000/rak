@@ -73,7 +73,7 @@ def trial_stats(trial: Path) -> dict | None:
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else Path.home() / "rak-frontier" / "probe-jobs")
     rows = []
-    for setup in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("20")):
+    for setup in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(("20", "_"))):
         by_task: dict[str, list[dict]] = {}
         for trial in setup.glob("*/*__*"):
             stats = trial_stats(trial)

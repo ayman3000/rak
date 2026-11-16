@@ -4,8 +4,8 @@ from svc.config import cfg
 
 
 def load():
-    level = os.environ.get("SVC_LOG_LEVEL", "info")
-    fmt = cfg.get("log.format", "json")
+    value = os.environ.get("SVC_LOG_LEVEL", "info")
+    value = cfg.get("log.format", "json")
     return locals()
 
 
