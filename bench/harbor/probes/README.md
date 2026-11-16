@@ -8,8 +8,9 @@ rak setups without tuning rak on the FrontierHarness tasks themselves.
 | `config-keys` | Batching: a 15-file survey; model calls per task, tool calls per call | 15 min |
 | `invoice-cli` | Near misses: 14 hidden checks of small, exact requirements | 15 min |
 | `pager-fix` | Stopping: model calls made after the tests first pass | 15 min |
-| `stats-timed` | Time awareness: a long spec under 6 minutes; the reward needs only the core | 6 min |
-| `sliding-puzzle` | Thinking: an optimal 8-puzzle solution (31 moves); output tokens and time | 15 min |
+| `stats-timed` | Time awareness: a long spec under 50 seconds; the reward needs only the core | 50 s |
+| `sliding-puzzle` | Thinking: an optimal 4x4 puzzle solution (54 moves); output tokens and time | 15 min |
+| `queue-rules` | Docs over comments: three bugs given as symptoms; DESIGN.md has the rules and the code's comments argue for the bugs (the shape of session-window-debug, in another domain) | 15 min |
 
 Each task has a reference solution (`solution/solve.sh`) and a checker
 (`tests/check.py`) that writes the reward and a `ctrf.json` with every check,

@@ -25,6 +25,22 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.18. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### On main, not released
+
+- Review before the answer: a one-off run (not a chat) that changed
+  something is sent back once, at its first final answer, to list each
+  requirement, rule and symptom in the request and its docs, quote it, name
+  the check it ran, and fix what has none or fails; docs win over code
+  comments. rak sends it, so it does not depend on the model following a
+  prompt rule. Skipped with under 15% of `--time-limit` left; `--no-review`
+  turns it off. About 1-3 extra model calls.
+- New probe `queue-rules`: a job queue with three bugs given as symptoms;
+  DESIGN.md has the rules and the code's comments argue for the bugs (the
+  shape of session-window-debug in another domain). Checked locally: the
+  unfixed code passes 3/8 checks, the reference fix 8/8.
+- To try on release: DeepSeek on the 6 probes and the two tasks, then Kimi K3
+  on queue-rules and session-window-debug, 2 attempts each.
+
 ### In v0.1.0-alpha.18
 
 - Contract and symptom rule in the system prompt: code others call keeps the

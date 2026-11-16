@@ -1,0 +1,21 @@
+schema_version = "1.1"
+artifacts = []
+
+[task]
+name = "rak-probes/queue-rules"
+description = "Fix three bugs from their symptoms; DESIGN.md has the rules and the code's comments argue for the bugs. Measures whether the agent checks each rule from the docs, not from its own reading."
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 32768
+gpus = 0
+allow_internet = true
+mcp_servers = []

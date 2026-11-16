@@ -485,6 +485,8 @@ pub fn run(mut o: Options) -> i32 {
     agent.defer(deferred);
     // Counted from here: start-up before this takes milliseconds.
     agent.time_limit = o.time_limit.map(|secs| (std::time::Instant::now(), std::time::Duration::from_secs(secs)));
+    // A one-off run is reviewed before it finishes: nobody else is there to.
+    agent.review = !chat && !o.no_review && !o.read_only;
     if !o.read_only {
         agent.gate = rak::notes::Gate::from_instructions(&project_notes.instructions);
     }

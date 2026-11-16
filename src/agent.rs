@@ -188,6 +188,11 @@ pub struct Agent {
     /// says how long there is, and past 70% and 90% the model is told how
     /// much is left. None: no limit.
     pub time_limit: Option<(Instant, Duration)>,
+    /// Review before the first final answer of a request that changed something:
+    /// the model is sent back once to check each requirement, rule and symptom
+    /// in the request and its docs against a check it ran. rak sets it for a
+    /// one-off run (nobody is there to review), not in a chat.
+    pub review: bool,
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,
     loaded: Vec<String>,
@@ -224,6 +229,7 @@ impl Agent {
             fallback: None,
             input_budget: None,
             time_limit: None,
+            review: false,
             switches: Vec::new(),
             groups: Vec::new(),
             loaded: Vec::new(),
@@ -476,6 +482,7 @@ impl Agent {
         let mut failed: Vec<(String, String)> = Vec::new();
         let mut repairs = 0;
         let mut gate_asks = 0;
+        let mut reviewed = false;
         self.acted = false;
         self.changed.clear();
         if let Some(gate) = self.gate.as_mut() {
@@ -586,6 +593,16 @@ impl Agent {
                 if let Some(note) = self.finish_check.as_mut().and_then(|check| check()) {
                     (self.on_event)(&Event::Note("the task list has open steps: asked to finish them"));
                     self.messages.push(json!({ "role": "user", "content": note }));
+                    continue;
+                }
+                // A one-off run that changed something is reviewed once against
+                // the request and its docs: a model's own tests check only its
+                // own reading. Skipped with little time or turns left.
+                let time_left = self.time_limit.is_none_or(|(start, limit)| start.elapsed() < limit.mul_f64(0.85));
+                if self.review && self.acted && !reviewed && time_left && turn < self.config.max_turns {
+                    reviewed = true;
+                    (self.on_event)(&Event::Note("reviewing the work against the request before finishing"));
+                    self.messages.push(json!({ "role": "user", "content": REVIEW_NOTE }));
                     continue;
                 }
                 return RunResult { outcome: Outcome::Done, answer: reply.content, turns: turn };
@@ -1056,6 +1073,14 @@ pub fn trim_keeping(
 /// RepairRetryPolicy: 3).
 const MAX_REPAIRS: usize = 3;
 
+/// Sent once before the first final answer of a reviewed run (`Agent::review`).
+pub const REVIEW_NOTE: &str = "[review] Before you finish, check your work against what was asked. List each \
+    requirement, rule and symptom stated in the request and in any docs it points to or that came with the code \
+    (design notes, specs, READMEs). For each one, quote its sentence, name the check you ran for it (a command, a \
+    test, a case built from that sentence's own words), and say whether it passed. Where code or its comments \
+    disagree with those docs, the docs win. Fix anything that has no check or fails, then give your final summary \
+    again.";
+
 /// Pure — unit-tested. Whether a tool error is one the model can act on: not
 /// a call to a tool that does not exist (SwiftAgentKit leaves those out too).
 /// A time left, said plainly: "12 minutes", "1 minute", "under a minute".
@@ -1261,6 +1286,41 @@ mod tests {
             s.agent.history().iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str().map(str::to_string)).collect();
         assert!(notes[0].starts_with("explore\n\n[time note] You have under a minute for this task"), "{}", notes[0]);
         assert!(notes[1].starts_with("[time note] Only"), "{}", notes[1]);
+    }
+
+    fn user_notes(agent: &Agent) -> Vec<String> {
+        agent.history().iter().filter(|m| m["role"] == "user").filter_map(|m| m["content"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_reviewed_run_that_changed_something_is_sent_back_once_before_it_finishes() {
+        let write = || Ok(call("write_file", json!({ "path": "hi.txt", "content": "hello" })));
+        let mut s = setup("review", vec![write(), Ok(text("first")), Ok(text("checked: all pass"))], 10);
+        s.agent.review = true;
+        let result = s.agent.run("make hi.txt");
+        assert_eq!(result.outcome, Outcome::Done);
+        assert_eq!(result.answer, "checked: all pass", "the answer after the review is the one given");
+        assert_eq!(result.turns, 3);
+        let notes = user_notes(&s.agent);
+        assert_eq!(notes.iter().filter(|n| n.starts_with("[review]")).count(), 1, "{notes:?}");
+    }
+
+    #[test]
+    fn no_review_without_changes_in_a_chat_or_with_little_time_left() {
+        // Nothing changed: a question needs no review.
+        let mut s = setup("review-read", vec![Ok(call("list_dir", json!({ "path": "." }))), Ok(text("answer"))], 10);
+        s.agent.review = true;
+        assert_eq!(s.agent.run("what is here?").answer, "answer");
+        // A chat (review off).
+        let write = || Ok(call("write_file", json!({ "path": "hi.txt", "content": "hello" })));
+        let mut s = setup("review-chat", vec![write(), Ok(text("done"))], 10);
+        assert_eq!(s.agent.run("make hi.txt").answer, "done");
+        // 90% of the time is gone: finishing beats reviewing.
+        let mut s = setup("review-late", vec![write(), Ok(text("done"))], 10);
+        s.agent.review = true;
+        s.agent.time_limit = Some((Instant::now() - Duration::from_secs(540), Duration::from_secs(600)));
+        assert_eq!(s.agent.run("make hi.txt").answer, "done");
+        assert!(!user_notes(&s.agent).iter().any(|n| n.starts_with("[review]")));
     }
 
     /// Records how calls reached it: together, in batches, or one by one.

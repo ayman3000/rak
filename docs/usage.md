@@ -122,6 +122,7 @@ Started without a task, rak opens a chat:
 | `--max-turns N` | Model calls allowed per request. Default: 30 in a chat (where you can say "go on"), no limit for one request; `0` for no limit. |
 | `--helper-budget N` | Input tokens one `delegate` helper may spend. Default 200000; `0` for no cap. |
 | `--time-limit SECS` | The time this run has, counted from start. The task tells the model, and it is warned at 70% and 90% to finish the essential work and save its outputs. For benchmarks and CI jobs with a timeout. |
+| `--no-review` | Skip the review a one-off run does before its answer. By default, when a run (not a chat) changed something, the model is sent back once to list each requirement, rule and symptom in the request and the docs it points to, quote it, and name the check it ran for it; with under 15% of `--time-limit` left the review is skipped. |
 | `--json` | Print one JSON object: answer, outcome, turns, tool calls, tokens, seconds. |
 | `--log FILE` | Append every step to FILE as JSON lines. |
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |
