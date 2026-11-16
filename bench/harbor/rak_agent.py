@@ -18,6 +18,8 @@ Options (`--ak key=value`; see `harbor agent schema`):
     context           the model's context window in tokens   (rak --context)
     max_tokens        the model's longest reply               (rak --max-tokens)
     reasoning_effort  low, medium, high (also --effort)       (rak --effort)
+    review            true: review before the answer (rak --review; opt-in from alpha.20)
+    no_review         true: skip it on alpha.19, where it was on by default (rak --no-review)
 
 Written for Harbor 0.26 (BaseInstalledAgent with ModelConnectionSpec).
 """
@@ -52,6 +54,12 @@ class RakOptions(InstalledAgentOptions):
     )
     reasoning_effort: Annotated[str | None, Cli("--effort")] = Field(
         default=None, description="Reasoning effort: low, medium or high."
+    )
+    review: Annotated[bool | None, Cli("--review")] = Field(
+        default=None, description="Review the work against the request before answering (alpha.20 and later)."
+    )
+    no_review: Annotated[bool | None, Cli("--no-review")] = Field(
+        default=None, description="Skip the review before the answer (alpha.19, where it was on by default)."
     )
 
 

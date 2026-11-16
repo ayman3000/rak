@@ -191,7 +191,7 @@ pub struct Agent {
     /// Review before the first final answer of a request that changed something:
     /// the model is sent back once to check each requirement, rule and symptom
     /// in the request and its docs against a check it ran. rak sets it for a
-    /// one-off run (nobody is there to review), not in a chat.
+    /// one-off run with --review, not in a chat.
     pub review: bool,
     /// Groups hidden until loaded, and the ids loaded so far in this conversation.
     groups: Vec<ToolGroup>,

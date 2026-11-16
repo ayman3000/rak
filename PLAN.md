@@ -25,6 +25,13 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.19. A working plan for picking 
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
 
+### On main, not released
+
+- The review before the answer is opt-in (`--review`); `--no-review` is
+  still accepted. The adapter has `--ak review=true` (and `no_review=true`
+  for alpha.19). Open: queue-rules without the review, 2 runs, to see
+  whether the review is what made it pass.
+
 ### In v0.1.0-alpha.19
 
 - Review before the answer: a one-off run (not a chat) that changed
