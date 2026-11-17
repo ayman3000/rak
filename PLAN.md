@@ -1,12 +1,20 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-17, after releasing v0.1.0-alpha.26. A working plan for picking the work up on another machine.
+Updated 2026-11-17, after releasing v0.1.0-alpha.27. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.26** (2026-11-17). It has everything
-  below except alpha.25's prompt rule, which it takes out; `main` and the
+- The newest release is **v0.1.0-alpha.27** (2026-11-17). It has everything
+  below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
+
+### In v0.1.0-alpha.27
+
+- A plain `rak update` only installs a release newer than the running rak;
+  a build newer than every release is left alone and says so. A version
+  named on the command line is still installed, older or not.
+- `rak update` passes the installer to `sh -s` on stdin; it is no longer
+  written to a predictable file in the temp folder.
 
 ### In v0.1.0-alpha.26
 
