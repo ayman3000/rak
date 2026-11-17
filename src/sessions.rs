@@ -89,10 +89,30 @@ pub fn save(dir: &Path, key: &str, id: &str, history: &[Value], model: &str) -> 
     std::fs::write(&partial, body.to_string()).map_err(|e| format!("cannot write {}: {e}", partial.display()))?;
     std::fs::rename(&partial, &path).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
     set_current(id);
-    for old in list(dir, key).into_iter().skip(KEEP) {
-        let _ = std::fs::remove_file(old.path);
+    for old in past_keep(&folder, &path) {
+        let _ = std::fs::remove_file(old);
     }
     Ok(path)
+}
+
+/// The project's chats past the newest `KEEP`, by when each file was last
+/// written. No chat is opened: this runs after every request, and reading
+/// thirty long chats to find the oldest took longer than saving one. The
+/// time a file was written is the time it was saved, so a chat resumed
+/// today counts as new whatever its id; the chat just saved always stays.
+fn past_keep(folder: &Path, just_saved: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    let mut chats: Vec<(SystemTime, PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if chats.len() <= KEEP {
+        return Vec::new();
+    }
+    // Newest first; two written at the same instant go by name, as `list` does.
+    chats.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    chats.into_iter().skip(KEEP).map(|(_, path)| path).filter(|path| path != just_saved).collect()
 }
 
 /// The project's chats, newest first.
@@ -182,6 +202,38 @@ mod tests {
             save(&dir, key, &format!("9{n:03}-000"), &chat("x"), "m").unwrap();
         }
         assert_eq!(list(&dir, key).len(), KEEP);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_oldest_written_chats_go_and_a_resumed_old_one_stays() {
+        let dir = temp_dir("sessions-prune");
+        let key = "app-00000000";
+        let chat = vec![json!({ "role": "user", "content": "x" })];
+        // Written one second apart, oldest first, whatever the clock's grain.
+        let written_at = |path: &Path, second: u64| {
+            let at = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + second);
+            std::fs::File::options().write(true).open(path).unwrap().set_modified(at).unwrap();
+        };
+        for n in 0..KEEP {
+            let path = save(&dir, key, &format!("1{n:03}-000"), &chat, "m").unwrap();
+            written_at(&path, n as u64);
+        }
+        let ids = |dir: &Path| -> Vec<String> { list(dir, key).iter().map(|c| id_of(&c.path)).collect() };
+        // The oldest id is picked up again and saved now: it is the newest chat.
+        save(&dir, key, "1000-000", &chat, "m").unwrap();
+        assert_eq!(ids(&dir).len(), KEEP, "thirty chats, none past the limit");
+        // A new chat: one must go, and it is the one written longest ago, not the lowest id.
+        save(&dir, key, "2000-000", &chat, "m").unwrap();
+        let left = ids(&dir);
+        assert_eq!(left.len(), KEEP);
+        assert!(left.contains(&"1000-000".to_string()), "the resumed chat stays");
+        assert!(left.contains(&"2000-000".to_string()), "and the one just saved");
+        assert!(!left.contains(&"1001-000".to_string()), "the chat written longest ago went: {left:?}");
+        // Other files in the folder are never touched.
+        std::fs::write(dir.join(key).join("notes.txt"), "mine").unwrap();
+        save(&dir, key, "3000-000", &chat, "m").unwrap();
+        assert!(dir.join(key).join("notes.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

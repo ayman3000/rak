@@ -8,6 +8,14 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.31. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- Saving a chat no longer opens every other chat: the clean-up past 30 goes
+  by each file's write time (sessions::past_keep), not by parsing them all.
+  Measured with 30 chats, median of 9: saving one went 3.4 → 0.5 ms at
+  100 KB a chat, 28.0 → 2.3 ms at 1 MB, 149.0 → 15.7 ms at 5 MB.
+  Listing is unchanged (3.0 / 25.4 / 136.0 ms): it still parses each chat.
+
 ### In v0.1.0-alpha.31
 
 - `Thinking… 12s` while a model call is out and nothing is arriving: one dim
