@@ -1,10 +1,10 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-16, after releasing v0.1.0-alpha.24. A working plan for picking the work up on another machine.
+Updated 2026-11-17, after releasing v0.1.0-alpha.25. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.24** (2026-11-16). It has everything
+- The newest release is **v0.1.0-alpha.25** (2026-11-17). It has everything
   below; `main` and the release match. The Harbor adapter installs it.
 - Rerun of the 6 lost benchmark tasks on alpha.16 (2026-11-16): mteb-leaderboard
   and sam-cell-seg passed, pytorch-model-recovery and session-window-debug got
@@ -24,6 +24,14 @@ Updated 2026-11-16, after releasing v0.1.0-alpha.24. A working plan for picking 
     did not catch either.
 - Next: run the probes on alpha.17 (`~/rak-frontier/run-probes.sh a17`) when a
   key is available.
+
+### In v0.1.0-alpha.25
+
+- The system prompt: numbers the request states are checked against the
+  output; a measured target is met with room to spare and measured from the
+  saved result in a fresh process; an exact value is matched exactly;
+  something unexpected is looked into, not explained away. From the
+  Terminal-Bench 2.1 trials (31/40 on alpha.24, below).
 
 ### In v0.1.0-alpha.24
 
@@ -482,7 +490,8 @@ frontierharness@runta.com (the owner's step).
 huggingface.co/spaces/joelniklaus/harness-leaderboard ranks harnesses on
 Terminal-Bench 2.1 and DeepSWE v1.1 with the open model held fixed
 (GLM-5.3-Flash, DeepSeek-V4.1-Flash, Flint), three attempts each, through
-Harbor. Top seven within 48.5-52%; cost per trial $0.097 (Pi) to $0.34. rak
+Harbor. Top seven within 48.5-52% (2026-11-16: 49.3-52.5%, cost per trial
+$0.48 Pi to $0.64; the 11-14 note said $0.097-$0.34). rak
 meets its six entry rules; the aim is the cost frontier. Added by asking on
 the Space's Community tab (the owner's step, public).
 
@@ -494,9 +503,38 @@ the Space's Community tab (the owner's step, public).
       (DeepSeek's rule); only to a server that sent it.
 - [x] Harbor adapter: bench/harbor/rak_agent.py (not run yet).
 - [x] Released in alpha.10.
-- [ ] A trial: ~10 Terminal-Bench 2.1 tasks,
-      one attempt, deepseek-v4.1-flash, Docker on this Mac (not installed
-      2026-11-14).
+- [x] A trial (2026-11-16, alpha.24, Runta, -n 5): 10 Terminal-Bench 2.1
+      tasks, one attempt, deepseek-v4.1-flash: 8/10 in 34 min. Passed
+      build-cython-ext, fix-code-vulnerability, git-leak-recovery,
+      modernize-scientific-stack, mteb-retrieve, path-tracing-reverse,
+      pytorch-model-recovery, torch-tensor-parallelism. Failed dna-assembly
+      (a reverse primer anneals 48 nt; the task says 15-45) and raman-fitting
+      (fitted the raw x axis, 3745/6327, without converting to Raman shift
+      cm-1; it noticed the odd units and explained them away). 295 calls,
+      6.93M input (6.51M cached, 94%), 0.65M output; per trial ~30 calls,
+      ~43K uncached input, ~65K output. At DeepInfra's standard rate
+      ($0.20 in, $0.006 cached, $0.60 out per M) that is $0.51 for all 10,
+      ~$0.05 a trial; at $0.30/$0.06/$1.20 ~$0.13. Board (2026-11-16, read
+      from a screenshot): cost/trial $0.48 (Pi) to $0.78, averaged over all
+      four models and both benchmarks, so not directly comparable;
+      DeepSeek column 53.8-70.8%, top OpenCode 70.8%.
+- [x] 30 more (2026-11-16, random from the other 79, seed 20261116,
+      batches/tb21-30.txt): 23/30 in 2 h 4 min. With the first 10: 31/40
+      (77.5%). 1257 turns, 40.7M input (97% cached), 2.2M output; $1.78 at
+      the standard rate (~$0.06 a trial), $5.35 at the high one. Failed:
+      train-fasttext (0.6276 on its own split, 0.598 in the grader; need
+      0.62) and tune-mjcf (fast enough on its own run, 71% vs 60% in the
+      grader): a measured target met with no margin. large-scale-text-editing
+      (`wq` with no `:`, the test wants `:wq`); bn-fit-modify (edge
+      directions wrong); filter-js-from-html (XSS cases let through);
+      sam-cell-seg (IoU 0.15); make-mips-interpreter (out of time, no frame).
+- [x] From both trials, in the system prompt (2026-11-17, not released):
+      numbers the request states are checked against the output before the
+      answer; a measured target (accuracy, speed, size) is met with room to
+      spare and measured from the saved result in a fresh process; an exact
+      value is matched exactly; something unexpected (odd units, a value out
+      of range) is looked into, not explained away. Aimed at dna-assembly,
+      train-fasttext, tune-mjcf and raman-fitting. Not yet run on them.
 
 ## Project notes in rak/ (from Naseem, built 2026-11-13, released in alpha.7)
 
