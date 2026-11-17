@@ -15,12 +15,13 @@ usage: rak keys            create the file if there is none; show every provider
                            (the old file is saved next to it as .env.bak)";
 
 pub fn run(args: &[String]) -> ! {
+    // Before the help check: `rak keys set --help` has its own text.
+    if args.first().is_some_and(|a| a == "set") {
+        super::add_key::command(&args[1..]);
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{USAGE}");
         std::process::exit(0);
-    }
-    if args.first().is_some_and(|a| a == "set") {
-        super::add_key::command(&args[1..]);
     }
     let updating = match args {
         [] => false,
