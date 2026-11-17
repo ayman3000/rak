@@ -382,6 +382,8 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     s.model = model.to_string();
     *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
     remember_model(&s.backend.memory_key(), model);
+    // And for the next chat in this folder.
+    super::settings::save_pick(&s.backend.memory_key(), model);
     s.log.write(json!({ "event": "model", "model": model, "provider": s.backend.provider.as_deref().unwrap_or("custom") }));
     let via = if say_where { format!(" at {}", provider_label(&s.backend)) } else { String::new() };
     println!("Now using {}{via}.", paint(color, Style::Bold, model));
@@ -461,8 +463,8 @@ fn pick_effort(current: Option<&str>, color: bool) -> Option<Option<String>> {
     }
 }
 
-/// Sends the chat's next requests (and its helpers') with this effort. For
-/// this chat only: RAK_EFFORT in ~/.config/rak/.env keeps one.
+/// Sends the chat's next requests (and its helpers') with this effort, and
+/// keeps it for the next chat in this folder.
 fn set_effort(s: &mut Session, effort: Option<String>) {
     let color = s.ui.borrow().out_color;
     s.o.effort = effort.clone();
@@ -471,11 +473,13 @@ fn set_effort(s: &mut Session, effort: Option<String>) {
     *s.helper_effort.borrow_mut() = (effort.clone(), false);
     s.agent.set_model(make_provider(&s.o, &s.backend, &s.model, &s.stop));
     s.log.write(json!({ "event": "effort", "effort": effort }));
-    println!(
-        "Effort: {} for this chat. {}",
-        paint(color, Style::Bold, &effort_label(effort.as_deref())),
-        paint(color, Style::Dim, "To keep one, set RAK_EFFORT in ~/.config/rak/.env.")
-    );
+    super::settings::save_pick_effort(effort.as_deref());
+    let kept = if super::settings::keeps_picks() {
+        "Chats in this folder start with it; RAK_EFFORT in ~/.config/rak/.env sets it everywhere."
+    } else {
+        "To keep one, set RAK_EFFORT in ~/.config/rak/.env."
+    };
+    println!("Effort: {}. {}", paint(color, Style::Bold, &effort_label(effort.as_deref())), paint(color, Style::Dim, kept));
 }
 
 /// Runs a slash command. False means leave the chat.

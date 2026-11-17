@@ -31,13 +31,15 @@ rak knows these providers by name. Each gets its own address and only its own ke
 |---|---|---|
 | The key file | `RAK_PROVIDER=…` and `RAK_MODEL=…` | until you change it |
 | The command line | `rak --provider groq -m MODEL "…"` | that run |
-| In a chat | `/provider NAME`, `/model NAME` | that chat; the model is remembered |
+| In a chat | `/provider NAME`, `/model NAME` | that chat, and the next chats in that folder |
 
-**Reasoning effort** works the same way: `RAK_EFFORT=high` in the key file, `--effort high` for one run (it wins over the file), `/effort high` in a chat (that chat only). It is sent as `reasoning_effort`, or as Anthropic's `output_config.effort`. `xhigh` and `max` are not taken by every model.
+**Reasoning effort** works the same way: `RAK_EFFORT=high` in the key file, `--effort high` for one run (it wins over the file), `/effort high` in a chat (kept for that folder, see below). It is sent as `reasoning_effort`, or as Anthropic's `output_config.effort`. `xhigh` and `max` are not taken by every model.
 
 With nothing set, a chat starts at `medium`, and a one-off run (`rak "…"`, `--json`) sends none, so scripts and benchmarks get the model's own default. If a model's server refuses the chat's `medium` (a 400), rak asks once more without it and sends that model none for the rest of the run. An effort you set yourself is never dropped: the server's answer is shown instead. `default` (in `RAK_EFFORT`, `--effort` or `/effort`) sends none, in a chat too.
 
-**Which model is used:** in a chat, `-m` if given, then the model you last picked for that provider, then `RAK_MODEL`, then a list to pick from. A one-off run (`rak "…"`) uses `-m`, then `RAK_MODEL`, then your last pick, so scripts stay predictable. `RAK_MODEL` belongs to the provider in `RAK_PROVIDER`, not to one chosen with `--provider`.
+**A folder remembers its pick.** When you switch with `/provider`, `/model` or `/effort`, rak notes it in the project folder as `.rak/model`: the provider's name, the model's name and the effort, never a key or an address. The next chat started in that folder begins there. `--provider`, `--base-url`, `-m`, `--effort`, and `RAK_PROVIDER` or `RAK_BASE_URL` in the environment win over it for that run. A one-off run (`rak "…"`) does not read it. If the provider's key is no longer set, rak says so and starts with your default. The file is plain text: commit it to share the pick with a team, or add `.rak/model` to `.gitignore` to keep it to yourself. In a folder you have not trusted (see [Safety](safety.md)) it is neither read nor written.
+
+**Which model is used:** in a chat, `-m` if given, then the model picked last in this folder (when the chat is at the provider it was picked at), then the model you last picked for that provider anywhere, then `RAK_MODEL`, then a list to pick from. A one-off run (`rak "…"`) uses `-m`, then `RAK_MODEL`, then your last pick, so scripts stay predictable. `RAK_MODEL` belongs to the provider in `RAK_PROVIDER`, not to one chosen with `--provider`.
 
 ```bash
 # Ollama on this machine: nothing to set

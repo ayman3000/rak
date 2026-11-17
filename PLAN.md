@@ -8,6 +8,16 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.29. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- A folder remembers its pick: `/provider`, `/model` and `/effort` write
+  `.rak/model` in the project folder (provider, model, effort: names only,
+  no other line is read), and the next chat there starts with them. Flags
+  and RAK_PROVIDER/RAK_BASE_URL in the environment win; a one-off run does
+  not read it; a provider whose key is gone is said and skipped. Read and
+  written only in a trusted folder; the file does not itself ask for trust.
+- `rak keys set --help` prints its own help (was the `rak keys` text).
+
 ### In v0.1.0-alpha.29
 
 - Keys without opening the file: `rak keys set NAME` (a provider, a key's

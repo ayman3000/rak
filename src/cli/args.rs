@@ -39,7 +39,8 @@ MODEL
       --no-stream         wait for each whole reply instead of showing it as it arrives
 
   In a chat, the model can be left out: rak uses the one picked last with
-  /model, or lists the server's models to pick from.
+  /model, or lists the server's models to pick from. A chat starts with the
+  provider, model and effort picked last in its folder (.rak/model).
 
 KEYS (run `rak keys` to create the key file from a template)
   Read from the environment, then ./.env in the project, then

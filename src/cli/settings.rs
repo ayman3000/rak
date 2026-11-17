@@ -64,6 +64,92 @@ pub fn remember_model(provider: &str, model: &str) {
     let _ = std::fs::write(file, text);
 }
 
+// MARK: - The pick kept in the project folder
+
+/// The provider, model and effort picked last in a chat in this folder, kept
+/// in the folder itself as `.rak/model`: three names, never a key or an
+/// address. A chat started here begins with them; a one-off run does not.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Pick {
+    /// A provider's name, or the address of a server rak doesn't know by name.
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    /// A level, or "default" for none.
+    pub effort: Option<String>,
+}
+
+const PICK_HEAD: &str = "# The provider, model and effort picked last in a rak chat in this folder.\n\
+# rak writes this file; a chat started here begins with them. No key is kept here.\n";
+
+/// Pure — unit-tested. Any other line (a key, an address) is not read.
+pub fn parse_pick(text: &str) -> Pick {
+    let mut pick = Pick::default();
+    for (name, value) in parse_models(text) {
+        match name.as_str() {
+            "provider" => pick.provider = Some(value),
+            "model" => pick.model = Some(value),
+            "effort" => pick.effort = Some(value),
+            _ => {}
+        }
+    }
+    pick
+}
+
+/// Pure — unit-tested.
+pub fn pick_text(pick: &Pick) -> String {
+    let mut text = PICK_HEAD.to_string();
+    for (name, value) in [("provider", &pick.provider), ("model", &pick.model), ("effort", &pick.effort)] {
+        if let Some(value) = value {
+            text.push_str(&format!("{name}={value}\n"));
+        }
+    }
+    text
+}
+
+fn pick_file(project: &Path) -> PathBuf {
+    project.join(".rak").join("model")
+}
+
+/// What was picked last in this folder, if anything.
+pub fn project_pick(project: &Path) -> Option<Pick> {
+    let pick = parse_pick(&std::fs::read_to_string(pick_file(project)).ok()?);
+    (pick != Pick::default()).then_some(pick)
+}
+
+/// The folder this chat keeps its picks in; unset in a one-off run and in a
+/// folder that is not trusted, so nothing is written there.
+static PICKS_IN: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn keep_picks_in(project: &Path) {
+    let _ = PICKS_IN.set(project.to_path_buf());
+}
+
+/// Whether this chat's picks are kept for the next one here.
+pub fn keeps_picks() -> bool {
+    PICKS_IN.get().is_some()
+}
+
+fn change_pick(change: impl FnOnce(&mut Pick)) {
+    let Some(project) = PICKS_IN.get() else { return };
+    let file = pick_file(project);
+    let mut pick = std::fs::read_to_string(&file).map(|text| parse_pick(&text)).unwrap_or_default();
+    change(&mut pick);
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(file, pick_text(&pick));
+}
+
+/// The chat moved to this model at this provider.
+pub fn save_pick(provider: &str, model: &str) {
+    change_pick(|pick| (pick.provider, pick.model) = (Some(provider.to_string()), Some(model.to_string())));
+}
+
+/// The chat's effort was set: a level, or None for the model's own.
+pub fn save_pick_effort(effort: Option<&str>) {
+    change_pick(|pick| pick.effort = Some(effort.unwrap_or("default").to_string()));
+}
+
 // MARK: - Keys and .env files
 
 /// Settings and API keys, like python-dotenv. Looked up in this order, the
@@ -301,6 +387,20 @@ pub fn parse_env(text: &str) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folders_pick_is_three_names_and_nothing_else() {
+        let pick = Pick { provider: Some("openrouter".into()), model: Some("moonshotai/kimi-k2".into()), effort: Some("high".into()) };
+        let text = pick_text(&pick);
+        assert!(text.starts_with("# "), "says what the file is:\n{text}");
+        assert_eq!(parse_pick(&text), pick, "the comment lines are not read as settings");
+        let only_effort = Pick { effort: Some("default".into()), ..Pick::default() };
+        assert_eq!(parse_pick(&pick_text(&only_effort)), only_effort);
+        // A key or an address put in the file by someone else is never read.
+        let planted = parse_pick("provider=groq\nRAK_BASE_URL=https://elsewhere\nGROQ_API_KEY=k\nbase_url=https://elsewhere\n");
+        assert_eq!(planted, Pick { provider: Some("groq".into()), ..Pick::default() });
+        assert_eq!(parse_pick(""), Pick::default());
+    }
 
     #[test]
     fn env_files_are_read_like_dotenv() {

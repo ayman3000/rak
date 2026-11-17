@@ -142,6 +142,27 @@ pub fn choose_model(o: &Options, chat: bool, last_pick: Option<String>) -> Optio
     }
 }
 
+/// Pure — unit-tested. Starts the chat at the provider picked last in this
+/// folder, the way `/provider` moves one: its own address and key. Nothing
+/// changes when it is the default provider already, or a server known only
+/// by its address. A provider whose key is gone is left out, with a note.
+pub fn start_at_pick(o: &mut Options, pick: &super::settings::Pick, has_key: &dyn Fn(&str) -> bool) -> Option<String> {
+    let provider = providers::find(pick.provider.as_deref()?)?;
+    if o.provider.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(&provider.name)) {
+        return None;
+    }
+    if let Some(name) = provider.key.as_ref().filter(|name| !has_key(name)) {
+        return Some(format!(
+            "this folder's last pick was {}, but {name} is not set now; starting with the default. /provider {} asks for the key.",
+            provider.label, provider.name
+        ));
+    }
+    o.provider = Some(provider.name.clone());
+    o.provider_flag = true;
+    (o.base_url, o.base_url_flag, o.api_key_env) = (None, false, None);
+    None
+}
+
 /// Where the last pick is remembered for these options, before a model is
 /// chosen (a claude-* model can move a run to Anthropic, so the candidate counts).
 fn memory_key_for(o: &Options, candidate: Option<&str>) -> Option<String> {
@@ -317,10 +338,30 @@ pub fn run(mut o: Options) -> i32 {
         }
     }
     load_keys(&cwd, trusted);
+    // A chat starts with what was picked last in this folder (.rak/model),
+    // unless the command line or the environment names a provider. Read only
+    // in a trusted folder; a one-off run follows the settings alone.
+    let starts_chat = o.task.is_none() && std::io::stdin().is_terminal() && !o.json;
+    let named = o.provider.is_some() || o.base_url.is_some();
+    let pick = if starts_chat && trusted { super::settings::project_pick(&cwd) } else { None };
+    if starts_chat && trusted {
+        super::settings::keep_picks_in(&cwd);
+    }
     // Defaults may also come from the .env files.
     o.model = o.model.or_else(|| key("RAK_MODEL"));
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
     o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
+    if let Some(pick) = pick.as_ref().filter(|_| !named) {
+        if let Some(note) = start_at_pick(&mut o, pick, &|name| key(name).is_some()) {
+            eprintln!("rak: {note}");
+        }
+    }
+    if let Some(typed) = pick.as_ref().and_then(|p| p.effort.clone()).filter(|_| o.effort.is_none() && !o.effort_none) {
+        match super::args::effort_level(&typed) {
+            Some(level) => o.effort = Some(level),
+            None => o.effort_none = super::args::is_default_effort(&typed),
+        }
+    }
     if o.effort.is_none() && !o.effort_none {
         if let Some(typed) = key("RAK_EFFORT").filter(|e| !e.trim().is_empty()) {
             match super::args::effort_level(&typed) {
@@ -359,7 +400,9 @@ pub fn run(mut o: Options) -> i32 {
     // RAK_MODEL, or (in a chat) picked now from the provider's list.
     let candidate = o.model.clone().filter(|_| o.model_flag || (!o.provider_flag && !o.base_url_flag));
     let memory = memory_key_for(&o, candidate.as_deref());
-    let model_name = match choose_model(&o, chat, memory.as_deref().and_then(last_model)) {
+    // The model picked last in this folder, when the chat starts at the provider it was picked at.
+    let picked_here = pick.as_ref().filter(|p| p.provider.is_some() && p.provider == memory).and_then(|p| p.model.clone());
+    let model_name = match choose_model(&o, chat, picked_here.or_else(|| memory.as_deref().and_then(last_model))) {
         Some(name) => name,
         None if chat => {
             let backend = backend(&o, None).unwrap_or_else(|why| usage_error(&why));
@@ -367,6 +410,7 @@ pub fn run(mut o: Options) -> i32 {
             let picked = chat::pick_model(make_provider(&o, &backend, "", &stop).as_ref(), None, out_color);
             let Some(name) = picked else { usage_error("no model named. Pass --model NAME or set RAK_MODEL") };
             remember_model(&backend.memory_key(), &name);
+            super::settings::save_pick(&backend.memory_key(), &name);
             name
         }
         None => usage_error("no model named. Pass --model NAME or set RAK_MODEL"),
@@ -1093,6 +1137,33 @@ mod tests {
     fn required(name: &str) -> KeySource {
         let label = providers::all().iter().find(|p| p.key.as_deref() == Some(name)).map(|p| p.label.clone()).unwrap();
         KeySource::Required(name.into(), format!("{label} needs it"))
+    }
+
+    #[test]
+    fn a_chat_starts_at_the_folders_pick_unless_its_key_is_gone() {
+        use super::super::settings::Pick;
+        let pick = |provider: &str| Pick { provider: Some(provider.into()), model: Some("m".into()), effort: None };
+        // The key file's default is OpenRouter with an address of its own; the folder picked Groq.
+        let mut o = options(Some("openrouter"), false, Some("https://proxy.example/v1"), false);
+        assert_eq!(start_at_pick(&mut o, &pick("groq"), &|_| true), None);
+        assert_eq!((o.provider.as_deref(), o.provider_flag, o.base_url.as_deref()), (Some("groq"), true, None), "Groq's own address");
+        let r = route(&o, Some("m"), false).unwrap();
+        assert_eq!(r.key, required("GROQ_API_KEY"), "and its own key, never the default provider's");
+        // Its key is gone: the default stays, and the note says how to give it.
+        let mut o = options(Some("openrouter"), false, None, false);
+        let note = start_at_pick(&mut o, &pick("groq"), &|_| false).unwrap();
+        assert!(note.contains("GROQ_API_KEY") && note.contains("/provider groq"), "{note}");
+        assert_eq!((o.provider.as_deref(), o.provider_flag), (Some("openrouter"), false));
+        // The default provider already, a keyless one, and a name rak doesn't know.
+        let mut o = options(Some("openrouter"), false, Some("https://proxy.example/v1"), false);
+        assert_eq!(start_at_pick(&mut o, &pick("OpenRouter"), &|_| true), None);
+        assert_eq!((o.provider_flag, o.base_url.as_deref()), (false, Some("https://proxy.example/v1")), "left as the key file has it");
+        let mut o = options(None, false, None, false);
+        assert_eq!(start_at_pick(&mut o, &pick("ollama"), &|_| false), None);
+        assert_eq!(o.provider.as_deref(), Some("ollama"));
+        let mut o = options(Some("openrouter"), false, None, false);
+        assert_eq!(start_at_pick(&mut o, &pick("https://elsewhere/v1"), &|_| true), None);
+        assert_eq!(o.provider.as_deref(), Some("openrouter"), "an address in the file moves nothing");
     }
 
     #[test]
