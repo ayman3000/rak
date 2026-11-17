@@ -1,14 +1,14 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-17, after releasing v0.1.0-alpha.31. A working plan for picking the work up on another machine.
+Updated 2026-11-17, after releasing v0.1.0-alpha.32. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.31** (2026-11-17). It has everything
+- The newest release is **v0.1.0-alpha.32** (2026-11-17). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
-### On main, not released
+### In v0.1.0-alpha.32
 
 - Saving a chat no longer opens every other chat: the clean-up past 30 goes
   by each file's write time (sessions::past_keep), not by parsing them all.
