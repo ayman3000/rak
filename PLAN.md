@@ -534,7 +534,27 @@ the Space's Community tab (the owner's step, public).
       spare and measured from the saved result in a fresh process; an exact
       value is matched exactly; something unexpected (odd units, a value out
       of range) is looked into, not explained away. Aimed at dna-assembly,
-      train-fasttext, tune-mjcf and raman-fitting. Not yet run on them.
+      train-fasttext, tune-mjcf and raman-fitting. Released in alpha.25.
+- [x] Check on alpha.25 (2026-11-17, batches/tb21-a25.txt, one attempt):
+      the 9 alpha.24 failures + 5 random alpha.24 passes. 6/13 scored
+      (train-fasttext: Runta "upstream internal error" after 8 min, no
+      score). Now pass: tune-mjcf (a target of the rule), bn-fit-modify.
+      Still fail: dna-assembly (length now fine, but forward/reverse Tm 7.3
+      degrees apart, the task says within 5: another stated number missed),
+      raman-fitting (still fitted the raw x axis, now calling it the Raman
+      shift), large-scale-text-editing (`wq` again), filter-js-from-html,
+      make-mips-interpreter, sam-cell-seg. New failure: sanitize-git-repo
+      (missed a Hugging Face token). Net: 6/13 vs 5/13 on alpha.24 for the
+      same tasks: within noise for one attempt; no clear gain. The prompt
+      rule is not enough on its own for stated numbers: a check that lists
+      each number in the request and makes the model show the measured
+      value (like the review note) may be next.
+      Cost on the 12 tasks scored on both: turns 395 -> 476 (+21%), output
+      684K -> 904K (+32%), $0.57 -> $0.90 (+58%), mostly on failures that
+      stayed failures (filter-js 41 -> 99 turns). Reverted on main
+      (2026-11-17): +1 pass within noise is not worth +58% cost when cost
+      is half the board's score. Any retry: opt-in, narrow, measured with
+      three attempts before it becomes the default.
 
 ## Project notes in rak/ (from Naseem, built 2026-11-13, released in alpha.7)
 
