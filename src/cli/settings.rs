@@ -203,8 +203,39 @@ pub fn load_keys(project: &Path, with_project: bool) {
     let _ = KEYS.set(Keys::load(project, with_project));
 }
 
+/// Keys given during this run (`/key`, or `/provider` asking for a missing
+/// one): used at once, ahead of the files read at the start. In memory only;
+/// the key file has them for the next run.
+static GIVEN: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// From here on in this run, `key(name)` is this value.
+pub fn give_key(name: &str, value: &str) {
+    if let Ok(mut given) = GIVEN.lock() {
+        given.retain(|(n, _)| n != name);
+        given.push((name.to_string(), value.to_string()));
+    }
+}
+
+fn given(name: &str) -> Option<String> {
+    GIVEN.lock().ok()?.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+}
+
+/// Where a key that is set comes from: "this chat", "the environment" or a file.
+pub fn key_source(name: &str) -> Option<String> {
+    if given(name).is_some() {
+        return Some("this chat".to_string());
+    }
+    match KEYS.get() {
+        Some(keys) => keys.source(name),
+        None => std::env::var(name).is_ok_and(|v| !v.is_empty()).then(|| "the environment".to_string()),
+    }
+}
+
 /// A setting or key; the environment alone until `load_keys` has run.
 pub fn key(name: &str) -> Option<String> {
+    if let Some(value) = given(name) {
+        return Some(value);
+    }
     match KEYS.get() {
         Some(keys) => keys.get(name),
         None => std::env::var(name).ok().filter(|v| !v.is_empty()),

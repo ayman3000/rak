@@ -5,7 +5,7 @@ use super::editor::Editor;
 use super::output;
 use super::picker::{self, Choice, Picked};
 use super::session::{backend, make_provider, provider_label, run_one, window_for, Backend, Session};
-use super::settings::{home, key, key_files, last_model, remember_model};
+use super::settings::{give_key, home, key, key_files, key_source, last_model, remember_model};
 use super::style::{cut, pad, paint, Style};
 use super::welcome::grouped;
 use super::{commands, menu, skills_command, term, welcome, VERSION};
@@ -323,6 +323,20 @@ pub fn switch_provider(s: &mut Session, name: &str) {
     o.base_url = if is_default { key("RAK_BASE_URL") } else { None };
     o.base_url_flag = false;
     o.api_key_env = None;
+    // No key for it yet: asked for now (not shown), saved, and used at once.
+    let mut just_given = false;
+    if let Some(name) = provider.key.as_ref().filter(|name| key(name).is_none()) {
+        println!("{} needs {name}, which is not set.", provider.label);
+        let Ok(target) = super::add_key::target(&provider.name) else { return };
+        match super::add_key::add(&target, None, color) {
+            Some(value) => {
+                give_key(name, &value);
+                just_given = true;
+                s.log.write(json!({ "event": "key", "name": name }));
+            }
+            None => return println!("Staying with {} at {}.", s.model, provider_label(&s.backend)),
+        }
+    }
     let backend_now = match backend(&o, None) {
         Ok(b) => b,
         Err(why) => return warn(&format!("Can't switch: {why}")),
@@ -334,7 +348,15 @@ pub fn switch_provider(s: &mut Session, name: &str) {
             println!("No model picked yet for {}. These are its models:", provider.label);
             match pick_model(make_provider(&o, &backend_now, "", &s.stop).as_ref(), None, color) {
                 Some(model) => model,
-                None => return println!("Staying with {} at {}.", s.model, provider_label(&s.backend)),
+                None => {
+                    println!("Staying with {} at {}.", s.model, provider_label(&s.backend));
+                    if just_given {
+                        let hint =
+                            format!("The key is saved. If {} did not accept it, /key {} replaces it.", provider.label, provider.name);
+                        println!("{}", paint(color, Style::Dim, &hint));
+                    }
+                    return;
+                }
             }
         }
     };
@@ -363,6 +385,44 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     s.log.write(json!({ "event": "model", "model": model, "provider": s.backend.provider.as_deref().unwrap_or("custom") }));
     let via = if say_where { format!(" at {}", provider_label(&s.backend)) } else { String::new() };
     println!("Now using {}{via}.", paint(color, Style::Bold, model));
+}
+
+/// /key [NAME]: gives (or replaces) a key from inside the chat. The chat's
+/// own provider picks the new key up at once.
+fn key_command(s: &mut Session, args: &str) {
+    let color = s.ui.borrow().out_color;
+    let target = if args.is_empty() {
+        match super::add_key::pick(&key_source, color) {
+            Some(target) => target,
+            None => return println!("{}", paint(color, Style::Dim, "Nothing changed.")),
+        }
+    } else {
+        match super::add_key::target(args) {
+            Ok(target) => target,
+            Err(why) => return println!("{}", paint(color, Style::Yellow, &why)),
+        }
+    };
+    let Some(value) = super::add_key::add(&target, key_source(&target.key), color) else { return };
+    give_key(&target.key, &value);
+    s.log.write(json!({ "event": "key", "name": target.key }));
+    if target.key == "TAVILY_API_KEY" {
+        return println!("{}", paint(color, Style::Dim, "web_search is there the next time rak starts."));
+    }
+    // The chat's own provider: its requests carry the new key from now on.
+    let mine = s.backend.provider.as_deref().and_then(rak::providers::find).is_some_and(|p| p.key.as_deref() == Some(target.key.as_str()));
+    if mine {
+        match backend(&s.o, Some(&s.model)) {
+            Ok(now) => {
+                s.agent.set_model(make_provider(&s.o, &now, &s.model, &s.stop));
+                s.backend = now;
+                *s.helper_model.borrow_mut() = (s.backend.clone(), s.model.clone(), s.window);
+                println!("{}", paint(color, Style::Dim, "This chat uses it from now on."));
+            }
+            Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+        }
+    } else {
+        println!("{}", paint(color, Style::Dim, "Switch to it with /provider."));
+    }
 }
 
 /// Pure — unit-tested. How an effort reads in the chat.
@@ -446,6 +506,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
         "provider" if !args.is_empty() => switch_provider(s, args),
+        "key" | "keys" => key_command(s, args),
         "effort" if !args.is_empty() => match args.to_lowercase().as_str() {
             "default" | "off" | "none" => set_effort(s, None),
             typed => match super::args::effort_level(typed) {

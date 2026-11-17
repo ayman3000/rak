@@ -17,6 +17,7 @@
 //!   editor, menu, markdown, welcome, style, term, commands
 //!                the interface's parts, each pure where it can be
 
+pub mod add_key;
 pub mod approval;
 pub mod args;
 pub mod chain;

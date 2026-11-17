@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "rak keys — create ~/.config/rak/.env from a template, and show which keys are set
 
 usage: rak keys            create the file if there is none; show every provider and its key
+       rak keys set NAME   give one key (pasted, not shown): a provider's name, or tavily
        rak keys --update   bring an older file up to the current template, keeping your values
                            (the old file is saved next to it as .env.bak)";
 
@@ -17,6 +18,9 @@ pub fn run(args: &[String]) -> ! {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{USAGE}");
         std::process::exit(0);
+    }
+    if args.first().is_some_and(|a| a == "set") {
+        super::add_key::command(&args[1..]);
     }
     let updating = match args {
         [] => false,
@@ -113,6 +117,14 @@ pub fn is_older(template: &str, text: &str) -> bool {
     parse_env(template).keys().any(|key| !present.contains_key(key))
 }
 
+/// The first free backup name next to the key file: .env.bak, .env.bak.2, …
+pub fn backup_path(file: &Path) -> PathBuf {
+    (1..)
+        .map(|n| if n == 1 { file.with_extension("bak") } else { file.with_extension(format!("bak.{n}")) })
+        .find(|path| !path.exists())
+        .expect("a free name")
+}
+
 /// Saves the old file as .env.bak (or .env.bak.2, …) and writes the updated
 /// one. None when there was nothing to change.
 fn update_file(file: &Path) -> std::io::Result<Option<(PathBuf, Updated, Vec<String>)>> {
@@ -122,10 +134,7 @@ fn update_file(file: &Path) -> std::io::Result<Option<(PathBuf, Updated, Vec<Str
     if updated.text == old_text {
         return Ok(None);
     }
-    let backup = (1..)
-        .map(|n| if n == 1 { file.with_extension("bak") } else { file.with_extension(format!("bak.{n}")) })
-        .find(|path| !path.exists())
-        .expect("a free name");
+    let backup = backup_path(file);
     write_private(&backup, &old_text)?;
     write_private(file, &updated.text)?;
     Ok(Some((backup, updated, update_notes(&old))))

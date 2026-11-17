@@ -54,7 +54,7 @@ The code is in two layers: a library that knows nothing about terminals, and the
 | `args`, `session`, `chain` | The command line; one run set up and reported; the fallback chain's questions. |
 | `chat`, `commands` | The chat loop and its slash commands. |
 | `approval`, `output`, `log` | Asking before changes; what is shown; `--log`. |
-| `mcp_command`, `skills_command`, `keys_command`, `setup` | `rak mcp`, `rak skills`, `rak keys`, and the first-run setup (`rak setup`). |
+| `mcp_command`, `skills_command`, `keys_command`, `add_key`, `setup` | `rak mcp`, `rak skills`, `rak keys`, giving one key (`rak keys set`, `/key`), and the first-run setup (`rak setup`). |
 | `update` | `rak update`: finds the release on GitHub and runs that release's install.sh into the folder rak runs from. |
 | `editor`, `menu`, `picker`, `markdown`, `welcome`, `style`, `term` | The interface's parts, each pure where it can be, and tested. |
 | `settings`, `signals`, `trust` | What is kept between runs; Ctrl-C; folder trust. |

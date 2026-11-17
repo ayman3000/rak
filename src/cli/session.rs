@@ -221,7 +221,7 @@ pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
         KeySource::None => None,
         KeySource::IfSet(name) => key(name),
         KeySource::Required(name, why) => Some(key(name).ok_or(format!(
-            "{name} is not set ({why}). Run `rak setup` to give it, or add it to ~/.config/rak/.env; `rak keys` shows which keys are set"
+            "{name} is not set ({why}). Give it with `rak keys set {name}` (or `rak setup`), or add it to ~/.config/rak/.env; `rak keys` shows which keys are set"
         ))?),
     };
     Ok(Backend {

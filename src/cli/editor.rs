@@ -383,7 +383,7 @@ impl Editor {
             let (cols, rows) = term::size();
             let waiting = pasting && peek();
             if !waiting {
-                let menu_rows = menu::rows(&matches, selected, cols, rows.saturating_sub(4).clamp(3, 16), self.color);
+                let menu_rows = menu::rows(&matches, selected, cols, rows.saturating_sub(4).clamp(3, menu::MAX_ROWS), self.color);
                 let (bytes, now) = frame(&prompt, prompt_width, &buffer, false, &menu_rows, cols, row);
                 row = now;
                 let _ = out.write_all(bytes.as_bytes());

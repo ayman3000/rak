@@ -13,6 +13,7 @@ USAGE
   rak setup                       pick a provider, give its key, pick a model (asked
                                   on the first chat too)
   rak keys                        create ~/.config/rak/.env and see which keys are set
+  rak keys set NAME               give one key (pasted, not shown): a provider, or tavily
   rak keys --update               bring an older key file up to date, keeping its values
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 

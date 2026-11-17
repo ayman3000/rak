@@ -60,6 +60,10 @@ pub fn resolve(line: &str, commands: &[Command], known: &[&str]) -> String {
     }
 }
 
+/// The most rows the menu takes on a tall terminal: every command at once,
+/// with room for a few more before it has to move.
+pub const MAX_ROWS: usize = 20;
+
 /// The menu's rows for a terminal `cols` wide, the `selected` match marked.
 /// At most `max_rows`; when there are more matches, the rows shown move to
 /// keep the selected one in view and the last row says how many aren't shown.
@@ -137,7 +141,7 @@ mod tests {
         // Names that start with the text come before names that contain it.
         assert_eq!(
             names(&matches("/e", &all())),
-            ["/effort", "/exit", "/model", "/models", "/provider", "/resume", "/notes", "/yes", "/usage", "/clear", "/help"]
+            ["/effort", "/exit", "/model", "/models", "/provider", "/key", "/resume", "/notes", "/yes", "/usage", "/clear", "/help"]
         );
     }
 
@@ -164,8 +168,8 @@ mod tests {
     fn rows_mark_the_selection_and_never_reach_the_edge() {
         let m = matches("/", &all());
         for cols in [30, 60, 100] {
-            let r = rows(&m, 1, cols, 16, false);
-            assert_eq!(r.len(), m.len());
+            let r = rows(&m, 1, cols, MAX_ROWS, false);
+            assert_eq!(r.len(), m.len(), "every command fits without moving");
             assert!(r[1].starts_with("❯ /models"));
             assert!(r[0].starts_with("  /model"));
             assert!(r.iter().all(|row| text_width(row) < cols), "a row reached the edge at {cols}");

@@ -144,7 +144,7 @@ pub fn clean_key(bytes: &[u8]) -> String {
 }
 
 /// Reads a key without showing it. None: cancelled (Esc, Ctrl-C) or nothing typed.
-fn read_hidden(prompt: &str, color: bool) -> Option<String> {
+pub(super) fn read_hidden(prompt: &str, color: bool) -> Option<String> {
     eprint!("{}", paint(color, Style::Bold, prompt));
     let _ = std::io::stderr().flush();
     let Some(raw) = super::term::Raw::enter() else {
@@ -182,7 +182,7 @@ fn read_hidden(prompt: &str, color: bool) -> Option<String> {
     (!key.is_empty()).then_some(key)
 }
 
-fn ask_yes(question: &str, color: bool) -> bool {
+pub(super) fn ask_yes(question: &str, color: bool) -> bool {
     eprint!("{}", paint(color, Style::Bold, question));
     let _ = std::io::stderr().flush();
     let mut typed = String::new();
@@ -329,7 +329,7 @@ pub fn classify(status: u16) -> Check {
 
 /// GET `url` with the key as a bearer token. Costs nothing: it reads the
 /// account, it runs no model.
-fn check_key(url: &str, key: &str) -> Check {
+pub(super) fn check_key(url: &str, key: &str) -> Check {
     let agent = rak::http::builder().timeout(Duration::from_secs(10)).build();
     match agent.get(url).set("Authorization", &format!("Bearer {key}")).call() {
         Ok(response) => classify(response.status()),

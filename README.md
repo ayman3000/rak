@@ -99,7 +99,7 @@ rak -c "and now add the tests"         # continue this folder's last chat
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
 2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project.
-3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set; `rak update` gets the newest release.
+3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).
 

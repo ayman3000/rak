@@ -21,7 +21,9 @@ rak "explain what this project does"   # one request
 
 **2. Check what is set** with `rak keys`: each provider, whether its key is set, and where it came from (never the key itself).
 
-**3. More keys by hand.** `~/.config/rak/.env` has a line for every provider, the web search key and rak's settings. Open it in any editor, put each key right after its `=` (no quotes):
+**3. More keys.** `rak keys set openrouter` (any provider's name, or `tavily` for web search) asks for the key, which you paste without it being shown, and saves it; `rak keys set` alone lists the keys to pick from. In a chat, `/key` does the same, and `/provider` asks for the key when the provider you pick has none yet. The key is never an argument, so it does not stay in your shell's history, and replacing one keeps the old file as `.env.bak`.
+
+Or by hand: `~/.config/rak/.env` has a line for every provider, the web search key and rak's settings. Open it in any editor, put each key right after its `=` (no quotes):
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-…
@@ -90,6 +92,7 @@ Started without a task, rak opens a chat:
 | `/model [name]` | Show or switch the model. Without a name: pick from a list (↑/↓, Enter, Esc cancels, type to narrow; a name the list doesn't have can be typed and used). |
 | `/models` | List the models the provider offers. |
 | `/provider [name]` | Show or switch the provider: its own address and key, and the model you last picked there. The conversation comes along. Without a name: a list that dims providers whose key isn't set. |
+| `/key [provider]` | Give or replace an API key from inside the chat: pasted without being shown, checked where the provider has a free check, saved in the key file, and used at once. Without a name: pick from a list. `/provider` asks the same way when the provider you pick has no key yet. |
 | `/effort [level]` | Show or switch the reasoning effort for this chat: `low`, `medium`, `high`, `xhigh`, `max`, or `default` (none sent: the model's own). Without a level: pick from a list. A chat starts at `medium` unless `RAK_EFFORT` says otherwise; the status line shows the level being sent. |
 | `/init` | Set up this project's notes in `rak/`, or bring them up to date. |
 | `/notes` | Show the project's rules and notes (project, roadmap without Done, the latest journal lines). |
@@ -146,6 +149,6 @@ Started without a task, rak opens a chat:
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |
 | `-q`, `--quiet` | Only the answer. |
 
-Other commands: `rak setup`, `rak keys`, `rak skills …`, `rak mcp …`, `rak update` (the newest release; `rak update VERSION` for one release, `--check` to only look).
+Other commands: `rak setup`, `rak keys`, `rak keys set NAME`, `rak skills …`, `rak mcp …`, `rak update` (the newest release; `rak update VERSION` for one release, `--check` to only look).
 
 Progress goes to stderr, so `rak "…" > answer.txt` holds only the answer. Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4` turn limit, `5` stuck repeating a call, `130` stopped with Ctrl-C.

@@ -8,6 +8,17 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.28. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- Keys without opening the file: `rak keys set NAME` (a provider, a key's
+  own name, or tavily; no name: a list), `/key` in a chat, and `/provider`
+  asks for the key when the provider picked has none. Pasted without being
+  shown, checked where the provider has a free check, saved 0600 on its own
+  line; a replaced key keeps the old file as .env.bak. Never an argument,
+  never printed, never in a chat, saved chat or log. A key given in a chat
+  is used at once (settings::give_key).
+- The "/" menu shows up to 20 rows (was 16): every command at once.
+
 ### In v0.1.0-alpha.28
 
 - Reasoning effort as a setting: `RAK_EFFORT` in the key file (a bad value
