@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 ```
 
 > [!NOTE]
-> **Early alpha (0.1.0-alpha.15).** The core works and is tested on every push. See [Status](#status) for what isn't there yet.
+> **Early alpha.** The core works and is tested on every push. See [Status](#status) for what isn't there yet.
 
 ## See it work
 
@@ -80,12 +80,11 @@ cargo install --git https://github.com/ayman3000/rak --locked
 <details>
 <summary><b>More install options</b></summary>
 
-- **Pick a release or a folder:** `RAK_VERSION=v0.1.0-alpha.15` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Nothing else on your system is changed.
-- **Update later:** `rak update` installs the newest release in place of the one you run, checked the same way; `rak update alpha.24` picks a release, `rak update --check` only says whether a newer one is out.
+- **Pick a release or a folder:** `RAK_VERSION=v0.1.0-alpha.24` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Nothing else on your system is changed.
 - **Builds:** Linux on x86-64 and ARM (static, any distribution), macOS on Apple Silicon and Intel. Windows is not supported yet.
 - **Read before you run:** download the script first (`curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh -o install.sh`), read it, then run `sh install.sh`.
 - **macOS:** the builds are not notarized. Installed with the script they just run; a build downloaded in a web browser needs `xattr -d com.apple.quarantine rak` first.
-- **Updating:** run the install command again. If you used both the script and `cargo install` at some point, remove the other copy (`cargo uninstall rak`) so the right one runs.
+- **Updating:** `rak update` installs the newest release in place of the one you run, checked the same way (from alpha.26; before that, run the install command again). `rak update alpha.24` picks a release; `rak update --check` only says whether a newer one is out. If you used both the script and `cargo install` at some point, remove the other copy (`cargo uninstall rak`) so the right one runs.
 - **Pre-built archives** are on the [releases page](https://github.com/ayman3000/rak/releases).
 
 </details>
@@ -100,7 +99,7 @@ rak -c "and now add the tests"         # continue this folder's last chat
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
 2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project.
-3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set.
+3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).
 
@@ -113,6 +112,8 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 - **`delegate`** hands a question to a read-only helper agent with a fresh context; only its answer comes back. Several run side by side.
 - **Context that lasts.** Old tool output is set aside and readable by id; when that isn't enough the older conversation becomes a summary, with the task list kept word for word.
 - **Saved chats.** Every request is saved; `rak -c` continues, `/resume` picks any.
+- **Images.** Paste a screenshot with Ctrl+V or drop in a path. A model that can see gets it directly; for one that can't, a vision model you set in the `.env` describes it ([how](docs/usage.md#images)).
+- **Servers in the background.** The agent can start a dev server and keep working; `/jobs` lists and stops them, and a chat that ends with some still running asks first.
 
 ### Edits you can trust
 
