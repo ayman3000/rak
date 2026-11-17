@@ -81,6 +81,7 @@ cargo install --git https://github.com/ayman3000/rak --locked
 <summary><b>More install options</b></summary>
 
 - **Pick a release or a folder:** `RAK_VERSION=v0.1.0-alpha.15` picks a release (default: the newest, pre-releases included); `RAK_INSTALL_DIR` picks the folder. Nothing else on your system is changed.
+- **Update later:** `rak update` installs the newest release in place of the one you run, checked the same way; `rak update alpha.24` picks a release, `rak update --check` only says whether a newer one is out.
 - **Builds:** Linux on x86-64 and ARM (static, any distribution), macOS on Apple Silicon and Intel. Windows is not supported yet.
 - **Read before you run:** download the script first (`curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh -o install.sh`), read it, then run `sh install.sh`.
 - **macOS:** the builds are not notarized. Installed with the script they just run; a build downloaded in a web browser needs `xattr -d com.apple.quarantine rak` first.

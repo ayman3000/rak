@@ -39,6 +39,7 @@ pub mod skills_command;
 pub mod style;
 pub mod term;
 pub mod trust;
+pub mod update;
 pub mod welcome;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

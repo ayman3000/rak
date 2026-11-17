@@ -102,7 +102,11 @@ mv -f "$INSTALL_DIR/rak.new" "$INSTALL_DIR/rak"
 
 now=$("$INSTALL_DIR/rak" --version | awk '{ print $2 }')
 if [ -n "$before" ] && [ "$before" != "$now" ]; then
-    say "Upgraded rak $before → $now in $INSTALL_DIR/rak"
+    if [ "$(printf 'v%s\nv%s\n' "$before" "$now" | newest)" = "v$now" ]; then
+        say "Upgraded rak $before → $now in $INSTALL_DIR/rak"
+    else
+        say "Went back from rak $before to $now in $INSTALL_DIR/rak"
+    fi
 else
     say "Installed rak $now to $INSTALL_DIR/rak"
 fi
