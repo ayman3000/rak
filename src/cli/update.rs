@@ -40,9 +40,7 @@ pub fn run(args: &[String]) -> ! {
 
 fn update(check: bool, wanted: Option<String>) -> Result<(), String> {
     if cfg!(windows) {
-        return Err(format!(
-            "there are no rak builds for Windows yet. With Rust installed: cargo install --git https://github.com/{REPO}"
-        ));
+        return Err(format!("there are no rak builds for Windows yet. With Rust installed: cargo install --git https://github.com/{REPO}"));
     }
     let current = format!("v{}", env!("CARGO_PKG_VERSION"));
     let tags = release_tags()?;
