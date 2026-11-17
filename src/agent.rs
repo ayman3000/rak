@@ -1255,6 +1255,11 @@ pub fn system_prompt(cwd: &Path, read_only: bool, project_notes: Option<&str>) -
          When the request describes symptoms or rules, check each one with a case built from its own words, not \
          from your idea of the bug; a test you wrote checks only your reading. Where the docs and the code \
          disagree, the docs win unless the request says otherwise.\n\
+         Numbers the request states (a limit, a range, a count, a threshold) are checks: compare your output with \
+         each one before you answer. A measured target (accuracy, speed, size) will be measured again on another \
+         run, so meet it with room to spare and measure it from the saved result in a fresh process; a value \
+         stated exactly is matched exactly. When something you see is not what you expected (odd units, a value \
+         out of range), find out why before you go on; don't explain it away.\n\
          Know when you are done: once what was asked works and you have checked it, stop and answer. Don't take \
          on work nobody asked for (speed-ups, extra cases, polish, deeper tests of what already passes); name it \
          in your summary as a possible next step instead.\n\
@@ -2052,6 +2057,9 @@ mod tests {
         assert!(!system_prompt(Path::new("/w"), false, None).contains("READ-ONLY"));
         // A solved task ends the run; extra work is named, not done.
         assert!(p.contains("Know when you are done") && p.contains("work nobody asked for"));
+        // Stated numbers are checked; measured targets get room and a fresh measurement.
+        assert!(p.contains("Numbers the request states") && p.contains("room to spare") && p.contains("fresh process"));
+        assert!(p.contains("don't explain it away"));
     }
 
     #[test]
