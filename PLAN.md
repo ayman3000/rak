@@ -1,12 +1,21 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-17, after releasing v0.1.0-alpha.25. A working plan for picking the work up on another machine.
+Updated 2026-11-17, after releasing v0.1.0-alpha.26. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.25** (2026-11-17). Its one change,
-  a prompt rule for stated numbers, was reverted on `main`: it cost more
-  and showed no clear gain. Benchmark-run notes are kept outside the repo.
+- The newest release is **v0.1.0-alpha.26** (2026-11-17). It has everything
+  below except alpha.25's prompt rule, which it takes out; `main` and the
+  release match. Benchmark-run notes are kept outside the repo.
+
+### In v0.1.0-alpha.26
+
+- `rak update` installs the newest release in place (`rak update VERSION`
+  for one release, `--check` to only look), through that release's own
+  install.sh. install.sh says "Went back" when it installs an older version.
+- alpha.25's stated-number rule taken out of the system prompt.
+- The Harbor adapter, the probes and the benchmark notes moved out of the
+  repository.
 
 ### In v0.1.0-alpha.25
 
