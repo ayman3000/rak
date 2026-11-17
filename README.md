@@ -111,7 +111,7 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 - **`todo`** keeps the plan visible as it changes. Finish with steps still open and rak sends the agent back once.
 - **`delegate`** hands a question to a read-only helper agent with a fresh context; only its answer comes back. Several run side by side.
 - **Context that lasts.** Old tool output is set aside and readable by id; when that isn't enough the older conversation becomes a summary, with the task list kept word for word.
-- **Saved chats.** Every request is saved; `rak -c` continues, `/resume` picks any.
+- **Saved chats.** Every request is saved; `rak -c` continues, `/resume` picks any, and the agent can look up what was asked in earlier ones (`past_chats`).
 - **Images.** Paste a screenshot with Ctrl+V or drop in a path. A model that can see gets it directly; for one that can't, a vision model you set in the `.env` describes it ([how](docs/usage.md#images)).
 - **Servers in the background.** The agent can start a dev server and keep working; `/jobs` lists and stops them, and a chat that ends with some still running asks first.
 

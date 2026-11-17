@@ -52,6 +52,10 @@ pub struct RunResult {
 }
 
 pub enum Event<'a> {
+    /// A request is on its way to the model; nothing has come back yet.
+    Calling,
+    /// That request ended, with a reply or an error.
+    Replied,
     ModelCalled {
         turn: usize,
         usage: Usage,
@@ -890,12 +894,14 @@ impl Agent {
         let mut attempt = 0;
         loop {
             let started = Instant::now();
+            (self.on_event)(&Event::Calling);
             let result = if self.stream {
                 let on_event = &mut self.on_event;
                 self.model.chat_stream(&self.messages, definitions, &mut |piece| on_event(&Event::Delta(piece)))
             } else {
                 self.model.chat(&self.messages, definitions)
             };
+            (self.on_event)(&Event::Replied);
             match result {
                 Ok(reply) => {
                     self.last_prompt_tokens = reply.usage.input;

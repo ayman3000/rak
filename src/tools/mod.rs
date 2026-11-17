@@ -1,6 +1,7 @@
 //! The tools the model can call, and what they share: where the project is,
 //! which paths are allowed, and which files this run has already seen.
 
+pub mod chats;
 pub mod fetch;
 pub mod fs;
 pub mod image;

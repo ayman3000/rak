@@ -62,6 +62,21 @@ pub fn title(history: &[Value]) -> String {
         .unwrap_or_else(|| "(empty)".to_string())
 }
 
+/// The chat this run is writing: the one it saved last. Empty before the
+/// first save, when it has no file yet.
+static CURRENT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// The id of the chat being written now, so it is not listed among earlier ones.
+pub fn current() -> String {
+    CURRENT.lock().map(|id| id.clone()).unwrap_or_default()
+}
+
+pub fn set_current(id: &str) {
+    if let Ok(mut current) = CURRENT.lock() {
+        *current = id.to_string();
+    }
+}
+
 /// Saves `history` (the conversation without its system prompt) as chat `id`
 /// of the project, and deletes the project's oldest chats past `KEEP`.
 pub fn save(dir: &Path, key: &str, id: &str, history: &[Value], model: &str) -> Result<PathBuf, String> {
@@ -73,6 +88,7 @@ pub fn save(dir: &Path, key: &str, id: &str, history: &[Value], model: &str) -> 
     let partial = folder.join(format!(".{id}.json.partial"));
     std::fs::write(&partial, body.to_string()).map_err(|e| format!("cannot write {}: {e}", partial.display()))?;
     std::fs::rename(&partial, &path).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
+    set_current(id);
     for old in list(dir, key).into_iter().skip(KEEP) {
         let _ = std::fs::remove_file(old.path);
     }

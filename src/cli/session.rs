@@ -96,6 +96,7 @@ impl Session {
         let count = history.len();
         self.agent.restore(history);
         self.chat_id = rak::sessions::id_of(path);
+        rak::sessions::set_current(&self.chat_id);
         Ok(count)
     }
 }
@@ -479,6 +480,9 @@ pub fn run(mut o: Options) -> i32 {
         renderer: (out_color && !o.json).then(markdown::Renderer::default),
         line_open: false,
         asked: false,
+        // Where progress goes, when that is a terminal: never a pipe or --json.
+        thinking: (!o.quiet && !o.json && if chat { stdout_tty } else { std::io::stderr().is_terminal() })
+            .then(|| super::thinking::Thinking::new(chat, if chat { out_color } else { err_color })),
     }));
 
     // What is kept for later sessions (skills, routines, memory notes, the
@@ -490,6 +494,11 @@ pub fn run(mut o: Options) -> i32 {
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
         tools.push(Box::new(WebSearch::new(tavily)));
+    }
+    // This project's earlier chats, for questions about them. A chat only: a
+    // one-off run has none to ask about, and pays nothing for the tool.
+    if let Some(dir) = config_dir().filter(|_| chat && allowed("past_chats")) {
+        tools.push(Box::new(rak::tools::chats::PastChats { dir: dir.join("sessions"), key: rak::sessions::project_key(&ctx.cwd) }));
     }
     if skills_on {
         tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));

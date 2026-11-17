@@ -391,6 +391,50 @@ pub fn table(header: &[String], aligns: &[Align], rows: &[Vec<String>], columns:
     out
 }
 
+/// Pure — unit-tested. Columns the lines after the first start at, so a
+/// wrapped bullet or numbered item continues under its own text.
+pub fn hang(line: &str) -> usize {
+    let indent = line.chars().take_while(|c| *c == ' ').count();
+    let body = &line[indent..];
+    let digits = body.chars().take_while(char::is_ascii_digit).count();
+    if body.starts_with("- ") || body.starts_with("* ") {
+        indent + 2
+    } else if digits > 0 && body[digits..].starts_with(". ") {
+        indent + digits + 2
+    } else {
+        indent
+    }
+}
+
+/// Pure — unit-tested. A styled line broken at spaces so no word is cut at
+/// the terminal's edge; lines after the first start `hang` columns in. A
+/// word wider than the terminal is left whole. Escape codes take no room, and
+/// a style open at a break carries on to the next line.
+pub fn wrap(styled: &str, columns: usize, hang: usize) -> String {
+    if columns < 20 || visible_width(styled) <= columns {
+        return styled.to_string();
+    }
+    let hang = hang.min(columns / 2);
+    let mut out = String::with_capacity(styled.len() + 16);
+    // Columns used on the current line, and whether it holds a word yet.
+    let (mut used, mut has_word) = (0, false);
+    for (i, word) in styled.split(' ').enumerate() {
+        let width = visible_width(word);
+        if has_word && width > 0 && used + 1 + width > columns {
+            out.push('\n');
+            out.extend(std::iter::repeat_n(' ', hang));
+            (used, has_word) = (hang, false);
+        } else if i > 0 {
+            out.push(' ');
+            used += 1;
+        }
+        out.push_str(word);
+        used += width;
+        has_word |= width > 0;
+    }
+    out
+}
+
 /// Feeds streamed pieces and gives back rendered text: whole lines as they
 /// complete, the rest at `finish()`.
 #[derive(Default)]
@@ -424,7 +468,7 @@ impl Renderer {
         }
         let mut out = self.flush();
         if !rest.is_empty() {
-            out.push_str(&render(&rest, &mut self.state));
+            out.push_str(&self.shown(&rest));
         }
         out.trim_end_matches('\n').to_string()
     }
@@ -440,9 +484,21 @@ impl Renderer {
             }
         }
         let mut out = self.flush();
-        out.push_str(&render(line, &mut self.state));
+        out.push_str(&self.shown(line));
         out.push('\n');
         out
+    }
+
+    /// One line rendered and, unless it is code, wrapped at words to the
+    /// terminal's width.
+    fn shown(&mut self, line: &str) -> String {
+        let code = self.state.in_code || line.trim_start().starts_with("```");
+        let rendered = render(line, &mut self.state);
+        if code {
+            return rendered;
+        }
+        let columns = if self.columns > 0 { self.columns } else { super::term::size().0 };
+        wrap(&rendered, columns.saturating_sub(1), hang(line))
     }
 
     /// What is held, drawn as a table when it is one, else line by line.
@@ -461,7 +517,7 @@ impl Renderer {
             }
             _ => {
                 for line in &held {
-                    out.push_str(&render(line, &mut self.state));
+                    out.push_str(&self.shown(line));
                     out.push('\n');
                 }
             }
@@ -517,6 +573,28 @@ mod tests {
         }
         // Stars inside code are code, not emphasis.
         assert_eq!(inline("`a * b * c`"), "\x1b[36ma * b * c\x1b[39m");
+    }
+
+    #[test]
+    fn long_lines_break_at_words_and_list_items_continue_under_their_text() {
+        let text = "The first thing you wrote here was \"does the app need any enhancements?\", and I can't see earlier sessions.";
+        let wrapped = wrap(text, 40, 0);
+        assert!(wrapped.lines().all(|l| l.chars().count() <= 40), "{wrapped}");
+        assert_eq!(wrapped.replace('\n', " "), text, "nothing lost, no word cut");
+        assert!(wrapped.lines().all(|l| !l.starts_with(' ') && !l.ends_with(' ')), "{wrapped:?}");
+        assert_eq!(wrap("short line", 40, 0), "short line");
+        // A bullet continues under its text; a numbered item too.
+        assert_eq!((hang("- item"), hang("  * item"), hang("12. item"), hang("    plain"), hang("-dash")), (2, 4, 4, 4, 0));
+        let mut r = Renderer { columns: 31, ..Renderer::default() };
+        let out = strip(&r.push("- one two three four five six seven eight nine ten\n"));
+        assert_eq!(out, "• one two three four five six\n  seven eight nine ten\n");
+        // Styles take no room, and a word wider than the terminal stays whole.
+        let out =
+            strip(&r.push("**bold words** that go on and on past the edge https://example.com/a/very/long/address/that/does/not/fit\n"));
+        assert_eq!(out, "bold words that go on and on\npast the edge\nhttps://example.com/a/very/long/address/that/does/not/fit\n");
+        // Code is never re-wrapped.
+        let code = format!("```\n{}\n```\n", "x ".repeat(40).trim_end());
+        assert!(strip(&r.push(&code)).lines().nth(1).unwrap().len() > 60);
     }
 
     #[test]

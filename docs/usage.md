@@ -83,6 +83,8 @@ Started without a task, rak opens a chat:
 - **The rule above the prompt** shows the model, how full its context is, the folder and branch, and the mode.
 - **Type `/`** for the commands. The list narrows as you type; ↑ and ↓ choose, Tab completes, Enter runs, Esc closes it.
 - **Answers appear as they are written**, with Markdown shown as headings, bullets, code and tables, and short formulas of common symbols drawn as characters (`$\rightarrow$` as →, `$n \times m$` as n × m). A table is drawn with aligned columns that fit the terminal, long cells wrapping inside their column.
+- **Long lines break at words**, not in the middle of one, and a wrapped bullet continues under its own text. Code is left exactly as written.
+- **`Thinking… 12s` while the model works.** When a request has been out for a second and nothing is arriving yet, one dim line counts the seconds; it goes the moment the answer or a tool line appears. A wait of five seconds or more leaves `Thought for 14s` behind. Only on a terminal: never in a pipe, a file or `--json`.
 - **Ctrl-C stops a request** (the answer being written, or a running command) and keeps the chat. A second Ctrl-C quits.
 - **History** is kept between runs (↑ and ↓). Pasted text keeps its line breaks; a line ending in `\` continues on the next.
 - **After each request** a line shows turns, tool calls (a helper's counted apart: `3 tool calls (+14 in helpers)`), tokens in and out, how many came from the cache, and the time.

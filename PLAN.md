@@ -8,6 +8,26 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.30. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- `Thinking… 12s` while a model call is out and nothing is arriving: one dim
+  line, drawn after the first second, redrawn each second, erased when the
+  answer or a tool line is shown; a wait of 5 s or more leaves `Thought for
+  Ns`. One sleeping thread (cli/thinking.rs), started on first use; the agent
+  says when a call begins and ends (Event::Calling / Replied). Terminal only.
+  Measured against alpha.30 on an instant fake server, 40 one-off runs each:
+  150.7 → 150.8 ms without a terminal, 153.2 → 153.1 ms in one. No reasoning
+  text or token count is shown (usage arrives only at the end of a call).
+- `past_chats` (tools/chats.rs): the model can list, read and search this
+  project's earlier saved chats; requests and answers only, tool output left
+  out, 12,000 characters a call with `from` to go on, the current chat left
+  out (sessions::current). Chats only: measured 574 bytes of tool definition
+  (all tools 10,833 → 11,409 bytes); a one-off run is unchanged (16 tools,
+  10,833 bytes). Chats past the newest 30 are deleted, so a project's very
+  first chat may be gone.
+- Answers wrap at words (markdown::wrap), list items continue under their
+  text, code is never re-wrapped; a word wider than the terminal stays whole.
+
 ### In v0.1.0-alpha.30
 
 - A folder remembers its pick: `/provider`, `/model` and `/effort` write

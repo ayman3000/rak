@@ -39,6 +39,7 @@ pub mod signals;
 pub mod skills_command;
 pub mod style;
 pub mod term;
+pub mod thinking;
 pub mod trust;
 pub mod update;
 pub mod welcome;

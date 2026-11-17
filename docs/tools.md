@@ -22,6 +22,7 @@ What the agent can do, how every write is checked, and how rak works on a projec
 | `web_search` | Searches the web through [Tavily](https://tavily.com). Only there when `TAVILY_API_KEY` is set; each search spends a Tavily credit. | |
 | `fetch_url` | Reads one public web page as Markdown, text or HTML. Addresses on this machine or a private network are refused, even through a redirect. | |
 | `remember` | Keeps a one-line note for later sessions, for this project or for all. | yes |
+| `past_chats` | In a chat: this project's earlier conversations, so "what did I ask you first?" has an answer. Lists them, reads one (your requests and rak's answers; tool output is left out), or searches them all. Read-only, this project only, the current chat left out; nothing is sent to the model unless it calls the tool. A one-off run does not have it. |
 | `save_routine`, `run_routine` | Saves steps that just worked, with `{placeholders}`, so they run again back to back with no model calls between them. Each step still asks like the model's own call. Same format as sak and Naseem. | yes |
 
 Two more appear only when needed: `load_tools` for a [large MCP server](mcp.md), and `artifact_read` / `artifact_search` once [old output has been set aside](#large-projects).
@@ -41,6 +42,6 @@ What helps the agent on a project too big to read whole:
 - **A map first.** `code_map` shows where everything is, and `read_file` with line numbers reads only what's needed.
 - **A plan it keeps.** `todo` holds the steps, and is never dropped when the context fills.
 - **Helpers for searching.** `delegate` reads many files in its own context and returns only the answer; independent questions run side by side.
-- **Chats are saved** after every request (30 per project folder). `rak -c` continues the last one; `/resume` picks any.
+- **Chats are saved** after every request (30 per project folder). `rak -c` continues the last one; `/resume` picks any; and the model can look into them itself with `past_chats`.
 - **When the context fills,** old tool outputs are replaced by a short note naming the call (`read_file src/main.rs`). The output itself is set aside (`out-3`), and the agent reads it back with `artifact_read` or searches it with `artifact_search` instead of running the tool again.
 - **When that isn't enough,** the older part of the conversation is replaced by a summary the model writes; the newest turns and the task list stay word for word. If the server still says the request is too long, rak summarizes once more and asks again.

@@ -125,9 +125,29 @@ pub struct Ui {
     pub line_open: bool,
     /// The fallback question was just shown, with the error in it.
     pub asked: bool,
+    /// The `Thinking…` line, on a terminal.
+    pub thinking: Option<super::thinking::Thinking>,
 }
 
 impl Ui {
+    /// A model call begins: after a second with nothing to show, `Thinking…`.
+    pub fn wait(&mut self) {
+        if self.show && !self.line_open {
+            if let Some(thinking) = &mut self.thinking {
+                thinking.start();
+            }
+        }
+    }
+
+    /// Takes the `Thinking…` line away before anything else is shown; a long
+    /// wait leaves one line saying how long it was.
+    pub fn waited(&mut self) {
+        let Some(waited) = self.thinking.as_mut().and_then(|thinking| thinking.stop()) else { return };
+        if waited >= super::thinking::WORTH_NOTING {
+            self.progress(Some(Style::Dim), &super::thinking::label("Thought for", waited.as_secs()));
+        }
+    }
+
     /// A piece of the answer, as it arrives.
     pub fn delta(&mut self, piece: &str) {
         if !self.live {
@@ -200,7 +220,13 @@ pub fn fit(line: &str) -> String {
 pub fn reporter(log: Log, ui: Rc<RefCell<Ui>>) -> impl for<'a> FnMut(&Event<'a>) {
     move |event| {
         let mut ui = ui.borrow_mut();
+        // Whatever comes next is shown where the `Thinking…` line was.
+        if !matches!(event, Event::Calling) {
+            ui.waited();
+        }
         match event {
+            Event::Calling => ui.wait(),
+            Event::Replied => {}
             Event::ModelCalled { turn, usage, millis } => {
                 log.write(json!({ "event": "model_call", "turn": turn, "input_tokens": usage.input, "cached_tokens": usage.cached, "cache_write_tokens": usage.cache_write, "output_tokens": usage.output, "ms": millis }));
             }
