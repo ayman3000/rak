@@ -61,22 +61,66 @@ fn update(check: bool, wanted: Option<String>) -> Result<(), String> {
         }
         return Ok(());
     }
-    if target == current {
-        println!("rak {current} is already installed{}.", if wanted.is_none() { ", the newest release" } else { "" });
-        return Ok(());
+    match plain_update(wanted.is_some(), &target, &current) {
+        Step::Install => {}
+        Step::Newest => {
+            println!("rak {current} is already installed, the newest release.");
+            return Ok(());
+        }
+        Step::Same => {
+            println!("rak {current} is already installed.");
+            return Ok(());
+        }
+        Step::Ahead => {
+            println!(
+                "This rak ({current}) is newer than any release (the newest is {target}); nothing was changed. \
+                 To go back to it: rak update {target}"
+            );
+            return Ok(());
+        }
     }
     let dir = install_dir()?;
     let script = download_installer(&target)?;
-    let status = std::process::Command::new("sh")
-        .arg(&script)
+    // The script goes to sh on stdin: it is never written to a shared folder
+    // such as /tmp, where another user could put a file of their own in its place.
+    let mut child = std::process::Command::new("sh")
+        .arg("-s")
         .env("RAK_VERSION", &target)
         .env("RAK_INSTALL_DIR", &dir)
-        .status()
-        .map_err(|e| format!("could not run the installer: {e}"));
-    let _ = std::fs::remove_file(&script);
-    match status? {
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run the installer: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(script.as_bytes()).map_err(|e| format!("could not run the installer: {e}"))?;
+    }
+    match child.wait().map_err(|e| format!("could not run the installer: {e}"))? {
         s if s.success() => Ok(()),
         s => Err(format!("the installer stopped ({s}); this rak was left as it was")),
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Step {
+    Install,
+    /// Asked for nothing; the running rak is the newest release.
+    Newest,
+    /// Asked for the version that is running.
+    Same,
+    /// Asked for nothing; the running rak is newer than every release (a
+    /// build of unreleased work). Never replaced with an older release unasked.
+    Ahead,
+}
+
+/// Pure — unit-tested. What `rak update` does: a version asked for by name is
+/// installed even when older; with no version, only a newer release is.
+fn plain_update(asked: bool, target: &str, current: &str) -> Step {
+    match (asked, compare(target, current)) {
+        (_, Ordering::Equal) if asked => Step::Same,
+        (_, Ordering::Equal) => Step::Newest,
+        (true, _) => Step::Install,
+        (false, Ordering::Greater) => Step::Install,
+        (false, Ordering::Less) => Step::Ahead,
     }
 }
 
@@ -118,8 +162,8 @@ fn tags_of(releases: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// That release's own install.sh, saved to a temporary file.
-fn download_installer(tag: &str) -> Result<PathBuf, String> {
+/// That release's own install.sh, as text.
+fn download_installer(tag: &str) -> Result<String, String> {
     let url = format!("https://raw.githubusercontent.com/{REPO}/{tag}/install.sh");
     let text = agent()
         .get(&url)
@@ -130,9 +174,7 @@ fn download_installer(tag: &str) -> Result<PathBuf, String> {
     if !text.starts_with("#!") {
         return Err(format!("the installer for {tag} does not look like a script; nothing was changed"));
     }
-    let path = std::env::temp_dir().join(format!("rak-install-{}.sh", std::process::id()));
-    std::fs::write(&path, text).map_err(|e| format!("could not save the installer: {e}"))?;
-    Ok(path)
+    Ok(text)
 }
 
 /// Pure — unit-tested. "alpha.24", "0.1.0-alpha.24" or "v0.1.0-alpha.24" as a
@@ -199,6 +241,17 @@ mod tests {
         // GitHub's own order put alpha.9 before alpha.10.
         assert_eq!(newest(&tags(&["v0.1.0-alpha.9", "v0.1.0-alpha.10", "v0.1.0-alpha.2"])), Some("v0.1.0-alpha.10"));
         assert_eq!(newest(&[]), None);
+    }
+
+    #[test]
+    fn a_plain_update_only_goes_forward_and_a_named_one_goes_anywhere() {
+        let a25 = "v0.1.0-alpha.25";
+        let a26 = "v0.1.0-alpha.26";
+        assert_eq!(plain_update(false, a26, a25), Step::Install, "newer release out");
+        assert_eq!(plain_update(false, a26, a26), Step::Newest);
+        assert_eq!(plain_update(false, a25, a26), Step::Ahead, "a build newer than every release stays");
+        assert_eq!(plain_update(true, a25, a26), Step::Install, "going back when asked by name");
+        assert_eq!(plain_update(true, a26, a26), Step::Same);
     }
 
     #[test]
