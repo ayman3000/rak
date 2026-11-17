@@ -61,6 +61,8 @@ pub struct Session {
     pub todo: rak::tools::todo::TodoList,
     /// The model delegate's helpers use, and what they spent since it was last counted.
     pub helper_model: Rc<RefCell<(Backend, String, usize)>>,
+    /// The reasoning effort helpers use, kept up to date by /effort.
+    pub helper_effort: Rc<RefCell<(Option<String>, bool)>>,
     pub helper_usage: Rc<Cell<rak::provider::Usage>>,
     /// Tool calls the helpers made since last counted, and in this whole chat.
     pub helper_calls: Rc<Cell<usize>>,
@@ -230,16 +232,27 @@ pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
     })
 }
 
+/// The effort to send this model: the chat's default is left out for a model
+/// whose server already refused the field.
+pub fn effort_for(o: &Options, backend: &Backend, model: &str) -> Option<String> {
+    if o.effort_auto && rak::provider::refused_effort(&backend.base_url, model) {
+        return None;
+    }
+    o.effort.clone()
+}
+
 pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -> Box<dyn Model + Send> {
     if backend.anthropic {
         let mut provider = Anthropic::new(&backend.base_url, backend.api_key.clone().unwrap_or_default(), model);
-        provider.effort = o.effort.clone();
+        provider.effort = effort_for(o, backend, model);
+        provider.effort_optional = o.effort_auto;
         provider.max_tokens = o.max_tokens;
         provider.stop = stop.clone();
         return Box::new(provider);
     }
     let mut provider = OpenAICompatible::new(&backend.base_url, backend.api_key.clone(), model);
-    provider.effort = o.effort.clone();
+    provider.effort = effort_for(o, backend, model);
+    provider.effort_optional = o.effort_auto;
     provider.max_tokens = o.max_tokens;
     provider.stop = stop.clone();
     Box::new(provider)
@@ -257,6 +270,7 @@ pub fn make_vision(o: &Options, stop: &Stop) -> Result<Option<rak::vision::Visio
     }
     // A description wants no reasoning budget or reply cap from the main model.
     vo.effort = None;
+    vo.effort_auto = false;
     vo.max_tokens = None;
     let backend = backend(&vo, Some(&model))?;
     let name = format!("{}/{model}", backend.provider.as_deref().unwrap_or(backend.base_url.as_str()));
@@ -307,12 +321,27 @@ pub fn run(mut o: Options) -> i32 {
     o.model = o.model.or_else(|| key("RAK_MODEL"));
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
     o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
+    if o.effort.is_none() && !o.effort_none {
+        if let Some(typed) = key("RAK_EFFORT").filter(|e| !e.trim().is_empty()) {
+            match super::args::effort_level(&typed) {
+                Some(level) => o.effort = Some(level),
+                None if super::args::is_default_effort(&typed) => o.effort_none = true,
+                None => eprintln!("rak: RAK_EFFORT={typed} is not a level (low, medium, high, xhigh, max or default); ignoring it"),
+            }
+        }
+    }
     o.vision_model = o.vision_model.or_else(|| key("RAK_VISION_MODEL")).filter(|m| !m.trim().is_empty());
     o.vision_provider = o.vision_provider.or_else(|| key("RAK_VISION_PROVIDER")).filter(|p| !p.trim().is_empty());
 
     let stdin_tty = std::io::stdin().is_terminal();
     let stdout_tty = std::io::stdout().is_terminal();
     let chat = o.task.is_none() && stdin_tty && !o.json;
+    // A chat starts at medium effort when none is set; a one-off run sends
+    // none unless asked, so scripts and benchmarks get the model's own default.
+    if chat && o.effort.is_none() && !o.effort_none {
+        o.effort = Some(super::args::CHAT_EFFORT.to_string());
+        o.effort_auto = true;
+    }
     let no_color = std::env::var_os("NO_COLOR").is_some();
     let out_color = stdout_tty && !no_color;
     let err_color = std::io::stderr().is_terminal() && !no_color;
@@ -457,6 +486,7 @@ pub fn run(mut o: Options) -> i32 {
     // delegate: a helper agent with read-only tools and a fresh context, on
     // the chat's current model (`helper_model`, kept up to date by /model).
     let helper_model = Rc::new(RefCell::new((backend.clone(), model_name.clone(), window)));
+    let helper_effort = Rc::new(RefCell::new((o.effort.clone(), o.effort_auto)));
     // Approvals and fallbacks: -y (or /yes) runs everything; otherwise ask at
     // the terminal, and with no terminal to ask, approvals stop.
     let auto = Rc::new(Cell::new(o.yes));
@@ -464,6 +494,7 @@ pub fn run(mut o: Options) -> i32 {
     let asker = chain::Asker { o: o.clone(), stop: stop.clone(), ui: ui.clone(), auto: auto.clone(), interactive, color: err_color };
     let delegate = rak::delegate::Delegate::new(Box::new(Helpers {
         current: helper_model.clone(),
+        effort: helper_effort.clone(),
         o: o.clone(),
         stop: stop.clone(),
         ui: ui.clone(),
@@ -590,6 +621,7 @@ pub fn run(mut o: Options) -> i32 {
         chat_id: rak::sessions::new_id(),
         todo,
         helper_model,
+        helper_effort,
         helper_usage,
         helper_calls,
         helper_calls_total: 0,
@@ -703,6 +735,7 @@ fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
 /// for it (each helper has its own place in the chain).
 struct Helpers {
     current: Rc<RefCell<(Backend, String, usize)>>,
+    effort: Rc<RefCell<(Option<String>, bool)>>,
     o: Options,
     stop: Stop,
     ui: Rc<RefCell<Ui>>,
@@ -723,7 +756,11 @@ impl rak::delegate::Host for Helpers {
         let mut system_prompt = system_prompt(&self.ctx.cwd, true, self.notes.as_deref());
         system_prompt.push_str(rak::delegate::HELPER_NOTE);
         rak::delegate::Helper {
-            model: make_provider(&self.o, &backend, &model, &self.stop),
+            model: {
+                let mut o = self.o.clone();
+                (o.effort, o.effort_auto) = self.effort.borrow().clone();
+                make_provider(&o, &backend, &model, &self.stop)
+            },
             tools,
             config: Config { system_prompt, max_turns: 25, context_window: window },
             stop: self.stop.clone(),

@@ -8,6 +8,18 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.27. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- Reasoning effort as a setting: `RAK_EFFORT` in the key file (a bad value
+  is named and ignored), `--effort` still wins for one run, and `/effort`
+  in a chat (picker, or `/effort high` / `default`) changes it for the chat
+  and its helpers. The status line shows the level being sent.
+- A chat starts at medium effort when none is set; a one-off run sends none
+  (benchmarks keep the model's own default). A server that refuses the chat's
+  default (400/422) gets the request again without it, and that model gets
+  none for the rest of the run; an effort the person set is never dropped.
+  `default` sends none on purpose.
+
 ### In v0.1.0-alpha.27
 
 - A plain `rak update` only installs a release newer than the running rak;

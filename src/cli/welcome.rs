@@ -127,6 +127,7 @@ pub fn panel(info: &Info, requested: usize, color: bool) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 pub fn status_rule(
     model: &str,
+    effort: Option<&str>,
     used: usize,
     window: usize,
     folder: &str,
@@ -151,9 +152,11 @@ pub fn status_rule(
         Some(branch) => format!("{folder} ({branch})"),
         None => folder.to_string(),
     };
-    let mut line: Line = vec![
-        span("── ", &[Style::C37]),
-        span(model, &[Style::C45, Style::Bold]),
+    let mut line: Line = vec![span("── ", &[Style::C37]), span(model, &[Style::C45, Style::Bold])];
+    if let Some(effort) = effort {
+        line.extend([sep(), span(format!("{effort} effort"), &[Style::Dim])]);
+    }
+    line.extend([
         sep(),
         span(format!("ctx {}/{} ", short(used), short(window)), &[Style::Dim]),
         span("▰".repeat(filled), &[bar_style]),
@@ -164,7 +167,7 @@ pub fn status_rule(
         sep(),
         span(mode, if mode.starts_with("auto") { &[Style::Yellow] } else { &[Style::Dim] }),
         span(" ", &[]),
-    ];
+    ]);
     if width(&line) >= total {
         line = fitted(&line, total);
     } else {
@@ -376,14 +379,15 @@ mod tests {
     #[test]
     fn the_status_rule_fills_the_width_and_shows_how_full_the_context_is() {
         for cols in [20, 50, 80, 140] {
-            let rule = status_rule("kimi-k2.6:cloud", 7_234, 262_144, "rak", Some("main"), "asks before changes", cols, false);
+            let rule = status_rule("kimi-k2.6:cloud", None, 7_234, 262_144, "rak", Some("main"), "asks before changes", cols, false);
             assert_eq!(text_width(&rule), cols);
         }
-        let rule = status_rule("m", 7_234, 262_144, "rak", Some("main"), "auto mode", 120, false);
+        let rule = status_rule("m", None, 7_234, 262_144, "rak", Some("main"), "auto mode", 120, false);
         assert!(rule.contains("ctx 7.2K/262K ▰▱▱▱▱▱▱▱▱▱ 3%"));
         assert!(rule.contains("rak (main) · auto mode"));
-        assert!(status_rule("m", 0, 128_000, "rak", None, "read-only", 120, false).contains("▱▱▱▱▱▱▱▱▱▱ 0% · rak · read-only"));
-        assert!(status_rule("m", 500_000, 128_000, "rak", None, "x", 120, false).contains("▰▰▰▰▰▰▰▰▰▰ 100%"));
+        assert!(status_rule("m", None, 0, 128_000, "rak", None, "read-only", 120, false).contains("▱▱▱▱▱▱▱▱▱▱ 0% · rak · read-only"));
+        assert!(status_rule("m", Some("high"), 0, 128_000, "rak", None, "x", 120, false).contains("m · high effort · ctx 0/128K"));
+        assert!(status_rule("m", None, 500_000, 128_000, "rak", None, "x", 120, false).contains("▰▰▰▰▰▰▰▰▰▰ 100%"));
     }
 
     #[test]

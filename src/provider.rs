@@ -129,12 +129,45 @@ pub fn known_to_see(model: &str) -> Option<bool> {
 /// What the person sees when they stop a request mid-answer.
 pub const STOPPED: &str = "stopped";
 
+/// Models whose server refused the reasoning-effort field ("address|model"),
+/// for this run: a chat's default effort is no longer sent to them.
+static REFUSED_EFFORT: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn effort_key(base_url: &str, model: &str) -> String {
+    format!("{}|{model}", base_url.trim_end_matches('/'))
+}
+
+/// Whether this model's server refused the effort field earlier in this run.
+pub fn refused_effort(base_url: &str, model: &str) -> bool {
+    REFUSED_EFFORT.lock().map(|list| list.contains(&effort_key(base_url, model))).unwrap_or(false)
+}
+
+/// Notes that this model's server refused the effort field.
+pub fn note_refused_effort(base_url: &str, model: &str) {
+    if let Ok(mut list) = REFUSED_EFFORT.lock() {
+        let key = effort_key(base_url, model);
+        if !list.contains(&key) {
+            list.push(key);
+        }
+    }
+}
+
+/// Pure — unit-tested. Whether an answer can mean "this request has a field
+/// the model doesn't take": a bad request (400) or an unprocessable one (422).
+pub fn may_refuse_a_field(code: u16) -> bool {
+    code == 400 || code == 422
+}
+
 pub struct OpenAICompatible {
     pub base_url: String,
     pub api_key: Option<String>,
     pub model: String,
     /// Sent as `reasoning_effort` when set (low / medium / high).
     pub effort: Option<String>,
+    /// The effort is a default, not the person's choice: when the server
+    /// answers 400/422, the request is tried once more without it, and on
+    /// success the model gets none from then on.
+    pub effort_optional: bool,
     /// Sent as `max_tokens` when set; otherwise the server's default applies.
     pub max_tokens: Option<u64>,
     /// Checked between pieces of a streamed answer.
@@ -156,6 +189,7 @@ impl OpenAICompatible {
             api_key,
             model: model.to_string(),
             effort: None,
+            effort_optional: false,
             max_tokens: None,
             stop: Stop::new(),
             http,
@@ -196,8 +230,33 @@ impl OpenAICompatible {
 }
 
 impl OpenAICompatible {
+    /// `post`, and when the server refuses a default effort, once more
+    /// without it (see `effort_optional`).
+    fn send(&mut self, body: Value, read: Duration) -> Result<ureq::Response, ModelError> {
+        let optional = self.effort_optional && body.get("reasoning_effort").is_some();
+        match self.post_status(body.clone(), read) {
+            Err((Some(code), error)) if optional && may_refuse_a_field(code) => {
+                let mut without = body;
+                if let Some(fields) = without.as_object_mut() {
+                    fields.remove("reasoning_effort");
+                }
+                // Refused again: the effort was not the reason; say the first answer.
+                let response = self.post(without, read).map_err(|_| error)?;
+                self.effort = None;
+                note_refused_effort(&self.base_url, &self.model);
+                Ok(response)
+            }
+            other => other.map_err(|(_, error)| error),
+        }
+    }
+
     /// `read`: how long the server may send nothing.
     fn post(&self, body: Value, read: Duration) -> Result<ureq::Response, ModelError> {
+        self.post_status(body, read).map_err(|(_, error)| error)
+    }
+
+    /// Like `post`, with the HTTP status of a refusal.
+    fn post_status(&self, body: Value, read: Duration) -> Result<ureq::Response, (Option<u16>, ModelError)> {
         let url = format!("{}/chat/completions", self.base_url);
         let mut request = self.clients.with_read_limit(read).post(&url);
         if let Some(key) = &self.api_key {
@@ -209,12 +268,12 @@ impl OpenAICompatible {
                 let text = response.into_string().unwrap_or_default();
                 let message = format!("the model server answered {code}: {}", one_line(&error_message(&text), 300));
                 if code == 408 || code == 429 || code >= 500 {
-                    Err(ModelError::Retryable(message))
+                    Err((Some(code), ModelError::Retryable(message)))
                 } else {
-                    Err(ModelError::Fatal(message))
+                    Err((Some(code), ModelError::Fatal(message)))
                 }
             }
-            Err(ureq::Error::Transport(t)) => Err(ModelError::Retryable(format!("could not reach {url}: {t}"))),
+            Err(ureq::Error::Transport(t)) => Err((None, ModelError::Retryable(format!("could not reach {url}: {t}")))),
         }
     }
 
@@ -278,7 +337,7 @@ impl Model for OpenAICompatible {
         let body = self.request_body(messages, tools);
         let read = crate::stall::limit(crate::stall::WHOLE_ANSWER, body.to_string().len());
         let body: Value = self
-            .post(body, read)?
+            .send(body, read)?
             .into_json()
             .map_err(|e| ModelError::Retryable(format!("unreadable reply from the model server: {e}")))?;
         parse_reply(&body)
@@ -289,7 +348,7 @@ impl Model for OpenAICompatible {
         body["stream"] = json!(true);
         body["stream_options"] = json!({ "include_usage": true });
         let read = crate::stall::limit(self.stall_base, body.to_string().len());
-        let mut lines = std::io::BufReader::new(self.post(body, read)?.into_reader());
+        let mut lines = std::io::BufReader::new(self.send(body, read)?.into_reader());
         let mut streamed = StreamedReply::default();
         let mut line = String::new();
         loop {
@@ -564,6 +623,94 @@ mod tests {
         let body = p.request_body(&[], &[json!({"type": "function"})]);
         assert_eq!(body["reasoning_effort"], "low");
         assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+    }
+
+    /// A stand-in model server: refuses (400) any request that carries
+    /// `reasoning_effort` when `refuses_effort`, answers the rest with "ok".
+    /// Returns its address and, at the end, the bodies it was sent.
+    fn effort_server(requests: usize, refuses_effort: bool, refuses_all: bool) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for _ in 0..requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut seen = Vec::new();
+                let mut buffer = [0u8; 8192];
+                let body = loop {
+                    let n = stream.read(&mut buffer).unwrap();
+                    seen.extend_from_slice(&buffer[..n]);
+                    let text = String::from_utf8_lossy(&seen).to_string();
+                    if let Some((head, sent)) = text.split_once("\r\n\r\n") {
+                        let length: usize = head
+                            .lines()
+                            .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+                            .unwrap_or(0);
+                        if sent.len() >= length {
+                            break serde_json::from_str::<Value>(sent).unwrap();
+                        }
+                    }
+                };
+                let refuse = refuses_all || (refuses_effort && body.get("reasoning_effort").is_some());
+                let (status, reply) = if refuse {
+                    ("400 Bad Request", json!({ "error": { "message": "unknown field" } }))
+                } else {
+                    ("200 OK", json!({ "choices": [{ "message": { "role": "assistant", "content": "ok" } }] }))
+                };
+                let reply = reply.to_string();
+                let answer = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+                stream.write_all(answer.as_bytes()).unwrap();
+                bodies.push(body);
+            }
+            bodies
+        });
+        (url, handle)
+    }
+
+    fn effort_provider(url: &str, model: &str, optional: bool) -> OpenAICompatible {
+        let mut p = OpenAICompatible::new(url, None, model);
+        p.effort = Some("medium".into());
+        p.effort_optional = optional;
+        p
+    }
+
+    #[test]
+    fn a_default_effort_the_server_refuses_is_dropped_and_remembered() {
+        let (url, server) = effort_server(3, true, false);
+        let mut p = effort_provider(&url, "no-effort-model", true);
+        let hi = [json!({ "role": "user", "content": "hi" })];
+        assert_eq!(p.chat(&hi, &[]).unwrap().content, "ok");
+        assert!(p.effort.is_none() && refused_effort(&url, "no-effort-model"));
+        assert_eq!(p.chat(&hi, &[]).unwrap().content, "ok", "the next request goes without it");
+        let bodies = server.join().unwrap();
+        assert_eq!(bodies[0]["reasoning_effort"], "medium");
+        assert!(bodies[1].get("reasoning_effort").is_none() && bodies[2].get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn an_effort_the_person_chose_is_never_dropped() {
+        let (url, server) = effort_server(1, true, false);
+        let mut p = effort_provider(&url, "chosen-effort-model", false);
+        let error = p.chat(&[json!({ "role": "user", "content": "hi" })], &[]).unwrap_err().to_string();
+        assert!(error.contains("400") && error.contains("unknown field"), "{error}");
+        assert_eq!(p.effort.as_deref(), Some("medium"));
+        assert!(!refused_effort(&url, "chosen-effort-model"));
+        assert_eq!(server.join().unwrap().len(), 1, "one request, no retry");
+    }
+
+    #[test]
+    fn a_request_refused_with_or_without_the_effort_keeps_it_and_says_the_first_answer() {
+        let (url, server) = effort_server(2, false, true);
+        let mut p = effort_provider(&url, "broken-model", true);
+        let error = p.chat(&[json!({ "role": "user", "content": "hi" })], &[]).unwrap_err().to_string();
+        assert!(error.contains("400"), "{error}");
+        assert_eq!(p.effort.as_deref(), Some("medium"), "not the effort's fault");
+        assert!(!refused_effort(&url, "broken-model"));
+        server.join().unwrap();
     }
 
     #[test]

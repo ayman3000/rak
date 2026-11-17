@@ -33,6 +33,10 @@ rak knows these providers by name. Each gets its own address and only its own ke
 | The command line | `rak --provider groq -m MODEL "…"` | that run |
 | In a chat | `/provider NAME`, `/model NAME` | that chat; the model is remembered |
 
+**Reasoning effort** works the same way: `RAK_EFFORT=high` in the key file, `--effort high` for one run (it wins over the file), `/effort high` in a chat (that chat only). It is sent as `reasoning_effort`, or as Anthropic's `output_config.effort`. `xhigh` and `max` are not taken by every model.
+
+With nothing set, a chat starts at `medium`, and a one-off run (`rak "…"`, `--json`) sends none, so scripts and benchmarks get the model's own default. If a model's server refuses the chat's `medium` (a 400), rak asks once more without it and sends that model none for the rest of the run. An effort you set yourself is never dropped: the server's answer is shown instead. `default` (in `RAK_EFFORT`, `--effort` or `/effort`) sends none, in a chat too.
+
 **Which model is used:** in a chat, `-m` if given, then the model you last picked for that provider, then `RAK_MODEL`, then a list to pick from. A one-off run (`rak "…"`) uses `-m`, then `RAK_MODEL`, then your last pick, so scripts stay predictable. `RAK_MODEL` belongs to the provider in `RAK_PROVIDER`, not to one chosen with `--provider`.
 
 ```bash
@@ -58,6 +62,7 @@ rak reads the environment first, then `./.env` in the project, then `~/.config/r
 | a provider's key (table above) | that provider, and only that provider |
 | `TAVILY_API_KEY` | `web_search` |
 | `RAK_PROVIDER`, `RAK_MODEL` | the selected provider and model |
+| `RAK_EFFORT` | the reasoning effort: `low`, `medium`, `high`, `xhigh` or `max` (empty: the model's own) |
 | `RAK_BASE_URL` | the selected provider at another address, e.g. Ollama on another machine |
 | `RAK_API_KEY` | the key for a server named only by `--base-url` |
 

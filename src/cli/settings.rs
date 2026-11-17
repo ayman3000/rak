@@ -139,6 +139,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("TAVILY_API_KEY", "web_search"),
     ("RAK_PROVIDER", "the default provider"),
     ("RAK_MODEL", "the default model"),
+    ("RAK_EFFORT", "the default reasoning effort"),
     ("RAK_BASE_URL", "the default provider's address, if not its usual one"),
     ("RAK_VISION_PROVIDER", "the provider of the model that reads images"),
     ("RAK_VISION_MODEL", "the model that reads images for one that can't"),
@@ -147,7 +148,7 @@ pub const KNOWN: &[(&str, &str)] = &[
 
 /// Which of `KNOWN` are settings whose values may be shown.
 pub fn shows_value(name: &str) -> bool {
-    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_BASE_URL" | "RAK_VISION_PROVIDER" | "RAK_VISION_MODEL")
+    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_EFFORT" | "RAK_BASE_URL" | "RAK_VISION_PROVIDER" | "RAK_VISION_MODEL")
 }
 
 /// rak's own key file: ~/.config/rak/.env.

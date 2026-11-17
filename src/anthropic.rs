@@ -39,6 +39,9 @@ pub struct Anthropic {
     pub model: String,
     /// Sent as `output_config.effort`: low, medium, high, xhigh or max.
     pub effort: Option<String>,
+    /// A default effort, not the person's choice: on 400/422 the request is
+    /// tried once more without it (see OpenAICompatible::effort_optional).
+    pub effort_optional: bool,
     pub max_tokens: Option<u64>,
     pub stop: Stop,
     /// How long the stream may send nothing (see stall.rs).
@@ -56,6 +59,7 @@ impl Anthropic {
             api_key,
             model: model.to_string(),
             effort: None,
+            effort_optional: false,
             max_tokens: None,
             stop: Stop::new(),
             stall_base,
@@ -94,6 +98,32 @@ impl Anthropic {
         body
     }
 
+    /// One request to the Messages API; a refusal comes with its HTTP status.
+    fn post(&self, url: &str, body: Value, read: Duration) -> Result<ureq::Response, (Option<u16>, ModelError)> {
+        let mut request = self
+            .clients
+            .with_read_limit(read)
+            .post(url)
+            .set("x-api-key", &self.api_key)
+            .set("anthropic-version", VERSION)
+            .set("content-type", "application/json");
+        if self.has_fallback() {
+            request = request.set("anthropic-beta", FALLBACK_BETA);
+        }
+        match request.send_json(body) {
+            Ok(response) => Ok(response),
+            Err(ureq::Error::Status(code, response)) => {
+                let message = format!("the Anthropic API answered {code}: {}", error_text(response));
+                // 529 is "overloaded".
+                Err((
+                    Some(code),
+                    if code == 408 || code == 429 || code >= 500 { ModelError::Retryable(message) } else { ModelError::Fatal(message) },
+                ))
+            }
+            Err(ureq::Error::Transport(t)) => Err((None, ModelError::Retryable(format!("could not reach {url}: {t}")))),
+        }
+    }
+
     fn get(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{path}", self.base_url);
         let response = self
@@ -121,28 +151,21 @@ impl Model for Anthropic {
         let url = format!("{}/v1/messages", self.base_url);
         let body = self.request_body(messages, tools);
         let read = crate::stall::limit(self.stall_base, body.to_string().len());
-        let mut request = self
-            .clients
-            .with_read_limit(read)
-            .post(&url)
-            .set("x-api-key", &self.api_key)
-            .set("anthropic-version", VERSION)
-            .set("content-type", "application/json");
-        if self.has_fallback() {
-            request = request.set("anthropic-beta", FALLBACK_BETA);
-        }
-        let response = match request.send_json(body) {
+        let optional = self.effort_optional && body.get("output_config").is_some();
+        let response = match self.post(&url, body.clone(), read) {
             Ok(response) => response,
-            Err(ureq::Error::Status(code, response)) => {
-                let message = format!("the Anthropic API answered {code}: {}", error_text(response));
-                // 529 is "overloaded".
-                return Err(if code == 408 || code == 429 || code >= 500 {
-                    ModelError::Retryable(message)
-                } else {
-                    ModelError::Fatal(message)
-                });
+            // A default effort the model doesn't take: once more without it.
+            Err((Some(code), error)) if optional && crate::provider::may_refuse_a_field(code) => {
+                let mut without = body;
+                if let Some(fields) = without.as_object_mut() {
+                    fields.remove("output_config");
+                }
+                let response = self.post(&url, without, read).map_err(|_| error)?;
+                self.effort = None;
+                crate::provider::note_refused_effort(&self.base_url, &self.model);
+                response
             }
-            Err(ureq::Error::Transport(t)) => return Err(ModelError::Retryable(format!("could not reach {url}: {t}"))),
+            Err((_, error)) => return Err(error),
         };
         let mut lines = std::io::BufReader::new(response.into_reader());
         let mut stream = Stream::default();

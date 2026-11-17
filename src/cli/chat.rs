@@ -91,6 +91,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
             "{}",
             welcome::status_rule(
                 &s.model,
+                effort_now(s).as_deref(),
                 s.agent.last_prompt_tokens as usize,
                 s.window,
                 &folder,
@@ -364,6 +365,59 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     println!("Now using {}{via}.", paint(color, Style::Bold, model));
 }
 
+/// Pure — unit-tested. How an effort reads in the chat.
+fn effort_label(effort: Option<&str>) -> String {
+    match effort {
+        Some(level) => level.to_string(),
+        None => "default (the model's own)".to_string(),
+    }
+}
+
+/// The effort this chat's requests carry now: none for a model that refused
+/// the chat's default.
+fn effort_now(s: &Session) -> Option<String> {
+    super::session::effort_for(&s.o, &s.backend, &s.model)
+}
+
+/// The effort picker: the model's own default first, then the levels.
+/// Some(None) is "default"; None when the person cancels (Esc).
+fn pick_effort(current: Option<&str>, color: bool) -> Option<Option<String>> {
+    let mut levels: Vec<Option<&str>> = vec![None];
+    levels.extend(super::args::EFFORTS.iter().map(|l| Some(*l)));
+    let note = |level: Option<&str>| match level {
+        None => "send none: the model decides",
+        Some("low") => "quicker answers, fewer reasoning tokens",
+        Some("medium") => "between the two; a chat starts here",
+        Some("high") => "more thinking on hard tasks",
+        Some("xhigh") | Some("max") => "not every model takes it",
+        _ => "",
+    };
+    let choices: Vec<Choice> =
+        levels.iter().map(|l| Choice { name: l.unwrap_or("default").to_string(), note: note(*l).to_string(), dim: false }).collect();
+    let start = levels.iter().position(|l| *l == current);
+    match picker::pick(&choices, start, false, color) {
+        Picked::Item(i) => Some(levels[i].map(str::to_string)),
+        _ => None,
+    }
+}
+
+/// Sends the chat's next requests (and its helpers') with this effort. For
+/// this chat only: RAK_EFFORT in ~/.config/rak/.env keeps one.
+fn set_effort(s: &mut Session, effort: Option<String>) {
+    let color = s.ui.borrow().out_color;
+    s.o.effort = effort.clone();
+    // Chosen now, so sent as chosen: no longer the chat's own default.
+    (s.o.effort_auto, s.o.effort_none) = (false, effort.is_none());
+    *s.helper_effort.borrow_mut() = (effort.clone(), false);
+    s.agent.set_model(make_provider(&s.o, &s.backend, &s.model, &s.stop));
+    s.log.write(json!({ "event": "effort", "effort": effort }));
+    println!(
+        "Effort: {} for this chat. {}",
+        paint(color, Style::Bold, &effort_label(effort.as_deref())),
+        paint(color, Style::Dim, "To keep one, set RAK_EFFORT in ~/.config/rak/.env.")
+    );
+}
+
 /// Runs a slash command. False means leave the chat.
 pub fn run_command(s: &mut Session, line: &str) -> bool {
     let color = s.ui.borrow().out_color;
@@ -392,6 +446,27 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
         "provider" if !args.is_empty() => switch_provider(s, args),
+        "effort" if !args.is_empty() => match args.to_lowercase().as_str() {
+            "default" | "off" | "none" => set_effort(s, None),
+            typed => match super::args::effort_level(typed) {
+                Some(level) => set_effort(s, Some(level)),
+                None => println!("{}", dim("The levels are low, medium, high, xhigh and max, or default for the model's own.")),
+            },
+        },
+        "effort" => {
+            let now = effort_now(s);
+            let why = match (&now, s.o.effort_auto) {
+                (Some(_), true) => " (a chat starts there when none is set)",
+                (None, true) => " (this model refused an effort)",
+                _ => "",
+            };
+            println!("Effort: {}{}", paint(color, Style::Bold, &effort_label(now.as_deref())), dim(why));
+            match pick_effort(now.as_deref(), color) {
+                Some(level) if level == now && !s.o.effort_auto => println!("{}", dim("Kept it.")),
+                Some(level) => set_effort(s, level),
+                None => println!("{}", dim("Kept it.")),
+            }
+        }
         "provider" => {
             println!("Provider: {}", paint(color, Style::Bold, &provider_label(&s.backend)));
             match pick_provider(s, color) {
@@ -563,6 +638,12 @@ mod tests {
     use super::*;
     use rak::tools::shell::JobInfo;
     use std::path::PathBuf;
+
+    #[test]
+    fn no_effort_reads_as_the_model_s_own() {
+        assert_eq!(effort_label(None), "default (the model's own)");
+        assert_eq!(effort_label(Some("high")), "high");
+    }
 
     #[test]
     fn jobs_are_listed_numbered_with_state_pid_command_and_log() {

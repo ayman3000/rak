@@ -90,6 +90,7 @@ Started without a task, rak opens a chat:
 | `/model [name]` | Show or switch the model. Without a name: pick from a list (↑/↓, Enter, Esc cancels, type to narrow; a name the list doesn't have can be typed and used). |
 | `/models` | List the models the provider offers. |
 | `/provider [name]` | Show or switch the provider: its own address and key, and the model you last picked there. The conversation comes along. Without a name: a list that dims providers whose key isn't set. |
+| `/effort [level]` | Show or switch the reasoning effort for this chat: `low`, `medium`, `high`, `xhigh`, `max`, or `default` (none sent: the model's own). Without a level: pick from a list. A chat starts at `medium` unless `RAK_EFFORT` says otherwise; the status line shows the level being sent. |
 | `/init` | Set up this project's notes in `rak/`, or bring them up to date. |
 | `/notes` | Show the project's rules and notes (project, roadmap without Done, the latest journal lines). |
 | `/tools`, `/mcp`, `/skills` | List the tools, the MCP servers and their tools, the skills. `/skills add URL` adds a skill (it shows it and asks first). |
@@ -123,7 +124,7 @@ Started without a task, rak opens a chat:
 | `--provider NAME` | Who runs the model (see [Providers](providers.md)). |
 | `--base-url URL` | Another address: a server rak doesn't know by name, or a provider somewhere else. |
 | `--api-key-env NAME` | The variable holding the key to send. |
-| `--effort LEVEL` | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. |
+| `--effort LEVEL` | Reasoning effort: `low`, `medium`, `high`, `xhigh`, `max`, or `default` (none sent). Wins over `RAK_EFFORT`. Without it a one-off run sends none and a chat starts at `medium`. |
 | `--max-tokens N` | Longest reply to ask for. |
 | `--context N` | The model's context window. Default: what Anthropic or Ollama reports, otherwise 128000. |
 | `--no-stream` | Wait for each whole reply instead of showing it as it arrives. |

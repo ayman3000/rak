@@ -29,7 +29,9 @@ MODEL
       --api-key-env NAME  the variable holding the key to send
                           default: the provider's own key (`rak keys` lists
                           them); RAK_API_KEY for a server named by --base-url
-      --effort LEVEL      reasoning effort: low, medium, high, xhigh or max
+      --effort LEVEL      reasoning effort: low, medium, high, xhigh, max, or
+                          default (none sent). A chat starts at medium, a
+                          one-off run sends none                [env RAK_EFFORT]
       --max-tokens N      longest reply to ask for
       --context N         the model's context window in tokens
                           default: what an Ollama server reports, else 128000
@@ -42,8 +44,8 @@ KEYS (run `rak keys` to create the key file from a template)
   Read from the environment, then ./.env in the project, then
   ~/.config/rak/.env. Values from the files are not passed on to commands.
   Each provider has its own key (ANTHROPIC_API_KEY, OPENROUTER_API_KEY,
-  OLLAMA_API_KEY, …); `rak keys` lists them all. RAK_PROVIDER, RAK_MODEL and
-  RAK_BASE_URL may be set there too.
+  OLLAMA_API_KEY, …); `rak keys` lists them all. RAK_PROVIDER, RAK_MODEL,
+  RAK_EFFORT and RAK_BASE_URL may be set there too.
   TAVILY_API_KEY                                   web_search (https://tavily.com)
 
 BEHAVIOUR
@@ -104,6 +106,11 @@ pub struct Options {
     pub model_flag: bool,
     pub api_key_env: Option<String>,
     pub effort: Option<String>,
+    /// The effort was set to "default" on purpose: send none, even in a chat.
+    pub effort_none: bool,
+    /// The effort is the chat's own default (medium), not one the person set:
+    /// a model whose server refuses the field gets none instead.
+    pub effort_auto: bool,
     pub max_tokens: Option<u64>,
     pub context: Option<usize>,
     pub no_stream: bool,
@@ -151,6 +158,26 @@ pub fn tool_list(text: &str) -> Vec<String> {
     }
 }
 
+/// The reasoning efforts rak passes on (`reasoning_effort`, or Anthropic's
+/// `output_config.effort`). xhigh and max are not taken by every model.
+pub const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Pure — unit-tested. A level as typed ("High", " low ") in its sent form;
+/// None when it is not one.
+pub fn effort_level(typed: &str) -> Option<String> {
+    let level = typed.trim().to_lowercase();
+    EFFORTS.contains(&level.as_str()).then_some(level)
+}
+
+/// Pure — unit-tested. "default" (or "none"): send no effort, the model decides.
+pub fn is_default_effort(typed: &str) -> bool {
+    matches!(typed.trim().to_lowercase().as_str(), "default" | "none" | "off")
+}
+
+/// The effort a chat starts with when none is set. One-off runs send none
+/// unless asked, so a scripted or benchmark run gets the model's own default.
+pub const CHAT_EFFORT: &str = "medium";
+
 pub fn usage_error(message: &str) -> ! {
     eprintln!("rak: {message}\nTry `rak --help`.");
     std::process::exit(2);
@@ -168,6 +195,8 @@ pub fn parse_args(args: Vec<String>) -> Options {
         model_flag: false,
         api_key_env: None,
         effort: None,
+        effort_none: false,
+        effort_auto: false,
         max_tokens: None,
         context: None,
         no_stream: false,
@@ -223,13 +252,13 @@ pub fn parse_args(args: Vec<String>) -> Options {
                 o.provider_flag = true;
             }
             "--api-key-env" => o.api_key_env = Some(value("--api-key-env")),
-            "--effort" => {
-                let level = value("--effort");
-                if !["low", "medium", "high", "xhigh", "max"].contains(&level.as_str()) {
-                    usage_error("--effort is low, medium, high, xhigh or max");
-                }
-                o.effort = Some(level);
-            }
+            "--effort" => match value("--effort") {
+                typed if is_default_effort(&typed) => o.effort_none = true,
+                typed => match effort_level(&typed) {
+                    Some(level) => o.effort = Some(level),
+                    None => usage_error("--effort is low, medium, high, xhigh, max or default"),
+                },
+            },
             "--max-tokens" => o.max_tokens = Some(number("--max-tokens", value("--max-tokens"))),
             "--context" => o.context = Some(number("--context", value("--context"))),
             "--no-stream" => o.no_stream = true,
@@ -273,6 +302,15 @@ pub fn parse_args(args: Vec<String>) -> Options {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_effort_is_one_of_the_levels_however_it_is_typed() {
+        assert_eq!(super::effort_level(" High ").as_deref(), Some("high"));
+        assert_eq!(super::effort_level("max").as_deref(), Some("max"));
+        assert_eq!(super::effort_level("extreme"), None);
+        assert_eq!(super::effort_level(""), None);
+        assert!(super::is_default_effort("Default") && super::is_default_effort("none") && !super::is_default_effort("low"));
+    }
+
     #[test]
     fn the_help_names_every_provider() {
         let normalized = super::HELP.replace(['\n', ' '], ",");
