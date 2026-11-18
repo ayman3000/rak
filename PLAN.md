@@ -1,10 +1,10 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-18, after releasing v0.1.0-alpha.36. A working plan for picking the work up on another machine.
+Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.36** (2026-11-18). It has everything
+- The newest release is **v0.1.0-alpha.37** (2026-11-18). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
@@ -12,10 +12,23 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.36. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.37
+
+- **Every skill is a chat command**: `/sdd-plan add login` sends "Use the
+  skill "sdd-plan": load it with use_skill and follow it for this request:
+  …" (menu::skill_request). The command is the skill's name as a slug; the
+  "/" menu lists skills after rak's own commands ("skill: " + description),
+  /help names them, and a typed prefix resolves to one. A slug that is one
+  of rak's own commands, or another skill's, gets no command. The list is
+  rebuilt before every prompt, so /skills add and remove show at once.
+  Driven in a real chat through a pty (gpt-5.6-luna): the menu, /help and
+  /sdd-plan, which loaded the skill and stopped at its missing inputs.
+
 ### In v0.1.0-alpha.36
 
-Released before the two-request change could be run against GitHub (its
-hourly limit was used up); its pure parts are unit-tested.
+Checked against GitHub after the release, once its limit had reset: an
+8-skill repository cost 2 API requests and saved 8 of 8, and a skill folder
+that ships files (anthropics/skills pdf) came with its 11 files.
 
 - `rak skills add … -y` no longer prints each skill's first 40 lines: with
   nothing asked, a skill is its name, description, source and length, the

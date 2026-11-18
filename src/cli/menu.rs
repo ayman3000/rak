@@ -22,6 +22,32 @@ pub fn commands(help: &[(&str, &str)]) -> Vec<Command> {
         .collect()
 }
 
+/// Pure — unit-tested. A command for each skill, after the chat's own:
+/// "/sdd-plan [request]" for the skill "sdd-plan", "/ios-app" for "iOS app".
+/// A skill whose command would be one of the chat's own (`known`), or
+/// another skill's, gets none: it is still loaded by name.
+pub fn skill_commands(skills: &[(String, String)], known: &[&str]) -> Vec<(Command, String)> {
+    let mut out: Vec<(Command, String)> = Vec::new();
+    for (name, description) in skills {
+        let command = format!("/{}", rak::skills::save::slug(name));
+        if known.contains(&command.as_str()) || out.iter().any(|(c, _)| c.name == command) {
+            continue;
+        }
+        let about = format!("skill: {description}");
+        out.push((Command { name: command, arguments: "[request]".to_string(), about }, name.clone()));
+    }
+    out
+}
+
+/// Pure — unit-tested. What the agent is asked when a skill's command is run.
+pub fn skill_request(skill: &str, request: &str) -> String {
+    let lead = format!("Use the skill \"{skill}\": load it with use_skill and follow it");
+    match request.trim() {
+        "" => format!("{lead}."),
+        request => format!("{lead} for this request:\n\n{request}"),
+    }
+}
+
 /// The commands to offer for what's typed. Empty unless the line is a "/word"
 /// still being typed (no space yet). Names that start with the text come
 /// first, then names that merely contain it.
@@ -114,6 +140,38 @@ pub fn moved(selected: usize, step: isize, count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_skill_is_a_command_unless_the_name_is_taken() {
+        let skills = [
+            ("sdd-plan".to_string(), "SDD step 3.".to_string()),
+            ("iOS app".to_string(), "Build an app.".to_string()),
+            ("Help".to_string(), "Clashes with /help.".to_string()),
+            ("ios_app".to_string(), "Same command as iOS app.".to_string()),
+        ];
+        let commands = super::skill_commands(&skills, crate::cli::commands::KNOWN);
+        let names: Vec<(&str, &str)> = commands.iter().map(|(c, skill)| (c.name.as_str(), skill.as_str())).collect();
+        assert_eq!(names, [("/sdd-plan", "sdd-plan"), ("/ios-app", "iOS app")]);
+        assert_eq!((commands[0].0.arguments.as_str(), commands[0].0.about.as_str()), ("[request]", "skill: SDD step 3."));
+        // In the menu with the chat's own commands, and found as typed.
+        let mut all = super::commands(crate::cli::commands::HELP);
+        all.extend(commands.iter().map(|(c, _)| c.clone()));
+        assert_eq!(super::matches("/sdd", &all)[0].name, "/sdd-plan");
+        let mut known: Vec<&str> = crate::cli::commands::KNOWN.to_vec();
+        known.extend(commands.iter().map(|(c, _)| c.name.as_str()));
+        assert_eq!(super::resolve("/sdd add login", &all, &known), "/sdd-plan add login");
+        assert_eq!(super::resolve("/sdd-plan add login", &all, &known), "/sdd-plan add login");
+        assert_eq!(super::resolve("/skills", &all, &known), "/skills", "a chat command is never taken over");
+    }
+
+    #[test]
+    fn a_skill_s_command_asks_for_the_skill_by_name() {
+        assert_eq!(super::skill_request("sdd-plan", "  "), "Use the skill \"sdd-plan\": load it with use_skill and follow it.");
+        assert_eq!(
+            super::skill_request("iOS app", " a timer app "),
+            "Use the skill \"iOS app\": load it with use_skill and follow it for this request:\n\na timer app"
+        );
+    }
+
     use super::*;
     use crate::cli::commands::{HELP, KNOWN};
     use crate::cli::style::text_width;

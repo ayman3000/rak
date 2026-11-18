@@ -53,6 +53,8 @@ rak skills                    # list them
 rak skills remove pdf
 ```
 
+**Each skill is a command.** In a chat, `/sdd-plan` (the skill's name, with dashes for spaces) asks the agent to load that skill and follow it; what you type after it is the request. The agent still loads a skill by itself when a task matches its description; the command is for when you want one for sure, or for step-by-step sets where you choose the step. A skill named like one of rak's own commands gets no command and is loaded by asking for it.
+
 In a chat, `/skills add URL` and `/skills remove NAME` do the same. `/skills remove` asks before deleting, and finds the skill whether it is this project's or yours; a skill built into rak can't be removed.
 
 `rak skills add` takes a web address (a GitHub file or skill folder, with the files it ships) or a file. A GitHub repository's own page, or a folder holding several skill folders, stands for every skill in it: rak lists them, then shows and asks about each in turn. Before saving it shows the skill and points out lines worth reading first: commands piped into a shell, deletions, `~/.ssh`, `.env`, text telling the agent to ignore you. That list is a hint, not a verdict: read the skill.

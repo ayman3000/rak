@@ -322,6 +322,11 @@ impl Editor {
         Editor { history, history_file, commands, color }
     }
 
+    /// The "/" menu's commands from here on (the skills come and go in a chat).
+    pub fn set_commands(&mut self, commands: Vec<Command>) {
+        self.commands = commands;
+    }
+
     fn remember(&mut self, line: &str) {
         if line.trim().is_empty() || self.history.last().map(String::as_str) == Some(line) {
             return;

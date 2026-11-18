@@ -100,6 +100,7 @@ Started without a task, rak opens a chat:
 | `/init` | Set up this project's notes in `rak/`, or bring them up to date. |
 | `/notes` | Show the project's rules and notes (project, roadmap without Done, the latest journal lines). |
 | `/tools`, `/mcp`, `/skills` | List the tools, the MCP servers and their tools, the skills. `/skills add URL` adds a skill (it shows it and asks first), or every skill in a GitHub repository; `/skills remove NAME` deletes one you saved (it asks first). |
+| `/SKILL [request]` | Every skill is a command under its own name: `/sdd-plan add a login page` asks the agent to load that skill and follow it for the request. The `/` menu lists them after rak's own commands, and `/help` names them. A name with spaces gets dashes (`/ios-app` for "iOS app"). |
 | `/resume [N]` | This folder's saved chats, newest first; `/resume N` picks one up. |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens, tool calls, the context used and the window, fallbacks. |

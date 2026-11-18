@@ -82,9 +82,15 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
     if let Some(warning) = super::session::broad_folder_warning(&s.cwd, &home(), true) {
         println!("{}", paint(s.ui.borrow().out_color, Style::Yellow, &warning));
     }
-    let slash_commands = menu::commands(commands::HELP);
     let color = s.ui.borrow().out_color;
     loop {
+        // The chat's commands, then one for each skill (they come and go in a chat).
+        let skill_commands = skill_commands(s);
+        let mut slash_commands = menu::commands(commands::HELP);
+        slash_commands.extend(skill_commands.iter().map(|(command, _)| command.clone()));
+        editor.set_commands(slash_commands.clone());
+        let mut known: Vec<&str> = commands::KNOWN.to_vec();
+        known.extend(skill_commands.iter().map(|(command, _)| command.name.as_str()));
         let folder = s.cwd.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         println!();
         println!(
@@ -111,7 +117,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
             }
         }
         // "/mo" + Enter runs the menu's first match, "/model".
-        let input = menu::resolve(line.trim(), &slash_commands, commands::KNOWN);
+        let input = menu::resolve(line.trim(), &slash_commands, &known);
         if input.is_empty() {
             continue;
         }
@@ -126,6 +132,13 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
     }
     offer_to_stop_jobs(s);
     println!("{}", paint(color, Style::Dim, "bye"));
+}
+
+/// A "/" command for each skill the agent can load in this chat.
+fn skill_commands(s: &Session) -> Vec<(menu::Command, String)> {
+    let skills: Vec<(String, String)> =
+        s.skills.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone())).collect();
+    menu::skill_commands(&skills, commands::KNOWN)
 }
 
 /// Pure — unit-tested. The background jobs as /jobs lists them, numbered.
@@ -557,6 +570,12 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             for (usage, about) in commands::HELP {
                 println!("  {} {about}", paint(color, Style::Cyan, &pad(usage, 16)));
             }
+            let skills = skill_commands(s);
+            if !skills.is_empty() {
+                let names: Vec<&str> = skills.iter().map(|(command, _)| command.name.as_str()).collect();
+                println!("\n  {} run a skill by its name:", paint(color, Style::Cyan, &pad("/SKILL [request]", 16)));
+                println!("  {}", dim(&cut(&names.join("  "), 200)));
+            }
             println!("{}", dim("\n  Ctrl-C stops a running request · ↑/↓ history · Tab completes a command\n  Multi-line: end a line with \\ to continue it, or paste · Ctrl+V (or Alt+V) pastes an image"));
         }
         "model" | "m" if !args.is_empty() => switch_model(s, args),
@@ -720,7 +739,17 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
         }
         "resume" | "load" => resume(s, args.trim(), color),
         "exit" | "quit" | "q" => return false,
-        other => println!("{}", paint(color, Style::Yellow, &format!("Unknown command /{other}. Type /help."))),
+        other => {
+            // A skill's own command: "/sdd-plan add login" asks for that skill.
+            let skill = skill_commands(s).into_iter().find(|(command, _)| command.name[1..] == *other).map(|(_, skill)| skill);
+            match skill {
+                Some(skill) => {
+                    println!();
+                    run_one(s, &menu::skill_request(&skill, args));
+                }
+                None => println!("{}", paint(color, Style::Yellow, &format!("Unknown command /{other}. Type /help."))),
+            }
+        }
     }
     true
 }
