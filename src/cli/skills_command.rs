@@ -20,7 +20,8 @@ rak skills — know-how the agent loads when a task needs it
 
 OPTIONS
   --project   ./.rak/skills (this project only) instead of ~/.config/rak/skills
-  -y, --yes   save without asking (only for skills you have read)
+  -y, --yes   save without asking (only for skills you have read); each skill
+              is then summed up in a few lines, not shown
 
 A skill is a NAME.md file starting with \"# Name\" and a \"Description:\" line
 (SwiftAgentKit's format, which sak and Naseem read too), or a folder with a
@@ -145,7 +146,11 @@ pub fn add_all(source: &str, folder: &Path, yes: bool, color: bool) -> Result<Ve
     }
     let mut saved = Vec::new();
     for (i, one) in sources.iter().enumerate() {
-        println!("\n{}", paint(color, Style::Dim, &format!("── {} of {} ──", i + 1, sources.len())));
+        if yes {
+            println!();
+        } else {
+            println!("\n{}", paint(color, Style::Dim, &format!("── {} of {} ──", i + 1, sources.len())));
+        }
         match add(one, folder, yes, color) {
             Ok(Some(skill)) => saved.push(skill),
             Ok(None) => {}
@@ -173,14 +178,20 @@ pub fn add(source: &str, folder: &Path, yes: bool, color: bool) -> Result<Option
     let dim = |t: &str| paint(color, Style::Dim, t);
 
     println!("{}  {}", bold(&name), dim(&description));
-    println!("{}", dim(&format!("from {source}")));
     let lines: Vec<&str> = instructions.lines().collect();
-    const SHOWN: usize = 40;
-    for line in lines.iter().take(SHOWN) {
-        println!("  │ {line}");
-    }
-    if lines.len() > SHOWN {
-        println!("  │ {}", dim(&format!("… {} more lines. Read them all at {source} before saying yes.", lines.len() - SHOWN)));
+    if yes {
+        // Nothing is asked, so the text is not shown to be read: a line says
+        // where it is from and how long it is. Flagged lines still follow.
+        println!("{}", dim(&format!("from {source} · {} lines", lines.len())));
+    } else {
+        println!("{}", dim(&format!("from {source}")));
+        const SHOWN: usize = 40;
+        for line in lines.iter().take(SHOWN) {
+            println!("  │ {line}");
+        }
+        if lines.len() > SHOWN {
+            println!("  │ {}", dim(&format!("… {} more lines. Read them all at {source} before saying yes.", lines.len() - SHOWN)));
+        }
     }
     // A GitHub skill folder: the files it ships come too, read for the review first.
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();

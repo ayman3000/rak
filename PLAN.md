@@ -1,16 +1,31 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-18, after releasing v0.1.0-alpha.35. A working plan for picking the work up on another machine.
+Updated 2026-11-18, after releasing v0.1.0-alpha.36. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.35** (2026-11-18). It has everything
+- The newest release is **v0.1.0-alpha.36** (2026-11-18). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.36
+
+Released before the two-request change could be run against GitHub (its
+hourly limit was used up); its pure parts are unit-tested.
+
+- `rak skills add … -y` no longer prints each skill's first 40 lines: with
+  nothing asked, a skill is its name, description, source and length, the
+  files it ships and any flagged lines. Without -y nothing changed.
+- Adding a repository's skills costs GitHub's API two requests (the
+  repository, then its file list, kept for the run), not one more per skill
+  folder: the files a skill ships are read from that list and downloaded
+  raw. GitHub allows 60 requests an hour unsigned, and a few runs on an
+  8-skill repository had used them up. At the limit rak now says so, with
+  the minutes until it opens again.
 
 ### In v0.1.0-alpha.35
 

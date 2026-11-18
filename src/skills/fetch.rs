@@ -66,35 +66,56 @@ pub fn github_folder(url: &str) -> Option<(String, String, String, String)> {
 }
 
 /// The files a GitHub skill folder ships besides its SKILL.md, subfolders
-/// included: (path inside the folder, where to download it). Listed through
-/// GitHub's contents API.
+/// included: (path inside the folder, where to download it). Read from the
+/// repository's file list, which is asked for once per run (`tree`), and
+/// downloaded as raw files, so a repository of many skills costs GitHub's
+/// API two requests, not one per skill (it allows 60 an hour unsigned).
 pub fn github_files(url: &str) -> Result<Vec<(String, String)>, String> {
     let Some((owner, repo, branch, folder)) = github_folder(url) else { return Ok(Vec::new()) };
-    let http = crate::http::builder().timeout(Duration::from_secs(20)).build();
-    let mut files = Vec::new();
-    let mut pending = vec![folder.clone()];
-    while let Some(dir) = pending.pop() {
-        let api = format!("https://api.github.com/repos/{owner}/{repo}/contents/{dir}?ref={branch}");
-        let listing: serde_json::Value = match http.get(&api).set("Accept", "application/vnd.github+json").call() {
-            Ok(response) => response.into_json().map_err(|e| format!("cannot read GitHub's listing of {dir}: {e}"))?,
-            Err(ureq::Error::Status(code, _)) => return Err(format!("GitHub answered HTTP {code} listing {dir}")),
-            Err(ureq::Error::Transport(t)) => return Err(format!("cannot list {dir} on GitHub: {t}")),
-        };
-        for entry in listing.as_array().into_iter().flatten() {
-            let field = |key: &str| entry.get(key).and_then(|v| v.as_str()).unwrap_or("");
-            let inside = field("path").strip_prefix(&format!("{folder}/")).unwrap_or("").to_string();
-            match field("type") {
-                "dir" => pending.push(field("path").to_string()),
-                "file" if safe_path(&inside) && inside != "SKILL.md" => files.push((inside, field("download_url").to_string())),
-                _ => {}
-            }
-            if files.len() > MAX_FILES {
-                return Err(format!("the folder has over {MAX_FILES} files, too many for a skill"));
-            }
-        }
+    let files = files_in(&tree(&owner, &repo, &branch)?, &folder);
+    if files.len() > MAX_FILES {
+        return Err(format!("the folder has over {MAX_FILES} files, too many for a skill"));
     }
+    Ok(files
+        .into_iter()
+        .map(|inside| {
+            let path = format!("{folder}/{inside}").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F");
+            (inside, format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"))
+        })
+        .collect())
+}
+
+/// Pure — unit-tested. The files under `folder` in a repository's file list,
+/// as paths inside it, sorted; its SKILL.md and unsafe paths left out.
+pub fn files_in(tree: &serde_json::Value, folder: &str) -> Vec<String> {
+    let prefix = format!("{folder}/");
+    let mut files: Vec<String> = tree["tree"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["type"] == "blob")
+        .filter_map(|entry| entry["path"].as_str()?.strip_prefix(&prefix))
+        .filter(|inside| *inside != "SKILL.md" && safe_path(inside))
+        .map(str::to_string)
+        .collect();
     files.sort();
-    Ok(files)
+    files
+}
+
+/// A repository's whole file list at a branch, from GitHub's tree API; kept
+/// for the rest of the run.
+fn tree(owner: &str, repo: &str, branch: &str) -> Result<serde_json::Value, String> {
+    static TREES: std::sync::Mutex<Vec<(String, serde_json::Value)>> = std::sync::Mutex::new(Vec::new());
+    let key = format!("{owner}/{repo}@{branch}");
+    if let Some((_, tree)) = TREES.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return Ok(tree.clone());
+    }
+    let tree = github_json(
+        &format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"),
+        &format!("{owner}/{repo} at {branch}"),
+    )?;
+    TREES.lock().unwrap().push((key, tree.clone()));
+    Ok(tree)
 }
 
 /// Pure — unit-tested. A GitHub repository's own page → (owner, repo): the
@@ -134,9 +155,28 @@ fn github_json(url: &str, what: &str) -> Result<serde_json::Value, String> {
     match http.get(url).set("Accept", "application/vnd.github+json").call() {
         Ok(response) => response.into_json().map_err(|e| format!("cannot read GitHub's answer about {what}: {e}")),
         Err(ureq::Error::Status(404, _)) => Err(format!("GitHub has no {what} (or it is private)")),
-        Err(ureq::Error::Status(code, _)) => Err(format!("GitHub answered HTTP {code} about {what}")),
+        Err(ureq::Error::Status(code, response)) => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let reset = response.header("x-ratelimit-reset").and_then(|v| v.parse().ok());
+            Err(github_refusal(code, response.header("x-ratelimit-remaining"), reset, now, what))
+        }
         Err(ureq::Error::Transport(t)) => Err(format!("cannot reach GitHub about {what}: {t}")),
     }
+}
+
+/// Pure — unit-tested. Why GitHub refused: its hourly limit for requests
+/// without a sign-in, with how long until it opens again, or the status.
+pub fn github_refusal(code: u16, remaining: Option<&str>, reset: Option<u64>, now: u64, what: &str) -> String {
+    if matches!(code, 403 | 429) && remaining == Some("0") {
+        let wait = match reset.map(|at| at.saturating_sub(now).div_ceil(60)) {
+            Some(minutes) if minutes > 0 => format!("try again in about {minutes} min"),
+            _ => "try again in a while".to_string(),
+        };
+        return format!(
+            "GitHub's hourly limit for requests without a sign-in (60) is used up; {wait}, or give one skill file's raw address"
+        );
+    }
+    format!("GitHub answered HTTP {code} about {what}")
 }
 
 /// What one address stands for: itself, or, for a GitHub repository (or a
@@ -153,10 +193,7 @@ pub fn expand(source: &str) -> Result<Vec<String>, String> {
         (None, Some(parts)) => parts,
         (None, None) => return Ok(vec![source.to_string()]),
     };
-    let tree = github_json(
-        &format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"),
-        &format!("{owner}/{repo} at {branch}"),
-    )?;
+    let tree = tree(&owner, &repo, &branch)?;
     let folders = skill_folders(&tree, &under);
     // The folder is a skill itself: as before.
     if !under.is_empty() && folders.contains(&under) {
@@ -286,6 +323,30 @@ mod tests {
         let top = serde_json::json!({ "tree": [{ "type": "blob", "path": "SKILL.md" }] });
         assert_eq!(skill_folders(&top, ""), [""]);
         assert!(skill_folders(&serde_json::json!({ "message": "Not Found" }), "").is_empty());
+    }
+
+    #[test]
+    fn a_skill_folder_s_files_come_from_the_repository_s_file_list() {
+        let tree = serde_json::json!({ "tree": [
+            { "type": "blob", "path": "skills/pdf/SKILL.md" },
+            { "type": "blob", "path": "skills/pdf/scripts/fill.py" },
+            { "type": "blob", "path": "skills/pdf/forms.md" },
+            { "type": "tree", "path": "skills/pdf/scripts" },
+            { "type": "blob", "path": "skills/pdf-extra/other.md" },
+            { "type": "blob", "path": "skills/pdf/../escape.txt" }
+        ]});
+        assert_eq!(files_in(&tree, "skills/pdf"), ["forms.md", "scripts/fill.py"]);
+        assert!(files_in(&tree, "skills/none").is_empty());
+    }
+
+    #[test]
+    fn github_s_hourly_limit_is_said_with_how_long_to_wait() {
+        let limit = github_refusal(403, Some("0"), Some(1_000 + 25 * 60 + 5), 1_000, "x/y at main");
+        assert!(limit.contains("hourly limit") && limit.contains("about 26 min"), "{limit}");
+        assert!(github_refusal(429, Some("0"), None, 1_000, "x").contains("in a while"));
+        // A 403 with requests left is something else (a private repository's rules, say).
+        assert_eq!(github_refusal(403, Some("12"), Some(2_000), 1_000, "x/y at main"), "GitHub answered HTTP 403 about x/y at main");
+        assert_eq!(github_refusal(500, None, None, 1_000, "x/y"), "GitHub answered HTTP 500 about x/y");
     }
 
     #[test]

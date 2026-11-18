@@ -35,15 +35,15 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.35** (2026-11-18)
+**v0.1.0-alpha.36** (2026-11-18)
 
-- **Add every skill in a GitHub repository.** `rak skills add https://github.com/OWNER/REPO` finds each skill in it, then shows and asks about them one at a time. Before, a repository's address was refused as "too big for a skill".
-- **Remove a skill from a chat:** `/skills remove NAME`, which asks first.
-- **Skill descriptions written over several lines** are read whole, so the agent knows when to load those skills.
+- **`rak skills add … -y` is brief.** With nothing asked, each skill is summed up in a few lines (name, description, source, length, anything worth a look) instead of printing its first 40 lines.
+- **A repository of skills costs GitHub two requests,** not one more per skill, so adding several no longer runs into GitHub's hourly limit. At the limit rak says so, with how long to wait.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.35:** add every skill in a GitHub repository (`rak skills add https://github.com/OWNER/REPO`), remove one from a chat (`/skills remove NAME`), and skill descriptions written over several lines are read whole.
 - **alpha.34:** a ChatGPT plan uses the prompt cache: on two real tasks the cached share went from 24% to 90% and from 1% to 84%.
 - **alpha.33:** Sign in with ChatGPT: `rak login chatgpt` and the `chatgpt` provider run requests on your ChatGPT plan, with no API key ([how it works](docs/providers.md#your-chatgpt-plan)). Also `/add-dir PATH` and `--add-dir PATH`, to let the agent work in one more folder.
 - **alpha.32:** saving a chat no longer opens every other saved chat (about ten times faster with large chats).
