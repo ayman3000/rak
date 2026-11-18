@@ -8,6 +8,7 @@
 //!   log          --log: every step as JSON lines
 //!   mcp_command  rak mcp add|list|remove
 //!   keys_command rak keys: the key file and what is set
+//!   login        rak login chatgpt / rak logout chatgpt: Sign in with ChatGPT
 //!   skills_command rak skills list|add|remove, and /skills add
 //!   settings     what is kept between runs
 //!   setup        first-run setup and rak setup: provider, key, model
@@ -27,6 +28,7 @@ pub mod commands;
 pub mod editor;
 pub mod keys_command;
 pub mod log;
+pub mod login;
 pub mod markdown;
 pub mod mcp_command;
 pub mod menu;

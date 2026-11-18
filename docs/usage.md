@@ -153,6 +153,6 @@ Started without a task, rak opens a chat:
 | `--record FILE`, `--replay FILE` | Record the model's replies, then play them back offline to rerun a session while fixing rak (a developer tool; SwiftAgentKit's scenario format). |
 | `-q`, `--quiet` | Only the answer. |
 
-Other commands: `rak setup`, `rak keys`, `rak keys set NAME`, `rak skills …`, `rak mcp …`, `rak update` (the newest release; `rak update VERSION` for one release, `--check` to only look).
+Other commands: `rak setup`, `rak keys`, `rak keys set NAME`, `rak login chatgpt` and `rak logout chatgpt` (Sign in with ChatGPT, for the `chatgpt` provider; see [providers](providers.md#your-chatgpt-plan)), `rak skills …`, `rak mcp …`, `rak update` (the newest release; `rak update VERSION` for one release, `--check` to only look).
 
 Progress goes to stderr, so `rak "…" > answer.txt` holds only the answer. Exit codes: `0` done, `1` failed, `2` bad usage, `3` a tool was not approved, `4` turn limit, `5` stuck repeating a call, `130` stopped with Ctrl-C.

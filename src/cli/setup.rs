@@ -40,7 +40,7 @@ pub fn host_port(url: &str) -> Option<(String, u16)> {
 }
 
 fn is_local(p: &Provider) -> bool {
-    p.key.is_none()
+    p.key.is_none() && !p.chatgpt
 }
 
 fn running(p: &Provider) -> bool {
@@ -68,6 +68,11 @@ pub fn rows(providers: &[Provider], up: &dyn Fn(&Provider) -> bool, key_at: &dyn
     let mut last = Vec::new();
     for (index, p) in providers.iter().enumerate() {
         match &p.key {
+            // Signed in to, not keyed: with the cloud providers.
+            None if p.chatgpt => match key_at(rak::providers::CHATGPT_SIGN_IN) {
+                Some(who) => middle.push(Row { index, note: format!("{} — signed in as {who}", p.label), dim: false }),
+                None => middle.push(Row { index, note: format!("{} — no API key: you sign in in your browser", p.label), dim: false }),
+            },
             None if up(p) => {
                 first.push(Row { index, note: format!("{} — running on this computer, no key needed", p.label), dim: false })
             }
@@ -204,7 +209,9 @@ pub fn run(color: bool) -> Option<()> {
     println!("{}", paint(color, Style::Dim, "↑/↓ to move, type to narrow, Enter to pick, Esc to stop."));
     let providers = rak::providers::all();
     let key_at = |name: &str| {
-        if in_env(name) {
+        if name == rak::providers::CHATGPT_SIGN_IN {
+            rak::chatgpt::auth::status()
+        } else if in_env(name) {
             Some("your environment".to_string())
         } else {
             has_key(name).then(|| shown.clone())
@@ -217,6 +224,20 @@ pub fn run(color: bool) -> Option<()> {
         Picked::Item(i) => &providers[rows[i].index],
         _ => return None,
     };
+
+    // A ChatGPT plan takes a sign-in, not a key.
+    if provider.chatgpt {
+        match rak::chatgpt::auth::status() {
+            Some(who) => println!("Using the ChatGPT sign-in already here ({who})."),
+            None => match super::login::sign_in(color, false) {
+                Ok(account) => println!("{}", super::login::welcome(&account)),
+                Err(why) => {
+                    println!("{}", paint(color, Style::Yellow, &why));
+                    return None;
+                }
+            },
+        }
+    }
 
     // The key: one already set is used as it is; otherwise asked for. After
     // a key that did not work, asked for again.
@@ -258,7 +279,9 @@ pub fn run(color: bool) -> Option<()> {
                 }
             }
         }
-        let model: Box<dyn rak::provider::Model> = if provider.anthropic {
+        let model: Box<dyn rak::provider::Model> = if provider.chatgpt {
+            Box::new(rak::chatgpt::ChatGpt::new(&provider.base_url, ""))
+        } else if provider.anthropic {
             Box::new(rak::anthropic::Anthropic::new(&provider.base_url, api_key.unwrap_or_default(), ""))
         } else {
             Box::new(rak::provider::OpenAICompatible::new(&provider.base_url, api_key, ""))
@@ -283,6 +306,10 @@ pub fn run(color: bool) -> Option<()> {
         let Some(model_name) = picked else {
             if is_local(provider) {
                 println!("Start {} and run `rak setup` again, or pick another provider then.", provider.label);
+                return None;
+            }
+            if provider.chatgpt {
+                println!("Run `rak setup` again later, or pick another provider then. `rak login chatgpt --status` says who is signed in.");
                 return None;
             }
             if !ask_yes("Try another key? [Y/n] › ", color) {
@@ -412,6 +439,13 @@ mod tests {
         assert!(anthropic.note.contains("ANTHROPIC_API_KEY set in your environment"));
         let openai = rows.iter().find(|r| providers[r.index].name == "openai").unwrap();
         assert!(openai.note.contains("needs OPENAI_API_KEY"));
+        // A ChatGPT plan is with the cloud providers, and says it takes a sign-in.
+        let at = |name: &str| rows.iter().position(|r| providers[r.index].name == name).unwrap();
+        assert!(at("openai") < at("chatgpt") && at("chatgpt") < at("openrouter"));
+        assert!(rows[at("chatgpt")].note.contains("you sign in in your browser") && !rows[at("chatgpt")].dim);
+        let signed_in = |name: &str| (name == rak::providers::CHATGPT_SIGN_IN).then(|| "a@example.com".to_string());
+        let rows = super::rows(providers, &up, &signed_in);
+        assert!(rows.iter().any(|r| r.note.ends_with("signed in as a@example.com")));
     }
 
     #[test]

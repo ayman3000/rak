@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod anthropic;
 pub mod artifacts;
+pub mod chatgpt;
 pub mod compact;
 pub mod delegate;
 pub mod fallback;

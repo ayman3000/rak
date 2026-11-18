@@ -300,9 +300,10 @@ dependencies = [
 
 [[package]]
 name = "rak"
-version = "0.1.0-alpha.32"
+version = "0.1.0-alpha.33"
 dependencies = [
  "libc",
+ "ring",
  "rustls",
  "rustls-native-certs",
  "serde_json",

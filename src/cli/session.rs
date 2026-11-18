@@ -113,6 +113,8 @@ pub struct Backend {
     /// its address.
     pub provider: Option<String>,
     pub anthropic: bool,
+    /// A ChatGPT plan: the sign-in's token, read when a request is sent.
+    pub chatgpt: bool,
     pub base_url: String,
     pub api_key: Option<String>,
 }
@@ -254,6 +256,7 @@ pub fn backend(o: &Options, model: Option<&str>) -> Result<Backend, String> {
     Ok(Backend {
         provider: route.provider.map(|p| p.name.clone()),
         anthropic: route.provider.is_some_and(|p| p.anthropic),
+        chatgpt: route.provider.is_some_and(|p| p.chatgpt),
         base_url: route.base_url,
         api_key,
     })
@@ -274,6 +277,14 @@ pub fn make_provider(o: &Options, backend: &Backend, model: &str, stop: &Stop) -
         provider.effort = effort_for(o, backend, model);
         provider.effort_optional = o.effort_auto;
         provider.max_tokens = o.max_tokens;
+        provider.stop = stop.clone();
+        return Box::new(provider);
+    }
+    if backend.chatgpt {
+        // No max_tokens: the plan route refuses a reply cap.
+        let mut provider = rak::chatgpt::ChatGpt::new(&backend.base_url, model);
+        provider.effort = effort_for(o, backend, model);
+        provider.effort_optional = o.effort_auto;
         provider.stop = stop.clone();
         return Box::new(provider);
     }
@@ -870,7 +881,11 @@ impl rak::delegate::Host for Helpers {
 /// The providers to fall back to from this backend (see chain.rs).
 pub fn fallback_chain(from: &Backend) -> Vec<chain::Link> {
     let order = super::settings::key_order();
-    chain::chain(providers::all(), from.provider.as_deref(), &order, &|k| key(k).is_some(), &|p| last_model(p))
+    let is_set = |name: &str| match name {
+        providers::CHATGPT_SIGN_IN => rak::chatgpt::auth::status().is_some(),
+        _ => key(name).is_some(),
+    };
+    chain::chain(providers::all(), from.provider.as_deref(), &order, &is_set, &|p| last_model(p))
 }
 
 /// Before a request: back on the chosen provider if the last request fell

@@ -18,6 +18,12 @@ fn main() {
     if argv.first().map(String::as_str) == Some("skills") {
         cli::skills_command::run(&argv[1..]);
     }
+    if argv.first().map(String::as_str) == Some("login") {
+        cli::login::login_command(&argv[1..]);
+    }
+    if argv.first().map(String::as_str) == Some("logout") {
+        cli::login::logout_command(&argv[1..]);
+    }
     if argv.first().map(String::as_str) == Some("update") {
         cli::update::run(&argv[1..]);
     }

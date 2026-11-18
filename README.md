@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="#whats-new">What's new</a> ·
   <a href="#install">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#features">Features</a> ·
@@ -21,7 +22,7 @@
 
 # rak — Rust Agent Kit
 
-**rak is a coding agent for the terminal.** You give it a task; it reads your project, edits files, runs commands, and tells you what it did. It is one binary of a few megabytes with nothing else to install, it works with fifteen providers or any OpenAI-compatible server, and it asks before it changes anything.
+**rak is a coding agent for the terminal.** You give it a task; it reads your project, edits files, runs commands, and tells you what it did. It is one binary of a few megabytes with nothing else to install, it works with sixteen providers or any OpenAI-compatible server, and it asks before it changes anything.
 
 rak is the cross-platform sibling of [sak](https://github.com/ayman3000/sak). sak is built on SwiftAgentKit and stays the Mac tool; rak carries the same prompt, the same tool designs and the same loop to Linux and macOS.
 
@@ -31,6 +32,27 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 > [!NOTE]
 > **Early alpha.** The core works and is tested on every push. See [Status](#status) for what isn't there yet.
+
+## What's new
+
+**v0.1.0-alpha.33** (2026-11-18)
+
+- **Sign in with ChatGPT.** `rak login chatgpt` signs in through your browser, and the new `chatgpt` provider runs requests on your ChatGPT plan, with no API key. `rak logout chatgpt` signs out. [How it works](docs/providers.md#your-chatgpt-plan).
+- **`/add-dir PATH`** in a chat and **`--add-dir PATH`** at start let the agent work in one more folder for that run.
+
+<details>
+<summary><b>Earlier releases</b></summary>
+
+- **alpha.32:** saving a chat no longer opens every other saved chat (about ten times faster with large chats).
+- **alpha.31:** the `Thinking…` line, the `past_chats` tool, and answers that wrap at words.
+- **alpha.30:** a folder remembers its provider, model and effort.
+- **alpha.29:** add keys without opening the key file: `rak keys set NAME`, `/key`, and `/provider` asks for a missing key.
+- **alpha.28:** reasoning effort as a setting (`/effort`, `--effort`, `RAK_EFFORT`); chats start at medium.
+- **alpha.26 and alpha.27:** `rak update`, which only goes forward unless you name a release.
+
+Every release is on the [releases page](https://github.com/ayman3000/rak/releases).
+
+</details>
 
 ## See it work
 
@@ -57,7 +79,7 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
 <table>
 <tr><td><b>Small and light</b></td><td>One binary that starts at once. A short request used about <b>4 MB</b> of memory, against 357 MB for Hermes Agent on the same task (<a href="docs/benchmarks.md#head-to-head-with-hermes">measured</a>).</td></tr>
 <tr><td><b>Cheap per call</b></td><td>A short prompt and a lean tool set, so every model call sends less. On the same six tasks rak sent <b>314K</b> input tokens where Hermes Agent sent 1,660K.</td></tr>
-<tr><td><b>Any model</b></td><td>Fifteen providers by name, any OpenAI-compatible server by address, Claude through Anthropic's own API with prompt caching, and automatic fallback to another provider when one fails.</td></tr>
+<tr><td><b>Any model</b></td><td>Sixteen providers by name, your ChatGPT plan by signing in, any OpenAI-compatible server by address, Claude through Anthropic's own API with prompt caching, and automatic fallback to another provider when one fails.</td></tr>
 <tr><td><b>Asks first</b></td><td>Every edit and command waits for your yes and shows exactly what will run. A no stops the request.</td></tr>
 <tr><td><b>Remembers the project</b></td><td>Notes, roadmap and journal in a plain <code>rak/</code> folder you can read and commit, loaded at the start of every session.</td></tr>
 <tr><td><b>Built for big codebases</b></td><td>A code map, line-range reads, a task list, parallel helper agents and context compaction keep it working when the project is too big to read whole.</td></tr>
@@ -99,11 +121,23 @@ rak -c "and now add the tests"         # continue this folder's last chat
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
 2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project.
-3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak update` gets the newest release.
+3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak login chatgpt` signs in with ChatGPT to use your ChatGPT plan; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).
 
 ## Features
+
+Everything rak does, grouped by what it is for. The details are in the [docs](#documentation).
+
+### Any model, your way
+
+- **Sixteen providers by name**, or any OpenAI-compatible server with `--base-url`. Each provider has its own address and its own key.
+- **Your ChatGPT plan, no API key.** `rak login chatgpt` signs in with ChatGPT in your browser; `--provider chatgpt` then runs on your plan.
+- **Claude with prompt caching** through Anthropic's own API, so a long conversation is re-read at a fraction of the price.
+- **Automatic fallback.** When a provider fails, rak retries, then offers the next provider you have set up.
+- **Reasoning effort** as a setting: `/effort` or `--effort`, from `low` to `max`.
+- **A folder remembers its pick:** the provider, model and effort you last used there.
+- **Keys without opening a file:** `rak keys set NAME`, or `/key` in a chat. Pasted hidden, saved readable by you only.
 
 ### Works on real projects
 
@@ -114,6 +148,16 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 - **Saved chats.** Every request is saved; `rak -c` continues, `/resume` picks any, and the agent can look up what was asked in earlier ones (`past_chats`).
 - **Images.** Paste a screenshot with Ctrl+V or drop in a path. A model that can see gets it directly; for one that can't, a vision model you set in the `.env` describes it ([how](docs/usage.md#images)).
 - **Servers in the background.** The agent can start a dev server and keep working; `/jobs` lists and stops them, and a chat that ends with some still running asks first.
+- **Web access:** `fetch_url` reads a page, and `web_search` searches when you give a Tavily key.
+
+### A chat that is pleasant to use
+
+- **Answers as they are written,** with Markdown drawn as headings, bullets, code and aligned tables, and long lines broken at words.
+- **`Thinking… 12s`** while the model works and nothing is arriving yet, so a silent model never looks stuck.
+- **A status line** above the prompt: the model, how full its context is, the folder and branch, and the mode.
+- **`/` for every command,** in a menu that narrows as you type. `/model` and `/provider` pick from lists.
+- **Ctrl-C stops a request** and keeps the chat. History is kept between runs.
+- **`/usage`** shows tokens, tool calls, context used and fallbacks.
 
 ### Edits you can trust
 
@@ -140,6 +184,7 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 - **MCP servers,** by program or URL, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
 - **Scripts and CI:** `--json` output, `--log` of every step, clear exit codes, and progress on stderr so stdout holds only the answer.
 - **A Rust library:** the agent loop, tools and providers with no terminal code, for your own agent.
+- **`rak update`** installs the newest release in place, checked against its SHA-256.
 
 ## Providers
 
@@ -148,13 +193,14 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 | Ollama, on this machine or its `:cloud` models | `ollama` (default) | none |
 | Ollama's cloud, without Ollama installed | `ollama-cloud` | `OLLAMA_API_KEY` |
 | Anthropic (Claude, with prompt caching) | `anthropic` | `ANTHROPIC_API_KEY` |
+| Your ChatGPT plan (Sign in with ChatGPT, no API key) | `chatgpt` | none: `rak login chatgpt` |
 | OpenAI · Gemini · Mistral · DeepSeek · Groq | `openai` · `gemini` · `mistral` · `deepseek` · `groq` | each its own |
 | OpenRouter · Hugging Face | `openrouter` · `huggingface` | `OPENROUTER_API_KEY` · `HF_TOKEN` |
 | Z.ai (GLM), incl. the Coding Plan | `zai` · `zai-coding` | `ZAI_API_KEY` |
 | LM Studio · llama.cpp · vLLM, on this machine | `lmstudio` · `llamacpp` · `vllm` | none |
 | Anything OpenAI-compatible | `--base-url URL` | `RAK_API_KEY` |
 
-Ollama, Ollama's cloud and Anthropic have been tried with real requests; the others are set up from their documentation. When a provider fails, rak retries, then offers the next provider whose key you've set. Keys, fallback and caching are in [docs/providers.md](docs/providers.md).
+Ollama, Ollama's cloud, Anthropic and a ChatGPT plan have been tried with real requests; the others are set up from their documentation. `chatgpt` uses OpenAI's own Sign in with ChatGPT for open-source apps, where rak registers under its own name. When a provider fails, rak retries, then offers the next provider whose key you've set. Keys, fallback and caching are in [docs/providers.md](docs/providers.md).
 
 ## Benchmarks
 
@@ -172,7 +218,7 @@ The tasks are easy: a perfect score says the pipeline works, not how rak ranks. 
 | Guide | What's in it |
 |---|---|
 | [Using rak](docs/usage.md) | Setup, the chat and its commands, every command-line option, exit codes |
-| [Providers and models](docs/providers.md) | The fifteen providers, choosing a model, keys, fallback, prompt caching |
+| [Providers and models](docs/providers.md) | The sixteen providers, signing in with ChatGPT, choosing a model, keys, fallback, prompt caching |
 | [Tools and large projects](docs/tools.md) | Every tool, the write check, working on big codebases |
 | [Project notes and skills](docs/memory-and-skills.md) | The `rak/` folder, the gate, writing and adding skills |
 | [MCP servers](docs/mcp.md) | Adding servers, approvals, large servers |
@@ -193,7 +239,8 @@ Known limits:
 - Ctrl-C takes effect when the model next sends something; while it is silent (thinking), a second Ctrl-C quits rak.
 - The window shown for a local Ollama model is the model's maximum; Ollama may run it with a smaller one.
 - On Anthropic's API, trimming or summarizing near a full window ends the cache from that point; the next call writes it again.
-- Only Ollama, Ollama's cloud and Anthropic have been tried for real. The chat was driven by hand on macOS only (on Linux it builds and its tests pass). `-y` has only run inside containers. More in [docs/field-notes.md](docs/field-notes.md).
+- Claude Pro and Max plans can't be used: Anthropic allows that sign-in only in its own apps, so Claude in rak takes an API key.
+- Only Ollama, Ollama's cloud, Anthropic and a ChatGPT plan have been tried for real. The chat was driven by hand on macOS only (on Linux it builds and its tests pass). `-y` has only run inside containers. More in [docs/field-notes.md](docs/field-notes.md).
 
 Tried rak with another provider, or hit a problem? [Open an issue](https://github.com/ayman3000/rak/issues).
 

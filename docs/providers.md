@@ -14,6 +14,7 @@ rak knows these providers by name. Each gets its own address and only its own ke
 | `ollama-cloud` | Ollama's cloud at ollama.com, without Ollama installed | `OLLAMA_API_KEY` | ✅ 2026-11-12 |
 | `anthropic` | Claude through Anthropic's API, with prompt caching | `ANTHROPIC_API_KEY` | ✅ 2026-11-12 |
 | `openai` | OpenAI | `OPENAI_API_KEY` | not yet |
+| `chatgpt` | your ChatGPT plan, through Sign in with ChatGPT | none: `rak login chatgpt` | ✅ 2026-11-18 |
 | `gemini` | Google Gemini | `GEMINI_API_KEY` | not yet |
 | `zai`, `zai-coding` | Z.ai (GLM); `zai-coding` for GLM Coding Plan keys | `ZAI_API_KEY` | not yet |
 | `openrouter` | OpenRouter | `OPENROUTER_API_KEY` | not yet |
@@ -24,6 +25,24 @@ rak knows these providers by name. Each gets its own address and only its own ke
 | `lmstudio`, `llamacpp`, `vllm` | those servers on this machine | none | not yet |
 
 "Not yet" means set up from the provider's documentation but no real request made. Tried one? Tell us how it went, in an issue. The list is data, [`src/providers.json`](../src/providers.json): adding a provider is one line there.
+
+## Your ChatGPT plan
+
+`--provider chatgpt` sends requests on your ChatGPT plan (Go, Plus, Pro or Business, where OpenAI allows it) rather than on an API key. It uses [Sign in with ChatGPT](https://developers.openai.com/siwc) the way OpenAI documents it for open-source apps.
+
+| Step | What happens |
+|---|---|
+| `rak login chatgpt` | Your browser opens OpenAI's sign-in page. You sign in, name the app (rak suggests "rak") and allow "Use your ChatGPT plan". The browser then answers rak on `127.0.0.1`. |
+| after it | rak keeps the sign-in in `~/.config/rak/chatgpt.json`, readable by you only, and renews it on its own. |
+| `rak --provider chatgpt`, `/provider chatgpt`, or `rak setup` | Requests go to OpenAI's Responses API with that sign-in. The models offered are the ones your account lists. |
+| `rak login chatgpt --status` · `rak logout chatgpt` | Who is signed in · sign out (the session is revoked at OpenAI and the tokens removed). |
+
+- **rak signs in as itself.** The first sign-in registers rak with your account and OpenAI issues it a client id of its own. rak never uses another tool's identity.
+- **Limits.** Usage counts against your plan, and you can cap what rak may use: ChatGPT settings → Usage (<https://chatgpt.com/settings/usage>). At a limit rak stops and says so; it does not switch to an API key by itself (it offers the next provider, as with any failure).
+- **What the route does not take:** a reply cap (`--max-tokens` is not sent) and OpenAI's hosted tools. rak's own tools work as usual.
+- **Another account or workspace:** `rak login chatgpt --new`.
+- **On a remote machine** the browser must reach rak's port: `ssh -L 1455:127.0.0.1:1455 HOST`, then open the address `rak login chatgpt` prints.
+- **Claude plans** (Pro, Max) can't be used this way: Anthropic allows that sign-in only in its own apps. Claude in rak takes `ANTHROPIC_API_KEY`.
 
 ## Choosing a provider and model
 

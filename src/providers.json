@@ -3,6 +3,7 @@
   { "name": "ollama-cloud", "label": "Ollama's cloud (ollama.com)", "base_url": "https://ollama.com/v1", "key": "OLLAMA_API_KEY", "api": "openai" },
   { "name": "anthropic", "label": "Claude, Anthropic's API", "base_url": "https://api.anthropic.com", "key": "ANTHROPIC_API_KEY", "api": "anthropic" },
   { "name": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1", "key": "OPENAI_API_KEY", "api": "openai" },
+  { "name": "chatgpt", "label": "ChatGPT plan (sign in with ChatGPT)", "base_url": "https://api.openai.com/v1", "key": null, "api": "chatgpt" },
   { "name": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY", "api": "openai", "key_check": "https://openrouter.ai/api/v1/key" },
   { "name": "huggingface", "label": "Hugging Face's router", "base_url": "https://router.huggingface.co/v1", "key": "HF_TOKEN", "api": "openai", "key_check": "https://huggingface.co/api/whoami-v2" },
   { "name": "groq", "label": "Groq", "base_url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY", "api": "openai" },

@@ -292,6 +292,10 @@ fn pick_provider(s: &Session, color: bool) -> Option<String> {
         .iter()
         .map(|p| {
             let (state, usable) = match &p.key {
+                None if p.chatgpt => match rak::chatgpt::auth::status() {
+                    Some(who) => (format!("signed in as {who}"), true),
+                    None => ("not signed in".to_string(), false),
+                },
                 None => ("no key needed".to_string(), true),
                 Some(name) if key(name).is_some() => (format!("{name} set"), true),
                 Some(name) => (format!("{name} not set"), false),
@@ -335,6 +339,17 @@ pub fn switch_provider(s: &mut Session, name: &str) {
                 s.log.write(json!({ "event": "key", "name": name }));
             }
             None => return println!("Staying with {} at {}.", s.model, provider_label(&s.backend)),
+        }
+    }
+    // A ChatGPT plan with nobody signed in: the sign-in happens now.
+    if provider.chatgpt && rak::chatgpt::auth::status().is_none() {
+        println!("{} needs you to sign in.", provider.label);
+        match super::login::sign_in(color, false) {
+            Ok(account) => println!("{}", super::login::welcome(&account)),
+            Err(why) => {
+                warn(&why);
+                return println!("Staying with {} at {}.", s.model, provider_label(&s.backend));
+            }
         }
     }
     let backend_now = match backend(&o, None) {

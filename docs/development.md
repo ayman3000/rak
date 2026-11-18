@@ -40,6 +40,7 @@ The code is in two layers: a library that knows nothing about terminals, and the
 | `agent.rs` | The loop: ask the model, run the tools it calls, repeat. Retries, loop detection, the repair nudge, the finish and gate checks, trimming. |
 | `compact.rs`, `artifacts.rs` | Summarizing a full context; output set aside when trimmed. |
 | `provider.rs`, `anthropic.rs` | The `Model` trait and the OpenAI-compatible client; Claude's Messages API. |
+| `chatgpt/` | A ChatGPT plan as the provider: OpenAI's Responses API (`mod.rs`) with the token from Sign in with ChatGPT (`auth.rs`: PKCE, the ID token check, the account file, renewal under a lock). |
 | `providers.rs`, `providers.json`, `fallback.rs`, `stall.rs` | The named providers; moving to another when one fails; the silent-server limits. |
 | `tools/` | The `Tool` trait and the built-in tools (`fs`, `patch`, `shell`, `map`, `todo`, `image`, `web`, `fetch`); `verify` is the write check. |
 | `delegate.rs` | The helper agent run inside a tool call. |
@@ -55,6 +56,7 @@ The code is in two layers: a library that knows nothing about terminals, and the
 | `chat`, `commands` | The chat loop and its slash commands. |
 | `approval`, `output`, `log` | Asking before changes; what is shown; `--log`. |
 | `mcp_command`, `skills_command`, `keys_command`, `add_key`, `setup` | `rak mcp`, `rak skills`, `rak keys`, giving one key (`rak keys set`, `/key`), and the first-run setup (`rak setup`). |
+| `login` | `rak login chatgpt`, `rak logout chatgpt`: opens the browser, waits for its answer on 127.0.0.1, saves the sign-in. |
 | `update` | `rak update`: finds the release on GitHub and runs that release's install.sh into the folder rak runs from. |
 | `editor`, `menu`, `picker`, `markdown`, `welcome`, `style`, `term` | The interface's parts, each pure where it can be, and tested. |
 | `settings`, `signals`, `trust` | What is kept between runs; Ctrl-C; folder trust. |

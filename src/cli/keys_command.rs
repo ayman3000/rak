@@ -85,6 +85,10 @@ pub fn run(args: &[String]) -> ! {
         let mark = if default.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(&p.name)) { "▸" } else { " " };
         let key = match &p.key {
             Some(name) => format!("{name:<20} {}", status(name)),
+            None if p.chatgpt => match rak::chatgpt::auth::status() {
+                Some(who) => format!("{:<20} signed in as {who}", "(a sign-in)"),
+                None => format!("{:<20} not signed in", "(a sign-in)"),
+            },
             None => "no key needed".to_string(),
         };
         println!(" {mark} {:<13} {key:<52} {}", p.name, p.label);

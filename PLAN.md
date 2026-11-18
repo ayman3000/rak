@@ -1,15 +1,43 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-17, after releasing v0.1.0-alpha.32. A working plan for picking the work up on another machine.
+Updated 2026-11-18, after releasing v0.1.0-alpha.33. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.32** (2026-11-17). It has everything
+- The newest release is **v0.1.0-alpha.33** (2026-11-18). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
 ### On main, not released
 
+Nothing yet.
+
+### In v0.1.0-alpha.33
+
+- The README has a "What's new" section, kept current with every release,
+  and its Features section lists everything by purpose.
+
+- **Sign in with ChatGPT** (the `chatgpt` provider; `rak login chatgpt`, `rak login chatgpt
+  --new`, `rak login chatgpt --status`, `rak logout chatgpt`): requests on the person's
+  ChatGPT plan, no API key. Built on OpenAI's documented open-source route
+  (developers.openai.com/siwc/token-sharing-open-source): rak registers as
+  itself (`dynamic_agent_client`, name "rak") and keeps the client id it is
+  issued; PKCE, callback on 127.0.0.1:1455 (or a free port), ID token
+  checked against OpenAI's keys (ring), tokens in ~/.config/rak/chatgpt.json
+  (0600), renewed under a file lock. Requests: POST /v1/responses, store
+  false, stream true, system prompt as `instructions`, the reply's own items
+  (reasoning with encrypted_content) sent back unchanged. Also in setup,
+  /provider (signs in on the spot), `rak keys` and the fallback chain.
+  **Tried for real 2026-11-18** (gpt-5.6-luna and gpt-6.2-sol): sign-in and registration, the model list (12 models, the
+  shape the docs give, with context_window and input_modalities), a plain
+  request, tool calls with plain function tools (no "namespaces" needed),
+  `include: reasoning.encrypted_content`, an 8-turn run with the reasoning
+  items sent back, and a forced token renewal. Efforts low to max go as they
+  are. Not measured: how much of the prompt the plan route caches. One
+  sign-in failed in the browser with OpenAI's own
+  `login_challenge_not_found_in_session` (their page lost its session); the
+  retry worked with no change. Claude Pro/Max
+  sign-in is not built: Anthropic allows it only in its own apps.
 - `/add-dir PATH` in a chat and `--add-dir PATH` at start: the file tools
   reach that folder too, for that run (Ctx::add_folder). Only the person
   adds one. Shown as resolved; refused: the disk's root, a file, a folder

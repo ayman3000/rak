@@ -48,6 +48,12 @@ pub fn chain(
                 keyed.push((position, index, p));
             }
             Some(_) => {}
+            // A ChatGPT plan counts like a key: only when signed in.
+            None if p.chatgpt => {
+                if is_set(rak::providers::CHATGPT_SIGN_IN) {
+                    keyed.push((usize::MAX, index, p));
+                }
+            }
             None => local.push(p),
         }
     }
@@ -155,6 +161,7 @@ mod tests {
             base_url: format!("https://{name}"),
             key: key.map(str::to_string),
             anthropic: false,
+            chatgpt: false,
             key_check: None,
         }
     }

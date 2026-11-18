@@ -15,14 +15,18 @@ USAGE
   rak keys                        create ~/.config/rak/.env and see which keys are set
   rak keys set NAME               give one key (pasted, not shown): a provider, or tavily
   rak keys --update               bring an older key file up to date, keeping its values
+  rak login chatgpt               sign in with ChatGPT, to use your ChatGPT plan (the
+                                  chatgpt provider); rak logout chatgpt signs out
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
 
 MODEL
   -m, --model NAME        model to use                      [env RAK_MODEL]
       --provider NAME     who runs the model; each gets its own address and key
-                          ollama, ollama-cloud, anthropic, openai, openrouter,
-                          huggingface, groq, deepseek, mistral, gemini, zai,
-                          zai-coding, lmstudio, llamacpp, vllm   [env RAK_PROVIDER]
+                          ollama, ollama-cloud, anthropic, openai, chatgpt,
+                          openrouter, huggingface, groq, deepseek, mistral, gemini,
+                          zai, zai-coding, lmstudio, llamacpp, vllm
+                          (chatgpt: your ChatGPT plan, after `rak login chatgpt`)
+                                                              [env RAK_PROVIDER]
                           default: ollama, or anthropic for a claude-* model
                           when ANTHROPIC_API_KEY is set
       --base-url URL      another address: a server rak doesn't know by name,
