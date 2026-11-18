@@ -35,13 +35,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.34** (2026-11-18)
+**v0.1.0-alpha.35** (2026-11-18)
 
-- **A ChatGPT plan now uses the prompt cache.** rak sends one session id per conversation, and the plan route then reads most of each request from its cache. On two real tasks the cached share went from 24% to 90% and from 1% to 84%.
+- **Add every skill in a GitHub repository.** `rak skills add https://github.com/OWNER/REPO` finds each skill in it, then shows and asks about them one at a time. Before, a repository's address was refused as "too big for a skill".
+- **Remove a skill from a chat:** `/skills remove NAME`, which asks first.
+- **Skill descriptions written over several lines** are read whole, so the agent knows when to load those skills.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.34:** a ChatGPT plan uses the prompt cache: on two real tasks the cached share went from 24% to 90% and from 1% to 84%.
 - **alpha.33:** Sign in with ChatGPT: `rak login chatgpt` and the `chatgpt` provider run requests on your ChatGPT plan, with no API key ([how it works](docs/providers.md#your-chatgpt-plan)). Also `/add-dir PATH` and `--add-dir PATH`, to let the agent work in one more folder.
 - **alpha.32:** saving a chat no longer opens every other saved chat (about ten times faster with large chats).
 - **alpha.31:** the `Thinking…` line, the `past_chats` tool, and answers that wrap at words.
@@ -169,7 +172,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 ### Learns as it goes
 
 - **Project notes** in `rak/`: what the project is, a roadmap and a journal kept current after each request that changed something.
-- **Skills:** know-how in Markdown that the agent loads when a task matches. It writes new ones with you, keeps lessons after you correct it, and adds skills from a URL (`rak skills add …`), in both SwiftAgentKit's and Claude's Agent Skills format.
+- **Skills:** know-how in Markdown that the agent loads when a task matches. It writes new ones with you, keeps lessons after you correct it, adds skills from a URL, or every skill in a GitHub repository (`rak skills add …`), and removes them (`/skills remove NAME`), in both SwiftAgentKit's and Claude's Agent Skills format.
 - **`remember`** keeps one-line notes for later sessions; **routines** replay steps that worked, with no model calls between them.
 
 ### Stays in your control

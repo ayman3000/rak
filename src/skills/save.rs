@@ -117,6 +117,28 @@ pub fn remove(folder: &Path, name: &str) -> Result<PathBuf, String> {
     result.map_err(|e| format!("cannot remove {}: {e}", skill.file.display()))
 }
 
+/// Pure — unit-tested. The folder of skills a saved skill lives in: the
+/// folder of its NAME.md, or the one above its own folder for a SKILL.md.
+pub fn home_folder(skill: &Skill) -> Option<PathBuf> {
+    let parent = skill.file.parent()?;
+    if skill.file.file_name().is_some_and(|f| f == "SKILL.md") {
+        parent.parent().map(Path::to_path_buf)
+    } else {
+        Some(parent.to_path_buf())
+    }
+}
+
+/// Takes the skill named `name` out of the run's list. A built-in skill it
+/// stood in for comes back.
+pub fn unshare(skills: &Shared, name: &str, os: &str) {
+    let mut list = skills.write().unwrap();
+    list.retain(|s| !s.name.eq_ignore_ascii_case(name));
+    if let Some(built_in) = super::built_in(os).into_iter().find(|s| s.name.eq_ignore_ascii_case(name)) {
+        list.push(built_in);
+    }
+    list.sort_by_key(|s| s.name.to_lowercase());
+}
+
 /// Puts `skill` in the run's list, in place of any skill with its name.
 pub fn share(skills: &Shared, skill: Skill) {
     let mut list = skills.write().unwrap();
@@ -278,6 +300,22 @@ mod tests {
         let clash = write(&dir, "# pdf-tools\nDescription: x\nBody.").unwrap_err();
         assert!(clash.contains("other file format"), "{clash}");
         assert!(write(&dir, "<html>not a skill</html>").is_err());
+
+        // Where each lives, for removing it from a chat without naming the folder.
+        assert_eq!(home_folder(&pdf).as_deref(), Some(dir.as_path()));
+        assert_eq!(home_folder(&skill).as_deref(), Some(dir.as_path()));
+        // Out of the run's list; a skill that stood in for a built-in one gives it back.
+        let built_in = super::super::built_in(std::env::consts::OS);
+        let shared: Shared = std::sync::Arc::new(std::sync::RwLock::new(vec![pdf.clone(), skill.clone()]));
+        unshare(&shared, "PDF-tools", std::env::consts::OS);
+        assert_eq!(shared.read().unwrap().iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Deploy"]);
+        if let Some(first) = built_in.first() {
+            let mut mine = skill.clone();
+            mine.name = first.name.clone();
+            share(&shared, mine);
+            unshare(&shared, &first.name, std::env::consts::OS);
+            assert!(shared.read().unwrap().iter().any(|s| s.name == first.name && s.builtin), "the built-in one is back");
+        }
 
         assert_eq!(remove(&dir, "PDF-TOOLS").unwrap(), dir.join("pdf-tools"));
         assert!(!dir.join("pdf-tools").exists());

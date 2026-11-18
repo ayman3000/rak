@@ -99,7 +99,7 @@ Started without a task, rak opens a chat:
 | `/effort [level]` | Show or switch the reasoning effort for this chat and the next ones in this folder: `low`, `medium`, `high`, `xhigh`, `max`, or `default` (none sent: the model's own). Without a level: pick from a list. A chat starts at `medium` unless `RAK_EFFORT` says otherwise; the status line shows the level being sent. |
 | `/init` | Set up this project's notes in `rak/`, or bring them up to date. |
 | `/notes` | Show the project's rules and notes (project, roadmap without Done, the latest journal lines). |
-| `/tools`, `/mcp`, `/skills` | List the tools, the MCP servers and their tools, the skills. `/skills add URL` adds a skill (it shows it and asks first). |
+| `/tools`, `/mcp`, `/skills` | List the tools, the MCP servers and their tools, the skills. `/skills add URL` adds a skill (it shows it and asks first), or every skill in a GitHub repository; `/skills remove NAME` deletes one you saved (it asks first). |
 | `/resume [N]` | This folder's saved chats, newest first; `/resume N` picks one up. |
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens, tool calls, the context used and the window, fallbacks. |

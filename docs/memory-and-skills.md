@@ -47,9 +47,12 @@ A skill is know-how in Markdown: how to build an iOS app from the terminal, how 
 
 ```bash
 rak skills add https://github.com/anthropics/skills/tree/main/skills/pdf
+rak skills add https://github.com/anthropics/skills        # every skill in a repository, one at a time
 rak skills add ./deploy.md --project
 rak skills                    # list them
 rak skills remove pdf
 ```
 
-`rak skills add` takes a web address (a GitHub file or skill folder, with the files it ships) or a file. Before saving it shows the skill and points out lines worth reading first: commands piped into a shell, deletions, `~/.ssh`, `.env`, text telling the agent to ignore you. That list is a hint, not a verdict: read the skill.
+In a chat, `/skills add URL` and `/skills remove NAME` do the same. `/skills remove` asks before deleting, and finds the skill whether it is this project's or yours; a skill built into rak can't be removed.
+
+`rak skills add` takes a web address (a GitHub file or skill folder, with the files it ships) or a file. A GitHub repository's own page, or a folder holding several skill folders, stands for every skill in it: rak lists them, then shows and asks about each in turn. Before saving it shows the skill and points out lines worth reading first: commands piped into a shell, deletions, `~/.ssh`, `.env`, text telling the agent to ignore you. That list is a hint, not a verdict: read the skill.

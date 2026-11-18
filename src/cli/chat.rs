@@ -645,17 +645,27 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 if s.o.no_skills {
                     println!("{}", dim("Skills are off for this run (--no-skills)."));
                 } else {
-                    match skills_command::add(source.trim(), &s.skill_folder, false, color) {
-                        Ok(Some(skill)) => {
-                            println!("{}", dim(&format!("The agent can load \"{}\" now.", skill.name)));
-                            rak::skills::save::share(&s.skills, skill);
+                    match skills_command::add_all(source.trim(), &s.skill_folder, false, color) {
+                        Ok(saved) => {
+                            for skill in saved {
+                                println!("{}", dim(&format!("The agent can load \"{}\" now.", skill.name)));
+                                rak::skills::save::share(&s.skills, skill);
+                            }
                         }
-                        Ok(None) => {}
                         Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
                     }
                 }
             }
             ("add", _) => println!("{}", dim("usage: /skills add URL-or-FILE")),
+            ("remove" | "rm", name) if !name.trim().is_empty() => {
+                let all = s.skills.read().unwrap().clone();
+                match skills_command::remove_in_chat(name.trim(), &all) {
+                    Ok(true) => rak::skills::save::unshare(&s.skills, name.trim(), std::env::consts::OS),
+                    Ok(false) => {}
+                    Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+                }
+            }
+            ("remove" | "rm", _) => println!("{}", dim("usage: /skills remove NAME")),
             _ => skills_command::print_list(&s.skills.read().unwrap(), color),
         },
         "notes" => {

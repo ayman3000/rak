@@ -1,16 +1,31 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-18, after releasing v0.1.0-alpha.34. A working plan for picking the work up on another machine.
+Updated 2026-11-18, after releasing v0.1.0-alpha.35. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.34** (2026-11-18). It has everything
+- The newest release is **v0.1.0-alpha.35** (2026-11-18). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.35
+
+- `rak skills add` (and `/skills add`) with a GitHub repository's page, or a
+  folder of skill folders: every folder with a SKILL.md is found through
+  GitHub's tree API (fetch::expand), listed, then shown and asked about one
+  at a time; one that can't be read is skipped. Before, a repository's page
+  was fetched as a skill file and refused as "over 256 KB". Tried on
+  sivaprasadreddy/sdd-skills (8 skills).
+- `/skills remove NAME` in a chat (the command line had `rak skills remove`
+  already): asks first, deletes the skill where it lives (this project's or
+  the person's), and takes it out of the run's list; a built-in skill it
+  stood in for comes back, and a built-in one itself is refused.
+- A SKILL.md description written as YAML block text (`description: >` and
+  the lines under it) is read whole; it used to be read as ">".
 
 ### In v0.1.0-alpha.34
 

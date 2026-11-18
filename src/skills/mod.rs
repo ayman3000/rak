@@ -72,10 +72,27 @@ pub fn parse(markdown: &str) -> Option<(String, String, String)> {
         // Agent Skills: a front-matter block of `key: value` lines.
         let end = rest.find("\n---")?;
         let (header, body) = (&rest[..end], &rest[end + 4..]);
+        let lines: Vec<&str> = header.lines().collect();
         let field = |key: &str| {
-            header.lines().find_map(|line| {
-                let (k, v) = line.split_once(':')?;
-                (k.trim() == key).then(|| v.trim().trim_matches('"').trim_matches('\'').to_string())
+            lines.iter().enumerate().find_map(|(at, line)| {
+                // A top-level key, not a line of another key's text.
+                let (k, v) = line.split_once(':').filter(|_| !line.starts_with([' ', '\t']))?;
+                if k.trim() != key {
+                    return None;
+                }
+                let value = v.trim();
+                // YAML's block text (`description: >` or `|`): the indented
+                // lines that follow, joined into one.
+                if matches!(value, ">" | ">-" | ">+" | "|" | "|-" | "|+") {
+                    let block: Vec<&str> = lines[at + 1..]
+                        .iter()
+                        .take_while(|l| l.trim().is_empty() || l.starts_with([' ', '\t']))
+                        .map(|l| l.trim())
+                        .filter(|l| !l.is_empty())
+                        .collect();
+                    return Some(block.join(" "));
+                }
+                Some(value.trim_matches('"').trim_matches('\'').to_string())
             })
         };
         (field("name")?, field("description").unwrap_or_default(), body.to_string())
@@ -275,6 +292,19 @@ mod tests {
         let (name, description, body) =
             parse("---\nname: pdf-tools\ndescription: \"Fill PDF forms\"\nlicense: MIT\n---\n\n# PDF\nUse pypdf.\n").unwrap();
         assert_eq!((name.as_str(), description.as_str(), body.as_str()), ("pdf-tools", "Fill PDF forms", "# PDF\nUse pypdf."));
+    }
+
+    #[test]
+    fn a_description_written_over_several_lines_is_read_whole() {
+        // YAML's folded text, as many Agent Skills write it: not a bare ">".
+        let text = "---\nname: sdd-plan\ndescription: >\n  SDD step 3. Read feature.md and produce a plan.\n  Use after: the feature step.\nlicense: MIT\n---\n\n# Plan\nDo it.\n";
+        let (name, description, body) = parse(text).unwrap();
+        assert_eq!(name, "sdd-plan");
+        assert_eq!(description, "SDD step 3. Read feature.md and produce a plan. Use after: the feature step.");
+        assert_eq!(body, "# Plan\nDo it.");
+        // The literal form, and a key that only appears inside the text.
+        let (name, description, _) = parse("---\ndescription: |-\n  First line.\n\n  name: not this\nname: real\n---\nBody").unwrap();
+        assert_eq!((name.as_str(), description.as_str()), ("real", "First line. name: not this"));
     }
 
     #[test]

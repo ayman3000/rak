@@ -25,9 +25,11 @@ OPTIONS
 A skill is a NAME.md file starting with \"# Name\" and a \"Description:\" line
 (SwiftAgentKit's format, which sak and Naseem read too), or a folder with a
 SKILL.md (Agent Skills, Claude's format). For GitHub, paste the page's address:
-a file's page or a skill folder's page both work.
+a file's page, a skill folder's page, or a whole repository's page (every skill
+in it is shown and asked about, one at a time).
 
-In a chat, /skills add URL does the same, and the agent can write skills with
+In a chat, /skills add URL and /skills remove NAME do the same (remove asks
+first, and finds the skill in this project or in yours), and the agent can write skills with
 you: ask it for one, or it offers one after it learns something the hard way.
 ";
 
@@ -61,9 +63,9 @@ pub fn run(args: &[String]) -> ! {
                 // The person adds it to this folder: it is theirs to trust.
                 super::trust::remember(&cwd);
             }
-            match add(source, &folder, yes, color) {
-                Ok(Some(_)) => {}
-                Ok(None) => std::process::exit(1),
+            match add_all(source, &folder, yes, color) {
+                Ok(saved) if !saved.is_empty() => {}
+                Ok(_) => std::process::exit(1),
                 Err(why) => fail(why),
             }
         }
@@ -86,6 +88,32 @@ pub fn run(args: &[String]) -> ! {
     std::process::exit(0);
 }
 
+/// `/skills remove NAME` in a chat: deletes a saved skill wherever it lives
+/// (this project's or yours), after a yes. Ok(true): removed. A built-in
+/// skill can't be removed.
+pub fn remove_in_chat(name: &str, all: &[Skill]) -> Result<bool, String> {
+    let Some(skill) = all.iter().find(|s| s.name.eq_ignore_ascii_case(name)) else {
+        let names: Vec<&str> = all.iter().filter(|s| !s.builtin).map(|s| s.name.as_str()).collect();
+        let have = if names.is_empty() { "you have saved none".to_string() } else { format!("yours are: {}", names.join(", ")) };
+        return Err(format!("no skill named \"{name}\" ({have})"));
+    };
+    if skill.builtin {
+        return Err(format!("\"{}\" is built into rak, so there is nothing to delete. --no-skills leaves skills out of a run", skill.name));
+    }
+    let folder = save::home_folder(skill).ok_or_else(|| format!("cannot tell where \"{}\" is saved", skill.name))?;
+    print!("Remove \"{}\" ({})? Its files are deleted. [y/N] ", skill.name, short_path(&skill.file.to_string_lossy(), &home(), 60));
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut answer);
+    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+        println!("Not removed.");
+        return Ok(false);
+    }
+    let path = save::remove(&folder, &skill.name)?;
+    println!("Removed {}", short_path(&path.to_string_lossy(), &home(), 70));
+    Ok(true)
+}
+
 /// The list `rak skills` and `/skills` print.
 pub fn print_list(skills: &[Skill], color: bool) {
     let dim = |text: &str| paint(color, Style::Dim, text);
@@ -98,7 +126,34 @@ pub fn print_list(skills: &[Skill], color: bool) {
         let place = if skill.builtin { "built into rak".to_string() } else { short_path(&skill.file.to_string_lossy(), &home(), 70) };
         println!("    {}", dim(&place));
     }
-    println!("{}", dim("Add one: rak skills add URL, or ask the agent to write one with you."));
+    println!("{}", dim("Add one: rak skills add URL, or ask the agent to write one with you. Remove one: rak skills remove NAME."));
+}
+
+/// `add` for everything an address stands for: one skill, or every skill in
+/// a GitHub repository (or folder of skills), each shown and asked about in
+/// turn. Returns the ones saved. One that can't be read is said and skipped
+/// when there are several.
+pub fn add_all(source: &str, folder: &Path, yes: bool, color: bool) -> Result<Vec<Skill>, String> {
+    let sources = if source.starts_with("https://") { fetch::expand(source)? } else { vec![source.to_string()] };
+    if let [only] = sources.as_slice() {
+        return Ok(add(only, folder, yes, color)?.into_iter().collect());
+    }
+    let names: Vec<&str> = sources.iter().map(|s| s.rsplit('/').next().unwrap_or(s)).collect();
+    println!("{} skills there: {}.", sources.len(), names.join(", "));
+    if !yes {
+        println!("{}", paint(color, Style::Dim, "Each is shown and asked about in turn."));
+    }
+    let mut saved = Vec::new();
+    for (i, one) in sources.iter().enumerate() {
+        println!("\n{}", paint(color, Style::Dim, &format!("── {} of {} ──", i + 1, sources.len())));
+        match add(one, folder, yes, color) {
+            Ok(Some(skill)) => saved.push(skill),
+            Ok(None) => {}
+            Err(why) => println!("{}", paint(color, Style::Yellow, &format!("Skipped: {why}"))),
+        }
+    }
+    println!("\nSaved {} of {} skills.", saved.len(), sources.len());
+    Ok(saved)
 }
 
 /// Reads a skill from a web address or a file, shows it, asks, and saves it

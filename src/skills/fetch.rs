@@ -97,6 +97,86 @@ pub fn github_files(url: &str) -> Result<Vec<(String, String)>, String> {
     Ok(files)
 }
 
+/// Pure — unit-tested. A GitHub repository's own page → (owner, repo): the
+/// address with nothing after the repository's name.
+pub fn github_repo(url: &str) -> Option<(String, String)> {
+    let path = url.trim().strip_prefix("https://github.com/")?;
+    let path = path.split(['?', '#']).next().unwrap_or(path).trim_end_matches('/');
+    let (owner, repo) = path.split_once('/')?;
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    (!owner.is_empty() && !repo.is_empty() && !repo.contains('/')).then(|| (owner.to_string(), repo.to_string()))
+}
+
+/// Pure — unit-tested. The folders in a repository's file list (GitHub's
+/// tree, as JSON) that hold a SKILL.md, under `under` ("" for the whole
+/// repository), sorted. A SKILL.md at the top is "".
+pub fn skill_folders(tree: &serde_json::Value, under: &str) -> Vec<String> {
+    let inside = if under.is_empty() { String::new() } else { format!("{under}/") };
+    let mut folders: Vec<String> = tree["tree"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["type"] == "blob")
+        .filter_map(|entry| entry["path"].as_str())
+        .filter(|path| path.starts_with(&inside))
+        .filter_map(|path| match path.rsplit_once('/') {
+            Some((folder, "SKILL.md")) => Some(folder.to_string()),
+            None if path == "SKILL.md" => Some(String::new()),
+            _ => None,
+        })
+        .collect();
+    folders.sort();
+    folders
+}
+
+fn github_json(url: &str, what: &str) -> Result<serde_json::Value, String> {
+    let http = crate::http::builder().timeout(Duration::from_secs(20)).build();
+    match http.get(url).set("Accept", "application/vnd.github+json").call() {
+        Ok(response) => response.into_json().map_err(|e| format!("cannot read GitHub's answer about {what}: {e}")),
+        Err(ureq::Error::Status(404, _)) => Err(format!("GitHub has no {what} (or it is private)")),
+        Err(ureq::Error::Status(code, _)) => Err(format!("GitHub answered HTTP {code} about {what}")),
+        Err(ureq::Error::Transport(t)) => Err(format!("cannot reach GitHub about {what}: {t}")),
+    }
+}
+
+/// What one address stands for: itself, or, for a GitHub repository (or a
+/// folder in one with no SKILL.md of its own), the page of every skill
+/// folder inside it. An address that is not a GitHub repository or folder
+/// comes back as it is.
+pub fn expand(source: &str) -> Result<Vec<String>, String> {
+    let (owner, repo, branch, under) = match (github_repo(source), github_folder(source)) {
+        (Some((owner, repo)), _) => {
+            let about = github_json(&format!("https://api.github.com/repos/{owner}/{repo}"), &format!("repository {owner}/{repo}"))?;
+            let branch = about["default_branch"].as_str().unwrap_or("main").to_string();
+            (owner, repo, branch, String::new())
+        }
+        (None, Some(parts)) => parts,
+        (None, None) => return Ok(vec![source.to_string()]),
+    };
+    let tree = github_json(
+        &format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"),
+        &format!("{owner}/{repo} at {branch}"),
+    )?;
+    let folders = skill_folders(&tree, &under);
+    // The folder is a skill itself: as before.
+    if !under.is_empty() && folders.contains(&under) {
+        return Ok(vec![source.to_string()]);
+    }
+    if folders.is_empty() {
+        let place = if under.is_empty() { format!("{owner}/{repo}") } else { format!("{under} in {owner}/{repo}") };
+        return Err(format!(
+            "no skill found in {place}: a skill is a folder with a SKILL.md. For a single .md skill, give that file's page"
+        ));
+    }
+    Ok(folders
+        .into_iter()
+        .map(|folder| match folder.as_str() {
+            "" => format!("https://github.com/{owner}/{repo}/blob/{branch}/SKILL.md"),
+            _ => format!("https://github.com/{owner}/{repo}/tree/{branch}/{folder}"),
+        })
+        .collect())
+}
+
 /// Pure — unit-tested. A relative path that stays inside the folder.
 pub fn safe_path(path: &str) -> bool {
     !path.is_empty()
@@ -172,6 +252,47 @@ mod tests {
         assert_eq!(github_folder("https://github.com/acme/skills/blob/main/deploy.md"), None);
         assert!(safe_path("scripts/fill.py") && safe_path("REFERENCE.md"));
         assert!(!safe_path("../x") && !safe_path("/etc/x") && !safe_path("a/../../x") && !safe_path(""));
+    }
+
+    #[test]
+    fn a_repository_s_page_is_told_from_a_file_s_or_a_folder_s() {
+        let repo = |url: &str| github_repo(url).map(|(owner, repo)| format!("{owner}/{repo}"));
+        assert_eq!(repo("https://github.com/someone/sdd-skills").as_deref(), Some("someone/sdd-skills"));
+        assert_eq!(repo("https://github.com/someone/sdd-skills/").as_deref(), Some("someone/sdd-skills"));
+        assert_eq!(repo(" https://github.com/someone/sdd-skills.git ").as_deref(), Some("someone/sdd-skills"));
+        assert_eq!(repo("https://github.com/someone/sdd-skills?tab=readme-ov-file#usage").as_deref(), Some("someone/sdd-skills"));
+        assert_eq!(repo("https://github.com/someone/sdd-skills/tree/main/skills"), None);
+        assert_eq!(repo("https://github.com/someone/sdd-skills/blob/main/SKILL.md"), None);
+        assert_eq!(repo("https://github.com/someone"), None);
+        assert_eq!(repo("https://example.com/someone/skills"), None);
+    }
+
+    #[test]
+    fn the_skill_folders_of_a_repository_are_those_with_a_skill_md() {
+        let tree = serde_json::json!({ "tree": [
+            { "type": "blob", "path": "README.md" },
+            { "type": "tree", "path": "skills" },
+            { "type": "blob", "path": "skills/sdd-plan/SKILL.md" },
+            { "type": "blob", "path": "skills/sdd-plan/notes/SKILL.md.txt" },
+            { "type": "blob", "path": "skills/sdd-init/SKILL.md" },
+            { "type": "blob", "path": "skills/sdd-init/template.md" },
+            { "type": "tree", "path": "other/SKILL.md" },
+            { "type": "blob", "path": "extras/deep/one/SKILL.md" }
+        ]});
+        assert_eq!(skill_folders(&tree, ""), ["extras/deep/one", "skills/sdd-init", "skills/sdd-plan"]);
+        assert_eq!(skill_folders(&tree, "skills"), ["skills/sdd-init", "skills/sdd-plan"]);
+        assert_eq!(skill_folders(&tree, "skills/sdd-plan"), ["skills/sdd-plan"]);
+        assert!(skill_folders(&tree, "skill").is_empty(), "a name that only starts the same is another folder");
+        let top = serde_json::json!({ "tree": [{ "type": "blob", "path": "SKILL.md" }] });
+        assert_eq!(skill_folders(&top, ""), [""]);
+        assert!(skill_folders(&serde_json::json!({ "message": "Not Found" }), "").is_empty());
+    }
+
+    #[test]
+    fn an_address_that_is_not_a_github_repository_or_folder_stands_for_itself() {
+        for source in ["https://example.com/skill.md", "notes/skill.md", "https://github.com/a/b/blob/main/x.md"] {
+            assert_eq!(expand(source).unwrap(), [source]);
+        }
     }
 
     #[test]
