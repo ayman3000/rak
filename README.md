@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="rak: a small, fast coding agent for your terminal" width="100%">
+  <img src="assets/banner.svg" alt="rak: the coding agent in a 4 MB binary" width="100%">
 </p>
 
 <p align="center">
