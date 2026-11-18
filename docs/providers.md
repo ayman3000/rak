@@ -39,6 +39,7 @@ rak knows these providers by name. Each gets its own address and only its own ke
 
 - **rak signs in as itself.** The first sign-in registers rak with your account and OpenAI issues it a client id of its own. rak never uses another tool's identity.
 - **Limits.** Usage counts against your plan, and you can cap what rak may use: ChatGPT settings → Usage (<https://chatgpt.com/settings/usage>). At a limit rak stops and says so; it does not switch to an API key by itself (it offers the next provider, as with any failure).
+- **Prompt cache.** rak sends one random session id per conversation; with it the route reads most of each request from its cache (84% and 90% on two real tasks, 2026-11-18), without it almost nothing. The id names only the conversation.
 - **What the route does not take:** a reply cap (`--max-tokens` is not sent) and OpenAI's hosted tools. rak's own tools work as usual.
 - **Another account or workspace:** `rak login chatgpt --new`.
 - **On a remote machine** the browser must reach rak's port: `ssh -L 1455:127.0.0.1:1455 HOST`, then open the address `rak login chatgpt` prints.

@@ -15,6 +15,13 @@
 //! items (reasoning with `encrypted_content`, text, tool calls) are kept with
 //! the assistant message (`native`, under "chatgpt") and sent back unchanged.
 //!
+//! **A session id for the prompt cache.** Every request of one model object
+//! carries the same random `session_id` header (and `prompt_cache_key`).
+//! Measured on 2026-11-18: without the header the plan route cached nothing
+//! of a repeated 4K-token prompt; with it, 4096 of 4238 tokens from the
+//! second request on. The header is not in OpenAI's documentation for this
+//! route; it names nothing but this conversation.
+//!
 //! The agent keeps its conversation in chat-completions shape; `to_input`
 //! turns it into this API's items on every request.
 
@@ -46,6 +53,9 @@ pub struct ChatGpt {
     pub account_file: Option<PathBuf>,
     /// A token to send as it is, for tests: no sign-in file is read.
     pub fixed_token: Option<String>,
+    /// Random, one per model object: keeps a conversation's requests on the
+    /// same prompt cache (see the top of this file).
+    session: String,
     clients: crate::stall::Clients,
 }
 
@@ -61,6 +71,7 @@ impl ChatGpt {
             stop: Stop::new(),
             account_file: auth::file(),
             fixed_token: None,
+            session: auth::random_token(),
             clients: Default::default(),
         }
     }
@@ -83,6 +94,7 @@ impl ChatGpt {
             "stream": true,
             // Thinking comes back in a form that can be sent again.
             "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": self.session,
         });
         if let Some(instructions) = instructions {
             body["instructions"] = json!(instructions);
@@ -104,7 +116,8 @@ impl ChatGpt {
             .post(url)
             .set("Authorization", &format!("Bearer {token}"))
             .set("Content-Type", "application/json")
-            .set("Accept", "text/event-stream");
+            .set("Accept", "text/event-stream")
+            .set("session_id", &self.session);
         match request.send_json(body.clone()) {
             Ok(response) => Ok(response),
             Err(ureq::Error::Status(code, response)) => {
@@ -548,6 +561,10 @@ mod tests {
         assert_eq!(body["instructions"], "Be brief.");
         assert_eq!(body["input"], json!([{ "role": "user", "content": "hi" }]), "no system message in the input");
         assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+        // The same cache key on every request of this conversation; another model object has its own.
+        assert_eq!(body["prompt_cache_key"], m.request_body(&messages, &[])["prompt_cache_key"]);
+        assert!(body["prompt_cache_key"].as_str().is_some_and(|key| key.len() >= 32));
+        assert_ne!(body["prompt_cache_key"], model().request_body(&messages, &[])["prompt_cache_key"]);
         for refused in
             ["max_output_tokens", "temperature", "top_p", "truncation", "metadata", "user", "previous_response_id", "tools", "reasoning"]
         {
@@ -791,6 +808,10 @@ mod tests {
         let seen = handle.join().unwrap();
         assert!(seen[0].0.starts_with("POST /v1/responses ") && seen[0].0.to_lowercase().contains("authorization: bearer tok-1"));
         assert_eq!(seen[0].1["reasoning"], json!({ "effort": "medium" }));
+        // Both requests carry the conversation's session id, for the prompt cache.
+        let session = |head: &str| head.lines().find_map(|l| l.to_lowercase().strip_prefix("session_id:").map(|v| v.trim().to_string()));
+        assert!(session(&seen[0].0).is_some_and(|id| id.len() >= 32));
+        assert_eq!(session(&seen[0].0), session(&seen[1].0));
         assert!(seen[1].1.get("reasoning").is_none());
     }
 

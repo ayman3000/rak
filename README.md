@@ -35,14 +35,14 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.33** (2026-11-18)
+**v0.1.0-alpha.34** (2026-11-18)
 
-- **Sign in with ChatGPT.** `rak login chatgpt` signs in through your browser, and the new `chatgpt` provider runs requests on your ChatGPT plan, with no API key. `rak logout chatgpt` signs out. [How it works](docs/providers.md#your-chatgpt-plan).
-- **`/add-dir PATH`** in a chat and **`--add-dir PATH`** at start let the agent work in one more folder for that run.
+- **A ChatGPT plan now uses the prompt cache.** rak sends one session id per conversation, and the plan route then reads most of each request from its cache. On two real tasks the cached share went from 24% to 90% and from 1% to 84%.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.33:** Sign in with ChatGPT: `rak login chatgpt` and the `chatgpt` provider run requests on your ChatGPT plan, with no API key ([how it works](docs/providers.md#your-chatgpt-plan)). Also `/add-dir PATH` and `--add-dir PATH`, to let the agent work in one more folder.
 - **alpha.32:** saving a chat no longer opens every other saved chat (about ten times faster with large chats).
 - **alpha.31:** the `Thinking…` line, the `past_chats` tool, and answers that wrap at words.
 - **alpha.30:** a folder remembers its provider, model and effort.
@@ -132,7 +132,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 ### Any model, your way
 
 - **Sixteen providers by name**, or any OpenAI-compatible server with `--base-url`. Each provider has its own address and its own key.
-- **Your ChatGPT plan, no API key.** `rak login chatgpt` signs in with ChatGPT in your browser; `--provider chatgpt` then runs on your plan.
+- **Your ChatGPT plan, no API key.** `rak login chatgpt` signs in with ChatGPT in your browser; `--provider chatgpt` then runs on your plan, with the prompt cache in use.
 - **Claude with prompt caching** through Anthropic's own API, so a long conversation is re-read at a fraction of the price.
 - **Automatic fallback.** When a provider fails, rak retries, then offers the next provider you have set up.
 - **Reasoning effort** as a setting: `/effort` or `--effort`, from `low` to `max`.

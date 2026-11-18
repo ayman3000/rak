@@ -1,16 +1,33 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-18, after releasing v0.1.0-alpha.33. A working plan for picking the work up on another machine.
+Updated 2026-11-18, after releasing v0.1.0-alpha.34. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.33** (2026-11-18). It has everything
+- The newest release is **v0.1.0-alpha.34** (2026-11-18). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.34
+
+- **The ChatGPT plan route now uses the prompt cache.** Every request of a
+  conversation carries one random `session_id` header (and the same
+  `prompt_cache_key`). Without the header the route cached nothing of a
+  repeated 4K-token prompt (0 of 4,238, four times); with it, 4,096 from
+  the second request on (the key alone did nothing). Same two read-only
+  tasks on rak's code, gpt-5.6-luna, 2026-11-18: cached 24% → 90% (138K of
+  580K → 392K of 435K) and 1% → 84% (3K of 352K → 789K of 935K); the runs
+  took different paths, so only the shares compare. The header is not in
+  OpenAI's docs for this route. gpt-6.2-sol hit less steadily in the direct
+  test (one of two repeats).
+- Memory, alpha.33 on macOS, read-only tasks, MCP off: 18.0 MB resident
+  for a one-word reply, 19.0 to 20.7 MB on 350K to 580K-token tasks
+  (footprint 8.6 to 11.3 MB). The 4.0 MB in the README's benchmark table is
+  alpha.1 and not comparable.
 
 ### In v0.1.0-alpha.33
 
