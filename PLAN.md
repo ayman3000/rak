@@ -8,6 +8,18 @@ Updated 2026-11-17, after releasing v0.1.0-alpha.32. A working plan for picking 
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
+### On main, not released
+
+- `/add-dir PATH` in a chat and `--add-dir PATH` at start: the file tools
+  reach that folder too, for that run (Ctx::add_folder). Only the person
+  adds one. Shown as resolved; refused: the disk's root, a file, a folder
+  inside the project, and any folder that is, holds or is inside a place
+  keys live (~/.ssh, ~/.gnupg, ~/.aws, ~/.kube, ~/.docker, rak's config),
+  so the home folder itself. `/add-dir` alone lists what is reachable.
+- The "outside the project" refusal now tells the model to stop and name
+  /add-dir in a line or two, and not to work around it (a blocked build
+  had cost 459,070 input tokens ending at "blocked").
+
 ### In v0.1.0-alpha.32
 
 - Saving a chat no longer opens every other chat: the clean-up past 30 goes

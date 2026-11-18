@@ -389,6 +389,42 @@ fn use_backend(s: &mut Session, o: Options, backend: Backend, model: &str, say_w
     println!("Now using {}{via}.", paint(color, Style::Bold, model));
 }
 
+/// /add-dir [PATH]: lets the file tools reach another folder, for this chat.
+/// Typed by the person, never by the model; the folder is shown as it
+/// resolves, so a link or a `..` cannot hide where it leads.
+fn add_dir(s: &mut Session, args: &str) {
+    let color = s.ui.borrow().out_color;
+    let dim = |text: &str| paint(color, Style::Dim, text);
+    let short = |path: &std::path::Path| welcome::short_path(&path.to_string_lossy(), &home(), 70);
+    if args.is_empty() {
+        let extra = s.ctx.extra_folders();
+        println!("The agent's file tools reach:");
+        println!("  {}  {}", short(&s.ctx.cwd), dim("the project"));
+        for folder in &extra {
+            println!("  {}  {}", short(folder), dim("added for this chat"));
+        }
+        if s.ctx.any_path {
+            println!("  {}", dim("and any other path: rak was started with --any-path"));
+        } else if extra.is_empty() {
+            println!("{}", dim("Add a folder with /add-dir PATH. It lasts for this chat only."));
+        }
+        return;
+    }
+    match s.ctx.add_folder(args, &super::session::protected_folders()) {
+        Ok(folder) => {
+            s.log.write(json!({ "event": "add_dir", "folder": folder.to_string_lossy() }));
+            println!("{}", paint(color, Style::Green, &format!("✓ Added {} for this chat.", short(&folder))));
+            let asks = if s.auto.get() {
+                "Auto-approve is on, so edits there run without asking."
+            } else {
+                "Edits there ask first, as in the project."
+            };
+            println!("{}", dim(&format!("The agent can now read and write there. {asks}")));
+        }
+        Err(why) => println!("{}", paint(color, Style::Yellow, &format!("Not added: {why}."))),
+    }
+}
+
 /// /key [NAME]: gives (or replaces) a key from inside the chat. The chat's
 /// own provider picks the new key up at once.
 fn key_command(s: &mut Session, args: &str) {
@@ -511,6 +547,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
         "model" | "m" if !args.is_empty() => switch_model(s, args),
         "provider" if !args.is_empty() => switch_provider(s, args),
         "key" | "keys" => key_command(s, args),
+        "add-dir" => add_dir(s, args),
         "effort" if !args.is_empty() => match args.to_lowercase().as_str() {
             "default" | "off" | "none" => set_effort(s, None),
             typed => match super::args::effort_level(typed) {

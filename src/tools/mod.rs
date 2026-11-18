@@ -105,8 +105,11 @@ pub fn reading_tools(ctx: &Arc<Ctx>) -> Vec<Box<dyn Tool + Send>> {
 pub struct Ctx {
     /// The project folder, symlinks resolved. Relative paths resolve here.
     pub cwd: PathBuf,
-    /// False: file tools only reach inside `cwd`.
+    /// False: file tools only reach inside `cwd` and the folders in `extra`.
     pub any_path: bool,
+    /// Folders the person added for this run (`/add-dir`, `--add-dir`),
+    /// symlinks resolved. Only the person adds one; no tool does.
+    extra: Mutex<Vec<PathBuf>>,
     /// Files read or written in this run, with their modification time then.
     seen: Mutex<HashMap<PathBuf, Option<SystemTime>>>,
     /// Set by Ctrl-C: a running command is killed and the request ends.
@@ -120,6 +123,7 @@ impl Ctx {
         Arc::new(Ctx {
             cwd: real_path(cwd),
             any_path,
+            extra: Mutex::new(Vec::new()),
             seen: Mutex::new(HashMap::new()),
             stop: Default::default(),
             jobs: Default::default(),
@@ -144,10 +148,46 @@ impl Ctx {
     /// resolved first, so a link inside the project that points outside it is
     /// treated as outside.
     pub fn block_reason(&self, path: &Path) -> Option<String> {
-        if self.any_path || real_path(path).starts_with(&self.cwd) {
+        let real = real_path(path);
+        if self.any_path || real.starts_with(&self.cwd) || self.extra.lock().unwrap().iter().any(|folder| real.starts_with(folder)) {
             return None;
         }
-        Some(format!("it is outside the project folder {} (start rak with --any-path to allow that)", self.cwd.display()))
+        // Said so the model stops here: going round it (a shell command, a
+        // copy inside the project) is not what the person asked for.
+        Some(format!(
+            "it is outside the project folder {}. Only the user can allow another folder: stop, and tell them in one or two \
+             lines to type /add-dir PATH in the chat (or start rak with --add-dir PATH). Do not work around this.",
+            self.cwd.display()
+        ))
+    }
+
+    /// The folders added to this run, as they were resolved.
+    pub fn extra_folders(&self) -> Vec<PathBuf> {
+        self.extra.lock().unwrap().clone()
+    }
+
+    /// Lets the file tools reach this folder too, for this run. `protected`:
+    /// places never opened this way (where rak keeps its keys). The folder as
+    /// resolved comes back, to show the person what they opened.
+    pub fn add_folder(&self, raw: &str, protected: &[PathBuf]) -> Result<PathBuf, String> {
+        let typed = self.resolve(raw.trim());
+        let real = std::fs::canonicalize(&typed).map_err(|_| format!("{} is not a folder that exists", typed.display()))?;
+        if !real.is_dir() {
+            return Err(format!("{} is a file, not a folder", real.display()));
+        }
+        if real.starts_with(&self.cwd) {
+            return Err(format!("{} is inside the project already", real.display()));
+        }
+        let mut never: Vec<PathBuf> = protected.iter().map(|p| real_path(p)).collect();
+        never.extend(secret_folders(&real_path(&home())));
+        if let Some(why) = refuse_folder(&real, &never) {
+            return Err(why);
+        }
+        let mut extra = self.extra.lock().unwrap();
+        if !extra.contains(&real) {
+            extra.push(real.clone());
+        }
+        Ok(real)
     }
 
     pub fn note_seen(&self, path: &Path) {
@@ -169,6 +209,27 @@ fn modified(path: &Path) -> Option<SystemTime> {
 
 fn home() -> PathBuf {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Where keys and credentials usually live under a home folder.
+fn secret_folders(home: &Path) -> Vec<PathBuf> {
+    [".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/rak"].iter().map(|name| home.join(name)).collect()
+}
+
+/// Pure — unit-tested. Why a folder is never added, or None when it may be:
+/// the disk's root, and any folder that holds, is, or is inside a place
+/// where keys live. So the home folder itself is refused (it holds ~/.ssh),
+/// and a project under it is not.
+pub fn refuse_folder(folder: &Path, never: &[PathBuf]) -> Option<String> {
+    if folder.parent().is_none() {
+        return Some("the whole disk is never added; name the folder you mean".to_string());
+    }
+    let secret = never.iter().find(|secret| folder.starts_with(secret) || secret.starts_with(folder))?;
+    Some(if folder.starts_with(secret) {
+        format!("{} is where keys are kept; it is never added", secret.display())
+    } else {
+        format!("{} holds {}, where keys are kept; name a folder inside it instead", folder.display(), secret.display())
+    })
 }
 
 /// Folds `.` and `..` without touching the disk.
@@ -269,6 +330,60 @@ mod tests {
         assert!(ctx.block_reason(&ctx.resolve("inside/new.txt")).is_none());
         assert!(ctx.block_reason(&ctx.resolve("../elsewhere.txt")).is_some());
         assert!(Ctx::new(&dir, true).block_reason(&ctx.resolve("../elsewhere.txt")).is_none());
+    }
+
+    #[test]
+    fn a_folder_the_person_adds_is_reachable_and_nothing_else_is() {
+        let dir = testing::temp_dir("add-project");
+        let other = testing::temp_dir("add-other");
+        let third = testing::temp_dir("add-third");
+        std::fs::write(other.join("a.txt"), "x").unwrap();
+        let ctx = Ctx::new(&dir, false);
+        let inside = other.join("src/new.rs");
+        let why = ctx.block_reason(&inside).unwrap();
+        assert!(why.contains("outside the project") && why.contains("/add-dir") && why.contains("stop"), "{why}");
+        assert_eq!(ctx.add_folder(other.to_str().unwrap(), &[]).unwrap(), other);
+        assert!(ctx.block_reason(&inside).is_none(), "a new file in the added folder");
+        assert!(ctx.block_reason(&third.join("x")).is_some(), "only that folder was added");
+        assert!(ctx.block_reason(&other.parent().unwrap().join("sibling.txt")).is_some(), "not its parent");
+        assert_eq!(ctx.extra_folders(), std::slice::from_ref(&other));
+        ctx.add_folder(other.to_str().unwrap(), &[]).unwrap();
+        assert_eq!(ctx.extra_folders().len(), 1, "adding it twice keeps one");
+        // What is refused: a file, a folder that is not there, one inside the project, a protected one.
+        assert!(ctx.add_folder(other.join("a.txt").to_str().unwrap(), &[]).unwrap_err().contains("a file"));
+        assert!(ctx.add_folder(other.join("nope").to_str().unwrap(), &[]).unwrap_err().contains("not a folder that exists"));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        assert!(ctx.add_folder("sub", &[]).unwrap_err().contains("inside the project"));
+        assert!(ctx.add_folder(third.to_str().unwrap(), &[third.join("keys")]).unwrap_err().contains("holds"));
+        assert_eq!(ctx.extra_folders().len(), 1);
+    }
+
+    #[test]
+    fn the_disk_the_home_folder_and_where_keys_live_are_never_added() {
+        let home = Path::new("/Users/me");
+        let never = secret_folders(home);
+        assert!(refuse_folder(Path::new("/"), &never).unwrap().contains("whole disk"));
+        assert!(refuse_folder(home, &never).unwrap().contains("holds /Users/me/.ssh"));
+        assert!(refuse_folder(Path::new("/Users"), &never).is_some(), "a folder above the home folder holds it too");
+        assert!(refuse_folder(&home.join(".ssh"), &never).unwrap().contains("never added"));
+        assert!(refuse_folder(&home.join(".ssh/keys"), &never).is_some());
+        assert!(refuse_folder(&home.join(".config"), &never).unwrap().contains(".config/rak"));
+        assert!(refuse_folder(&home.join(".config/rak/sessions"), &never).is_some());
+        assert_eq!(refuse_folder(&home.join("projects/shell-coach"), &never), None);
+        assert_eq!(refuse_folder(&home.join("projects"), &never), None);
+        assert_eq!(refuse_folder(Path::new("/tmp/work"), &never), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_an_added_folder_is_shown_as_where_it_leads() {
+        let dir = testing::temp_dir("add-link");
+        let target = testing::temp_dir("add-link-target");
+        std::os::unix::fs::symlink(&target, dir.parent().unwrap().join(format!("{}-link", dir.file_name().unwrap().to_string_lossy())))
+            .unwrap();
+        let ctx = Ctx::new(&dir, false);
+        let link = format!("../{}-link", dir.file_name().unwrap().to_string_lossy());
+        assert_eq!(ctx.add_folder(&link, &[]).unwrap(), target, "the person sees the real folder, not the link");
     }
 
     #[cfg(unix)]

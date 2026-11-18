@@ -143,6 +143,11 @@ pub fn choose_model(o: &Options, chat: bool, last_pick: Option<String>) -> Optio
     }
 }
 
+/// Where rak keeps its keys: never opened to the file tools by /add-dir.
+pub fn protected_folders() -> Vec<PathBuf> {
+    config_dir().into_iter().collect()
+}
+
 /// Pure — unit-tested. Starts the chat at the provider picked last in this
 /// folder, the way `/provider` moves one: its own address and key. Nothing
 /// changes when it is the default provider already, or a server known only
@@ -390,6 +395,11 @@ pub fn run(mut o: Options) -> i32 {
 
     // One stop flag for the loop, the model stream and a running command.
     let ctx = Ctx::new(&cwd, o.any_path);
+    for folder in &o.add_dirs {
+        if let Err(why) = ctx.add_folder(folder, &protected_folders()) {
+            usage_error(&format!("--add-dir: {why}"));
+        }
+    }
     output::set_project(&ctx.cwd);
     let stop = ctx.stop.clone();
     #[cfg(unix)]

@@ -94,6 +94,7 @@ Started without a task, rak opens a chat:
 | `/model [name]` | Show or switch the model. Without a name: pick from a list (↑/↓, Enter, Esc cancels, type to narrow; a name the list doesn't have can be typed and used). |
 | `/models` | List the models the provider offers. |
 | `/provider [name]` | Show or switch the provider: its own address and key, and the model you last picked there. The conversation comes along, and the next chat in this folder starts there too (kept in `.rak/model`). Without a name: a list that dims providers whose key isn't set. |
+| `/add-dir [path]` | Let the agent read and write in another folder, for this chat; edits there ask as in the project. Without a path: the folders it can reach. Your home folder itself and the places keys live are refused. |
 | `/key [provider]` | Give or replace an API key from inside the chat: pasted without being shown, checked where the provider has a free check, saved in the key file, and used at once. Without a name: pick from a list. `/provider` asks the same way when the provider you pick has no key yet. |
 | `/effort [level]` | Show or switch the reasoning effort for this chat and the next ones in this folder: `low`, `medium`, `high`, `xhigh`, `max`, or `default` (none sent: the model's own). Without a level: pick from a list. A chat starts at `medium` unless `RAK_EFFORT` says otherwise; the status line shows the level being sent. |
 | `/init` | Set up this project's notes in `rak/`, or bring them up to date. |
@@ -135,6 +136,7 @@ Started without a task, rak opens a chat:
 | `--no-stream` | Wait for each whole reply instead of showing it as it arrives. |
 | `-y`, `--yes` | Run every tool without asking. Use it only inside a container. One request with `-y` (an unattended run, as a benchmark or CI does it) keeps nothing for later sessions: no `remember`, skills, routines or journal, so it writes no files of its own into the project. |
 | `--read-only` | No edits and no commands: read and report. |
+| `--add-dir PATH` | Let file tools reach this folder too, besides the project (repeatable). In a chat: `/add-dir PATH`. |
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp`, `--no-skills`, `--no-memory`, `--no-notes` | Leave out MCP servers, skills, memory notes, or the after-request notes update. |
 | `--trust` | Use this folder's own `.rak/` settings and `.env` this run, as if trusted (see [Safety](safety.md)). |

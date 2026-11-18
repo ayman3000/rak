@@ -133,7 +133,7 @@ The full walkthrough, every chat command and every option are in [docs/usage.md]
 - **Asks before every edit and command,** showing the whole command. In a script without `-y` it stops instead of guessing.
 - **Folder trust.** A cloned repository's own MCP servers, `.env`, skills and routines wait until you trust the folder.
 - **Keys stay with their provider.** Each provider gets only its own key, and key-file values never reach the commands the agent runs.
-- **`--read-only`, `--tools`, `--any-path`** decide exactly what the agent may touch.
+- **`--read-only`, `--tools`, `/add-dir`, `--any-path`** decide exactly what the agent may touch.
 
 ### Extends and embeds
 

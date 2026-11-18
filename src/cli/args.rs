@@ -53,6 +53,8 @@ KEYS (run `rak keys` to create the key file from a template)
 BEHAVIOUR
   -y, --yes               run every tool without asking
       --read-only         no edits and no commands: read and report
+      --add-dir PATH      let file tools reach this folder too (repeatable); in a chat,
+                          /add-dir PATH does the same
       --any-path          let file tools reach outside the project folder
       --no-mcp            don't connect the MCP servers for this run
       --no-skills         no skills for this run, built-in ones included
@@ -119,6 +121,8 @@ pub struct Options {
     pub yes: bool,
     pub read_only: bool,
     pub any_path: bool,
+    /// Folders the file tools may reach besides the project (--add-dir).
+    pub add_dirs: Vec<String>,
     pub no_mcp: bool,
     pub no_skills: bool,
     /// Only these tools (--tools a,b); Some(empty) is --tools none.
@@ -205,6 +209,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         yes: false,
         read_only: false,
         any_path: false,
+        add_dirs: Vec::new(),
         no_mcp: false,
         no_skills: false,
         tools: None,
@@ -267,6 +272,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "-y" | "--yes" => o.yes = true,
             "--read-only" => o.read_only = true,
             "--any-path" => o.any_path = true,
+            "--add-dir" => o.add_dirs.push(value("--add-dir")),
             "--no-mcp" => o.no_mcp = true,
             "--no-skills" => o.no_skills = true,
             "--trust" => o.trust = true,
