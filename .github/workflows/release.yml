@@ -11,6 +11,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # By hand, from the Actions page or `gh workflow run release.yml`: builds
+  # and packages everything and publishes nothing. For trying a change to
+  # this file without making a release.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,10 +26,13 @@ jobs:
       matrix:
         include:
           # Linux: static (musl), so one binary runs on any distribution.
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
-          - { target: aarch64-apple-darwin, os: macos-latest }
-          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { name: linux-x86_64, os: ubuntu-latest, targets: x86_64-unknown-linux-musl }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, targets: aarch64-unknown-linux-musl }
+          # Both Mac builds on one runner, one after the other. As two jobs
+          # they competed for GitHub's scarce Mac runners: twice (alpha.45,
+          # alpha.46) the second waited 15 minutes for one, was cancelled
+          # ("not acquired by Runner"), and the release was not published.
+          - { name: macos, os: macos-latest, targets: aarch64-apple-darwin x86_64-apple-darwin }
     runs-on: ${{ matrix.os }}
     env:
       # Static Linux builds: Rust brings musl's startup files, and ring's bit of
@@ -36,6 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: The tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -44,24 +52,42 @@ jobs:
             exit 1
           fi
       - name: Rust
-        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.targets }}
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          for target in ${{ matrix.targets }}; do
+            cargo build --release --locked --target "$target"
+          done
       - name: Package
         shell: bash
         run: |
-          name="rak-$GITHUB_REF_NAME-${{ matrix.target }}"
-          mkdir "$name"
-          cp "target/${{ matrix.target }}/release/rak" LICENSE README.md "$name/"
-          tar -czf "$name.tar.gz" "$name"
-          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          # A run by hand has no tag: its archives are named for the version in Cargo.toml.
+          case "$GITHUB_REF" in
+            refs/tags/*) version="$GITHUB_REF_NAME" ;;
+            *) version="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" ;;
+          esac
+          for target in ${{ matrix.targets }}; do
+            name="rak-$version-$target"
+            mkdir "$name"
+            cp "target/$target/release/rak" LICENSE README.md "$name/"
+            tar -czf "$name.tar.gz" "$name"
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+            ls -l "target/$target/release/rak"
+          done
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.target }}
+          name: ${{ matrix.name }}
           path: rak-*.tar.gz*
 
   publish:
     needs: build
+    # Only a tag publishes; a run by hand stops after the builds.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
