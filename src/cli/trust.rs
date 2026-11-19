@@ -51,6 +51,30 @@ pub fn project_settings(project: &Path) -> Vec<String> {
     out
 }
 
+/// Folders where the person said no to setting up rak's notes: not asked again.
+fn no_notes_store() -> Option<PathBuf> {
+    super::settings::config_dir().map(|dir| dir.join("no-notes"))
+}
+
+/// Whether the person declined the notes offer in this folder before.
+pub fn notes_declined(project: &Path) -> bool {
+    no_notes_store().and_then(|file| std::fs::read_to_string(file).ok()).is_some_and(|list| listed(&list, &canonical(project)))
+}
+
+/// Remembers that the person does not want the notes offer in this folder.
+pub fn decline_notes(project: &Path) {
+    let Some(file) = no_notes_store() else { return };
+    let folder = canonical(project);
+    let list = std::fs::read_to_string(&file).unwrap_or_default();
+    if listed(&list, &folder) {
+        return;
+    }
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&file, format!("{list}{folder}\n"));
+}
+
 fn store() -> Option<PathBuf> {
     super::settings::config_dir().map(|dir| dir.join("trusted"))
 }

@@ -227,6 +227,7 @@ pub const KNOWN: &[(&str, &str)] = &[
     ("RAK_MODEL", "the default model"),
     ("RAK_EFFORT", "the default reasoning effort"),
     ("RAK_BASE_URL", "the default provider's address, if not its usual one"),
+    ("RAK_ALLOW_HOURS", "hours a continued chat keeps what you allowed (default 24; 0: never)"),
     ("RAK_VISION_PROVIDER", "the provider of the model that reads images"),
     ("RAK_VISION_MODEL", "the model that reads images for one that can't"),
     ("RAK_API_KEY", "the key for a server named only by --base-url"),
@@ -234,7 +235,10 @@ pub const KNOWN: &[(&str, &str)] = &[
 
 /// Which of `KNOWN` are settings whose values may be shown.
 pub fn shows_value(name: &str) -> bool {
-    matches!(name, "RAK_PROVIDER" | "RAK_MODEL" | "RAK_EFFORT" | "RAK_BASE_URL" | "RAK_VISION_PROVIDER" | "RAK_VISION_MODEL")
+    matches!(
+        name,
+        "RAK_PROVIDER" | "RAK_MODEL" | "RAK_EFFORT" | "RAK_BASE_URL" | "RAK_ALLOW_HOURS" | "RAK_VISION_PROVIDER" | "RAK_VISION_MODEL"
+    )
 }
 
 /// rak's own key file: ~/.config/rak/.env.

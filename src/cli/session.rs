@@ -53,6 +53,10 @@ pub struct Session {
     pub mcp_summary: Option<String>,
     pub mcp_problems: Vec<String>,
     pub server_of: Rc<RefCell<std::collections::HashMap<String, String>>>,
+    /// After a chat is continued: what is still allowed, or that it lapsed. None: nothing was.
+    pub continued_note: Option<String>,
+    /// What the person allowed without asking (A, a, s): saved with the chat.
+    pub granted: Rc<RefCell<approval::Granted>>,
     /// Tools of the user's own saved during a request: they join when it ends.
     pub fresh_tools: rak::tools::user::Fresh,
     /// Where those tools live: this project's folder, and the one for every project.
@@ -92,7 +96,8 @@ impl Session {
         if self.agent.history().is_empty() {
             return;
         }
-        if let Err(why) = rak::sessions::save(dir, &self.project_key, &self.chat_id, self.agent.history(), &self.model) {
+        let allowed = self.granted.borrow().to_json();
+        if let Err(why) = rak::sessions::save(dir, &self.project_key, &self.chat_id, self.agent.history(), &self.model, &allowed) {
             self.ui.borrow_mut().progress(Some(Style::Yellow), &format!("chat not saved: {why}"));
         }
     }
@@ -102,6 +107,11 @@ impl Session {
         let history = rak::sessions::load(path)?;
         let count = history.len();
         self.agent.restore(history);
+        // What was allowed in that chat is allowed again for RAK_ALLOW_HOURS
+        // after it was given (24 by default); the caller says which it was.
+        let mut granted = approval::Granted::from_json(&rak::sessions::load_allowed(path));
+        self.continued_note = granted.on_continue(rak::sessions::now_seconds(), approval::allow_hours(key("RAK_ALLOW_HOURS").as_deref()));
+        *self.granted.borrow_mut() = granted;
         self.chat_id = rak::sessions::id_of(path);
         rak::sessions::set_current(&self.chat_id);
         Ok(count)
@@ -714,11 +724,13 @@ pub fn run(mut o: Options) -> i32 {
     // and with no terminal to ask, stop rather than let the model look for
     // another way.
     let server_of = Rc::new(RefCell::new(std::mem::take(&mut connected.server_of)));
+    let granted: Rc<RefCell<approval::Granted>> = Default::default();
     agent.on_approval(approval::prompter(approval::Prompter {
         ui: ui.clone(),
         auto: auto.clone(),
         stop: stop.clone(),
         server_of: server_of.clone(),
+        granted: granted.clone(),
         interactive,
         color: err_color,
     }));
@@ -751,6 +763,8 @@ pub fn run(mut o: Options) -> i32 {
         mcp_summary,
         mcp_problems,
         server_of,
+        continued_note: None,
+        granted,
         mcp_pending,
         fresh_tools,
         tool_folders,
@@ -774,7 +788,10 @@ pub fn run(mut o: Options) -> i32 {
         let last = session.sessions_dir.as_ref().and_then(|dir| rak::sessions::list(dir, &session.project_key).into_iter().next());
         let note = match last {
             Some(saved) => match session.resume(&saved.path) {
-                Ok(_) => format!("(continuing this folder's last chat: {})", saved.title),
+                Ok(_) => match session.continued_note.clone() {
+                    Some(still) => format!("(continuing this folder's last chat: {})\n{still}", saved.title),
+                    None => format!("(continuing this folder's last chat: {})", saved.title),
+                },
                 Err(why) => format!("(could not continue the last chat: {why})"),
             },
             None => "(no earlier chat in this folder — starting fresh)".to_string(),

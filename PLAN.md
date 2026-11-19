@@ -12,6 +12,37 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.43
+
+Two requests from 2026-11-19: "users may not be aware of /init" and "if
+the user wrote A … exit and re-enter the same session by rak -c, the
+permission should be remembered".
+
+- **The notes are offered at a project's first chat** (chat::offer_notes,
+  offers_notes): "This project has no rak notes yet", what they are and
+  cost, then "Set them up now? [Y/n]". Enter or y runs /init; anything else
+  is remembered in ~/.config/rak/no-notes and not asked again. Not offered
+  with notes present, --read-only, --no-notes, -c, no terminal, the home
+  folder or disk top, or an empty folder. Asked, not run unasked: it is a
+  minute and a model request before the person's own first message.
+- **Approvals are saved with the chat** (approval::Granted, sessions "allowed").
+  The prompter's A / a / s answers were closure-local and lost on exit. Now
+  shared with the session, written by save_chat, and restored by
+  Session::resume (rak -c and /resume), with one line saying what is still
+  allowed. After an A the status line reads "runs without asking". /yes
+  turns asking back on and forgets them. A new chat allows nothing.
+  They last RAK_ALLOW_HOURS (default 24; 0: a continued chat always asks)
+  from the first "always" answer (Granted::since, on_continue): in time,
+  the line ends "This lasts N hours more"; past it, or with no time on a
+  saved chat, they are dropped and the line says rak asks again. The
+  limit is applied when a chat is continued, not to a chat left open.
+  Tried: right away (24 hours more), with the setting at 0, and with the
+  saved time moved back 25 hours.
+  Tried in a scratch home with a stand-in model: chat 1 declined the notes
+  and answered A; `rak -c` said so and ran the command unasked; /yes turned
+  asking on; a new chat asked again. The yes path of the offer runs the
+  same code as typing /init and was not tried by itself.
+
 ### In v0.1.0-alpha.42
 
 - **An approval answers only what was typed after the question appeared**

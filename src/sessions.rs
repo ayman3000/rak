@@ -79,11 +79,11 @@ pub fn set_current(id: &str) {
 
 /// Saves `history` (the conversation without its system prompt) as chat `id`
 /// of the project, and deletes the project's oldest chats past `KEEP`.
-pub fn save(dir: &Path, key: &str, id: &str, history: &[Value], model: &str) -> Result<PathBuf, String> {
+pub fn save(dir: &Path, key: &str, id: &str, history: &[Value], model: &str, allowed: &Value) -> Result<PathBuf, String> {
     let folder = dir.join(key);
     std::fs::create_dir_all(&folder).map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     let path = folder.join(format!("{id}.json"));
-    let body = json!({ "version": 1, "saved_at": now(), "model": model, "title": title(history), "messages": history });
+    let body = json!({ "version": 1, "saved_at": now(), "model": model, "title": title(history), "allowed": allowed, "messages": history });
     // Written beside it, then moved over it: a crash mid-write leaves the old file whole.
     let partial = folder.join(format!(".{id}.json.partial"));
     std::fs::write(&partial, body.to_string()).map_err(|e| format!("cannot write {}: {e}", partial.display()))?;
@@ -142,6 +142,16 @@ pub fn load(path: &Path) -> Result<Vec<Value>, String> {
     body["messages"].as_array().cloned().ok_or_else(|| format!("{} holds no messages", path.display()))
 }
 
+/// What a saved chat's person had allowed without asking (the caller reads
+/// it); Null for a chat saved before this was kept, or one that can't be read.
+pub fn load_allowed(path: &Path) -> Value {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .map(|body| body["allowed"].clone())
+        .unwrap_or(Value::Null)
+}
+
 /// The chat's id, from its file.
 pub fn id_of(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
@@ -187,10 +197,14 @@ mod tests {
         let dir = temp_dir("sessions");
         let key = "app-00000000";
         let chat = |text: &str| vec![json!({ "role": "user", "content": text }), json!({ "role": "assistant", "content": "done" })];
-        let first = save(&dir, key, "1-000", &chat("first"), "m").unwrap();
-        save(&dir, key, "2-000", &chat("second"), "m").unwrap();
+        let first = save(&dir, key, "1-000", &chat("first"), "m", &Value::Null).unwrap();
+        save(&dir, key, "2-000", &chat("second"), "m", &Value::Null).unwrap();
         // Saving again under the same id replaces that chat.
-        save(&dir, key, "2-000", &[chat("second"), chat("more")].concat(), "m").unwrap();
+        save(&dir, key, "2-000", &[chat("second"), chat("more")].concat(), "m", &json!({ "everything": true })).unwrap();
+        // What the person had allowed is kept with the chat; one saved without it has none.
+        assert_eq!(load_allowed(&dir.join(key).join("2-000.json")), json!({ "everything": true }));
+        assert_eq!(load_allowed(&first), Value::Null);
+        assert_eq!(load_allowed(&dir.join("missing.json")), Value::Null);
         let listed = list(&dir, key);
         assert_eq!(listed.len(), 2);
         assert_eq!((listed[0].title.as_str(), listed[0].messages), ("second", 4));
@@ -199,7 +213,7 @@ mod tests {
         assert!(list(&dir, "other").is_empty());
 
         for n in 0..KEEP + 3 {
-            save(&dir, key, &format!("9{n:03}-000"), &chat("x"), "m").unwrap();
+            save(&dir, key, &format!("9{n:03}-000"), &chat("x"), "m", &Value::Null).unwrap();
         }
         assert_eq!(list(&dir, key).len(), KEEP);
         let _ = std::fs::remove_dir_all(&dir);
@@ -216,15 +230,15 @@ mod tests {
             std::fs::File::options().write(true).open(path).unwrap().set_modified(at).unwrap();
         };
         for n in 0..KEEP {
-            let path = save(&dir, key, &format!("1{n:03}-000"), &chat, "m").unwrap();
+            let path = save(&dir, key, &format!("1{n:03}-000"), &chat, "m", &Value::Null).unwrap();
             written_at(&path, n as u64);
         }
         let ids = |dir: &Path| -> Vec<String> { list(dir, key).iter().map(|c| id_of(&c.path)).collect() };
         // The oldest id is picked up again and saved now: it is the newest chat.
-        save(&dir, key, "1000-000", &chat, "m").unwrap();
+        save(&dir, key, "1000-000", &chat, "m", &Value::Null).unwrap();
         assert_eq!(ids(&dir).len(), KEEP, "thirty chats, none past the limit");
         // A new chat: one must go, and it is the one written longest ago, not the lowest id.
-        save(&dir, key, "2000-000", &chat, "m").unwrap();
+        save(&dir, key, "2000-000", &chat, "m", &Value::Null).unwrap();
         let left = ids(&dir);
         assert_eq!(left.len(), KEEP);
         assert!(left.contains(&"1000-000".to_string()), "the resumed chat stays");
@@ -232,7 +246,7 @@ mod tests {
         assert!(!left.contains(&"1001-000".to_string()), "the chat written longest ago went: {left:?}");
         // Other files in the folder are never touched.
         std::fs::write(dir.join(key).join("notes.txt"), "mine").unwrap();
-        save(&dir, key, "3000-000", &chat, "m").unwrap();
+        save(&dir, key, "3000-000", &chat, "m", &Value::Null).unwrap();
         assert!(dir.join(key).join("notes.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

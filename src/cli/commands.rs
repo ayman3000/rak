@@ -15,7 +15,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/skills", "the skills (each is a command too: /NAME); /skills add URL, /skills remove NAME"),
     ("/init", "set up this project's notes in rak/ (or bring them up to date)"),
     ("/notes", "the project's rules and its notes in rak/ (project, roadmap, journal)"),
-    ("/yes", "toggle auto-approve for edits and shell commands"),
+    ("/yes", "toggle auto-approve for edits and shell commands (also turns asking back on after an A)"),
     ("/usage", "tokens and tool calls so far"),
     ("/jobs", "servers started in the background; /jobs stop N (or all) stops them"),
     ("/clear", "start a fresh conversation"),

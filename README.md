@@ -36,15 +36,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.42** (2026-11-19)
+**v0.1.0-alpha.43** (2026-11-19)
 
-- **A key pressed early can no longer answer a question.** Before this release, `y` and Enter typed while rak was busy approved the next edit or command the moment its question appeared. Now only what you type after the question is on screen counts. Update if you use an earlier release.
-- **A slip no longer ends the request.** An answer that is not `y`, `n`, `a` or `A` is shown back to you and asked about again, where it used to count as a no and stop everything.
-- macOS and Linux. On Windows the second point applies; the first does not yet.
+- **The first chat in a project offers to set up its notes.** rak says what the notes are and asks once; Enter starts it, `n` skips it for good. Before, you had to know about `/init`.
+- **A continued chat remembers what you allowed.** If you answered `A` (everything), `a` (a tool) or `s` (a server), then `rak -c` or `/resume` picks that up, says so in one line, and shows "runs without asking" in the status line. `/yes` turns asking back on.
+- **It expires.** What you allowed lasts 24 hours from when you first allowed it; after that a continued chat says so and asks again. `RAK_ALLOW_HOURS` in `~/.config/rak/.env` changes the length, and `0` means a continued chat always asks.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.42:** a key pressed early can no longer answer an approval question, and an answer rak doesn't recognise is asked about again where it used to count as a no. Update if you use an earlier release.
 - **alpha.41:** [tools of your own](#make-your-own-tools): say "I need a tool that …" or type `/make-tool`; rak writes a small script, shows it, and asks before saving. Keys stay out of scripts (`/key NAME`), and `/tools remove NAME` deletes one.
 - **alpha.40:** add an MCP server from its page: `rak mcp add https://github.com/…` reads the JSON, shows what will run and asks; `rak mcp add` alone takes pasted JSON or three questions; `/mcp add` does it inside a chat.
 - **alpha.39:** a chat shows its prompt at once and connects MCP servers behind it: on a Mac with one MCP server, the time until typed text appears went from 811 ms to about 8 ms.
@@ -167,7 +168,7 @@ rak -c "and now add the tests"         # continue this folder's last chat
 ```
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
-2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project.
+2. **Say yes to the notes.** The first chat in a project offers to look around and write rak's notes in `rak/` (Enter for yes), so every later session starts already knowing the project. `/init` does the same any time, and brings the notes up to date later.
 3. **Type `/`** for every chat command. `/mcp add` (or `rak mcp add`) adds an MCP server from the JSON on its page or the page's address. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak login chatgpt` signs in with ChatGPT to use your ChatGPT plan; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).

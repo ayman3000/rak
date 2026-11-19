@@ -8,7 +8,7 @@ use rak::agent::Approval;
 use rak::interrupt::Stop;
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
 
@@ -114,6 +114,99 @@ pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
     format!("? allow {what}\n  [y]es  [n]o  [a]lways for {name}{scope}  [A] everything this session › ")
 }
 
+/// What the person has allowed for the rest of the chat: `A` (everything),
+/// `a` (a tool) or `s` (an MCP server's tools). Saved with the chat, so
+/// continuing it (`rak -c`, `/resume`) does not ask for the same things again.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Granted {
+    pub everything: bool,
+    pub tools: std::collections::BTreeSet<String>,
+    pub servers: std::collections::BTreeSet<String>,
+    /// When the first of these was given (seconds since 1970): a continued
+    /// chat keeps them only for `allow_hours` after that.
+    pub since: u64,
+}
+
+/// How long a continued chat keeps what was allowed, when nothing is set.
+pub const DEFAULT_ALLOW_HOURS: u64 = 24;
+
+/// Pure — unit-tested. `RAK_ALLOW_HOURS` as a number of hours: 0 means a
+/// continued chat always asks again. Empty or not a number: the default.
+pub fn allow_hours(setting: Option<&str>) -> u64 {
+    setting.map(str::trim).filter(|typed| !typed.is_empty()).and_then(|typed| typed.parse::<u64>().ok()).unwrap_or(DEFAULT_ALLOW_HOURS)
+}
+
+fn hours(n: u64) -> String {
+    format!("{n} hour{}", if n == 1 { "" } else { "s" })
+}
+
+impl Granted {
+    fn holds_anything(&self) -> bool {
+        self.everything || !self.tools.is_empty() || !self.servers.is_empty()
+    }
+
+    /// Called when the person answers a, s or A: the clock starts at the first.
+    pub fn stamp(&mut self, now: u64) {
+        if self.since == 0 {
+            self.since = now;
+        }
+    }
+
+    /// Pure — unit-tested. Hours left before a continued chat asks again;
+    /// None when the time is up, or `limit` is 0.
+    pub fn hours_left(&self, now: u64, limit: u64) -> Option<u64> {
+        let end = self.since.saturating_add(limit.saturating_mul(3600));
+        (limit > 0 && now < end).then(|| (end - now).div_ceil(3600))
+    }
+
+    /// Pure — unit-tested. What a continued chat does with the approvals it
+    /// was saved with: keeps them and says so, or drops them and says why.
+    /// None: there were none.
+    pub fn on_continue(&mut self, now: u64, limit: u64) -> Option<String> {
+        if !self.holds_anything() {
+            return None;
+        }
+        match self.hours_left(now, limit) {
+            Some(left) => self.notice().map(|said| format!("{said} This lasts {} more.", hours(left))),
+            None => {
+                *self = Granted::default();
+                Some(match limit {
+                    0 => "What you allowed in this chat is not kept when it is continued (RAK_ALLOW_HOURS=0): rak asks again.".to_string(),
+                    _ => format!("What you allowed in this chat was given more than {} ago: rak asks again.", hours(limit)),
+                })
+            }
+        }
+    }
+
+    /// Pure — unit-tested. As it is kept in the saved chat.
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({ "everything": self.everything, "tools": self.tools, "servers": self.servers, "since": self.since })
+    }
+
+    /// Pure — unit-tested. From a saved chat; anything missing or odd is "not allowed".
+    pub fn from_json(value: &Value) -> Granted {
+        let names = |key: &str| value[key].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+        Granted {
+            everything: value["everything"] == true,
+            tools: names("tools"),
+            servers: names("servers"),
+            since: value["since"].as_u64().unwrap_or(0),
+        }
+    }
+
+    /// Pure — unit-tested. One line said when a chat is continued with
+    /// approvals still in force, so nothing runs unasked as a surprise.
+    pub fn notice(&self) -> Option<String> {
+        let how = "/yes turns asking back on.";
+        if self.everything {
+            return Some(format!("You allowed everything in this chat (A): edits and commands run without asking. {how}"));
+        }
+        let mut allowed: Vec<String> = self.tools.iter().cloned().collect();
+        allowed.extend(self.servers.iter().map(|server| format!("all of {server}'s tools")));
+        (!allowed.is_empty()).then(|| format!("Still allowed without asking in this chat: {}. {how}", allowed.join(", ")))
+    }
+}
+
 /// What the prompt needs to know.
 pub struct Prompter {
     pub ui: Rc<RefCell<Ui>>,
@@ -124,6 +217,8 @@ pub struct Prompter {
     /// Shared with the session: servers still connecting when the chat
     /// starts add their tools here later.
     pub server_of: Rc<RefCell<HashMap<String, String>>>,
+    /// The "always" answers so far, shared with the session, which saves them with the chat.
+    pub granted: Rc<RefCell<Granted>>,
     /// Someone is at a terminal to answer.
     pub interactive: bool,
     pub color: bool,
@@ -132,12 +227,13 @@ pub struct Prompter {
 /// The approval step for the agent: remembers the "always" answers for the
 /// rest of the session.
 pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
-    let mut tools: HashSet<String> = HashSet::new();
-    let mut servers: HashSet<String> = HashSet::new();
-    let mut everything = false;
     move |name, args| {
         let server: Option<String> = p.server_of.borrow().get(name).cloned();
-        if p.auto.get() || everything || tools.contains(name) || server.as_ref().is_some_and(|s| servers.contains(s)) {
+        let allowed = {
+            let granted = p.granted.borrow();
+            granted.everything || granted.tools.contains(name) || server.as_ref().is_some_and(|s| granted.servers.contains(s))
+        };
+        if p.auto.get() || allowed {
             return Approval::Yes;
         }
         p.ui.borrow_mut().end_line();
@@ -159,15 +255,21 @@ pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
             match answer(&typed, server.is_some()) {
                 Answer::Once => return Approval::Yes,
                 Answer::AlwaysTool => {
-                    tools.insert(name.to_string());
+                    let mut granted = p.granted.borrow_mut();
+                    granted.tools.insert(name.to_string());
+                    granted.stamp(rak::sessions::now_seconds());
                     return Approval::Yes;
                 }
                 Answer::AlwaysServer => {
-                    servers.extend(server);
+                    let mut granted = p.granted.borrow_mut();
+                    granted.servers.extend(server);
+                    granted.stamp(rak::sessions::now_seconds());
                     return Approval::Yes;
                 }
                 Answer::Everything => {
-                    everything = true;
+                    let mut granted = p.granted.borrow_mut();
+                    granted.everything = true;
+                    granted.stamp(rak::sessions::now_seconds());
                     return Approval::Yes;
                 }
                 Answer::No => return Approval::No,
@@ -207,6 +309,56 @@ mod tests {
         assert_eq!(as_typed("\u{1b}[Aa\n"), "<Esc>[Aa");
         assert_eq!(as_typed("ya\r\n"), "ya");
         assert!(as_typed(&"x".repeat(200)).chars().count() <= 40);
+    }
+
+    #[test]
+    fn what_was_allowed_is_kept_with_the_chat_and_said_when_it_is_continued() {
+        let mut granted = Granted::default();
+        assert!(granted.notice().is_none());
+        granted.tools.insert("edit_file".into());
+        granted.servers.insert("files".into());
+        let notice = granted.notice().unwrap();
+        assert!(notice.contains("edit_file, all of files's tools") && notice.contains("/yes turns asking back on"), "{notice}");
+        assert_eq!(Granted::from_json(&granted.to_json()), granted);
+        granted.everything = true;
+        assert!(granted.notice().unwrap().starts_with("You allowed everything in this chat (A)"));
+        assert_eq!(Granted::from_json(&granted.to_json()), granted);
+        // The clock starts at the first "always" answer, and a later one does not restart it.
+        let hour = 3600;
+        let mut timed = Granted::default();
+        timed.stamp(1_000);
+        timed.stamp(9_000);
+        assert_eq!(timed.since, 1_000);
+        timed.everything = true;
+        assert_eq!(timed.hours_left(1_000, 24), Some(24));
+        assert_eq!(timed.hours_left(1_000 + 23 * hour + 60, 24), Some(1), "under an hour left is said as 1 hour");
+        assert_eq!(timed.hours_left(1_000 + 24 * hour, 24), None);
+        assert_eq!(timed.hours_left(1_000, 0), None, "0: never kept");
+        // Continued in time: kept, and said with how long is left.
+        let mut kept = timed.clone();
+        let said = kept.on_continue(1_000 + 20 * hour, 24).unwrap();
+        assert!(said.starts_with("You allowed everything") && said.ends_with("This lasts 4 hours more."), "{said}");
+        assert!(kept.everything);
+        // Continued too late: dropped, and said why.
+        let mut late = timed.clone();
+        let said = late.on_continue(1_000 + 25 * hour, 24).unwrap();
+        assert!(said.contains("more than 24 hours ago: rak asks again"), "{said}");
+        assert_eq!(late, Granted::default());
+        let mut never = timed.clone();
+        assert!(never.on_continue(1_000, 0).unwrap().contains("RAK_ALLOW_HOURS=0"));
+        assert_eq!(never, Granted::default());
+        // One with no time on it (a chat saved by an earlier build) is dropped too; nothing allowed says nothing.
+        let mut old = Granted { everything: true, ..Default::default() };
+        assert!(old.on_continue(2_000_000_000, 24).unwrap().contains("asks again"));
+        assert_eq!(Granted::default().on_continue(1_000, 24), None);
+        // The setting: hours, 0 for never, the default when empty or not a number.
+        assert_eq!(
+            (allow_hours(None), allow_hours(Some("")), allow_hours(Some(" 72 ")), allow_hours(Some("0")), allow_hours(Some("a day"))),
+            (24, 24, 72, 0, 24)
+        );
+        // A chat saved before this, or a damaged entry, allows nothing.
+        assert_eq!(Granted::from_json(&Value::Null), Granted::default());
+        assert_eq!(Granted::from_json(&json!({ "everything": "yes", "tools": "edit_file" })), Granted::default());
     }
 
     #[test]

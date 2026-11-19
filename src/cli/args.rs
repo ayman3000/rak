@@ -51,7 +51,8 @@ KEYS (run `rak keys` to create the key file from a template)
   ~/.config/rak/.env. Values from the files are not passed on to commands.
   Each provider has its own key (ANTHROPIC_API_KEY, OPENROUTER_API_KEY,
   OLLAMA_API_KEY, …); `rak keys` lists them all. RAK_PROVIDER, RAK_MODEL,
-  RAK_EFFORT and RAK_BASE_URL may be set there too.
+  RAK_EFFORT, RAK_BASE_URL and RAK_ALLOW_HOURS (hours a continued chat
+  keeps what you allowed; default 24) may be set there too.
   TAVILY_API_KEY                                   web_search (https://tavily.com)
 
 BEHAVIOUR

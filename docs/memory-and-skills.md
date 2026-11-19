@@ -18,7 +18,8 @@ rak keeps a project's notes in a visible `rak/` folder inside it: plain Markdown
 
 How it works:
 
-- **Start with `/init`.** The agent looks at the project (map, README, build and test files, git log) and writes `project.md` and `roadmap.md`, each write approved. Run it again later to bring them up to date. rak never creates the folder on its own.
+- **The first chat offers them.** In a project with no notes, rak says so and asks once whether to set them up (Enter for yes; `n` is remembered for that folder).
+- **Or start with `/init`.** The agent looks at the project (map, README, build and test files, git log) and writes `project.md` and `roadmap.md`, each write approved. Run it again later to bring them up to date. rak never creates the folder on its own.
 - **Loaded, not read.** Every session starts with the rules, `project.md` and the roadmap's open sections in its instructions, so it starts oriented instead of spending its first steps reading.
 - **Kept current.** After a request that changed a file or ran a command, one small model call writes the journal line and moves or adds roadmap cards. rak applies those edits itself: a card it can't find is skipped and said so, and nothing is ever deleted. A plain question costs nothing extra.
 - **The gate.** A `## Gate` section in `rak/rules.md` (or `AGENTS.md`) with a fenced command:

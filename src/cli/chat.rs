@@ -18,8 +18,82 @@ pub fn mode_label(s: &Session) -> &'static str {
         "read-only"
     } else if s.auto.get() {
         "auto mode"
+    } else if s.granted.borrow().everything {
+        // The person answered A, in this chat or the one it continues.
+        "runs without asking"
     } else {
         "asks before changes"
+    }
+}
+
+/// What decides whether a chat offers to set up the project's notes.
+pub struct NotesOffer {
+    pub has_notes: bool,
+    /// --read-only or --no-notes: nothing would be written.
+    pub writes_off: bool,
+    /// `rak -c`: the person came to carry on, not to set up.
+    pub continuing: bool,
+    /// Someone is at a terminal to answer.
+    pub can_ask: bool,
+    /// The home folder or the top of the disk: not a project.
+    pub broad: bool,
+    /// Nothing in the folder to look at yet.
+    pub empty: bool,
+    /// The person said no here before.
+    pub declined: bool,
+}
+
+/// Pure — unit-tested. Whether to offer the notes now: once, in a project
+/// that has none, to someone who can answer and has not said no.
+pub fn offers_notes(o: &NotesOffer) -> bool {
+    !o.has_notes && !o.writes_off && !o.continuing && o.can_ask && !o.broad && !o.empty && !o.declined
+}
+
+/// A project with no notes yet: says what they are and sets them up unless
+/// the person says no. /init is the same thing by hand; many never find it.
+fn offer_notes(s: &mut Session, color: bool) {
+    use std::io::{IsTerminal, Write};
+    let empty = std::fs::read_dir(&s.cwd)
+        .map(|entries| !entries.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.')))
+        .unwrap_or(true);
+    let offer = NotesOffer {
+        has_notes: s.has_notes,
+        writes_off: s.o.read_only || s.o.no_notes,
+        continuing: s.o.continue_last,
+        can_ask: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
+        broad: super::session::broad_folder_warning(&s.cwd, &home(), true).is_some(),
+        empty,
+        declined: super::trust::notes_declined(&s.cwd),
+    };
+    if !offers_notes(&offer) {
+        return;
+    }
+    println!();
+    println!("This project has no rak notes yet.");
+    println!(
+        "{}",
+        paint(
+            color,
+            Style::Dim,
+            "rak can look around and write them (rak/project.md and rak/roadmap.md), so every chat here starts already\n\
+             knowing the project. It takes about a minute and one request to the model; you approve what it writes."
+        )
+    );
+    term::discard_typed_ahead();
+    eprint!("{}", paint(color, Style::Bold, "Set them up now? [Y/n] › "));
+    let _ = std::io::stderr().flush();
+    let mut typed = String::new();
+    if !matches!(std::io::stdin().read_line(&mut typed), Ok(n) if n > 0) {
+        return;
+    }
+    match typed.trim().to_lowercase().as_str() {
+        "" | "y" | "yes" => {
+            run_command(s, "/init");
+        }
+        _ => {
+            super::trust::decline_notes(&s.cwd);
+            println!("{}", paint(color, Style::Dim, "Skipped; rak won't ask here again. /init sets them up any time."));
+        }
     }
 }
 
@@ -87,6 +161,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
         println!("{}", paint(s.ui.borrow().out_color, Style::Yellow, &warning));
     }
     let color = s.ui.borrow().out_color;
+    offer_notes(s, color);
     loop {
         // The chat's commands, then one for each skill (they come and go in a chat).
         let skill_commands = skill_commands(s);
@@ -740,8 +815,14 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 );
             }
         }
+        // Asking is off when auto-approve is on or the person answered A: either way /yes turns it back on,
+        // and forgets the "always" answers with it.
         "yes" | "auto" => {
-            s.auto.set(!s.auto.get());
+            let was_on = s.auto.get() || s.granted.borrow().everything;
+            s.auto.set(!was_on);
+            if was_on {
+                *s.granted.borrow_mut() = Default::default();
+            }
             if s.auto.get() {
                 println!("{}", paint(color, Style::Yellow, "Auto-approve ON: edits and shell commands run without asking."));
             } else {
@@ -815,7 +896,12 @@ fn resume(s: &mut Session, args: &str, color: bool) {
     };
     s.save_chat();
     match s.resume(&chat.path) {
-        Ok(count) => println!("Resumed {} ({count} messages).", paint(color, Style::Bold, &chat.title)),
+        Ok(count) => {
+            println!("Resumed {} ({count} messages).", paint(color, Style::Bold, &chat.title));
+            if let Some(still) = s.continued_note.clone() {
+                println!("{}", paint(color, Style::Yellow, &still));
+            }
+        }
         Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
     }
 }
@@ -823,6 +909,27 @@ fn resume(s: &mut Session, args: &str, color: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_notes_are_offered_once_in_a_project_that_has_none() {
+        let fresh = || NotesOffer {
+            has_notes: false,
+            writes_off: false,
+            continuing: false,
+            can_ask: true,
+            broad: false,
+            empty: false,
+            declined: false,
+        };
+        assert!(offers_notes(&fresh()));
+        assert!(!offers_notes(&NotesOffer { has_notes: true, ..fresh() }), "it has them");
+        assert!(!offers_notes(&NotesOffer { writes_off: true, ..fresh() }), "--read-only or --no-notes");
+        assert!(!offers_notes(&NotesOffer { continuing: true, ..fresh() }), "rak -c carries on");
+        assert!(!offers_notes(&NotesOffer { can_ask: false, ..fresh() }), "nobody to ask");
+        assert!(!offers_notes(&NotesOffer { broad: true, ..fresh() }), "the home folder is not a project");
+        assert!(!offers_notes(&NotesOffer { empty: true, ..fresh() }), "nothing to look at");
+        assert!(!offers_notes(&NotesOffer { declined: true, ..fresh() }), "said no before");
+    }
     use rak::tools::shell::JobInfo;
     use std::path::PathBuf;
 
