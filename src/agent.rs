@@ -317,6 +317,20 @@ impl Agent {
         self.loaded.clear();
     }
 
+    /// Puts a tool in, in place of one with its name when there is one (a
+    /// tool of the user's own, saved or changed during the chat).
+    pub fn replace_tool(&mut self, tool: Box<dyn Tool>) {
+        self.tools.retain(|have| have.name() != tool.name());
+        self.tools.push(tool);
+    }
+
+    /// Takes a tool out. Returns whether it was there.
+    pub fn remove_tool(&mut self, name: &str) -> bool {
+        let before = self.tools.len();
+        self.tools.retain(|have| have.name() != name);
+        self.tools.len() < before
+    }
+
     /// More groups to hide until loaded, beside the ones there already (a
     /// server added or connected after the chat began). What is loaded stays
     /// loaded; the system prompt's index is rewritten to list them all.

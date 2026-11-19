@@ -35,15 +35,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.40** (2026-11-19)
+**v0.1.0-alpha.41** (2026-11-19)
 
-- **Add an MCP server from its page.** `rak mcp add https://github.com/ChromeDevTools/chrome-devtools-mcp` reads the JSON the page tells you to add to your MCP client, shows you what will run, and asks before it saves. With no address, `rak mcp add` asks you to paste the JSON, or to answer three questions. ([how it works](docs/mcp.md#adding-one))
-- **`/mcp add` inside a chat** does the same, and the server's tools are usable at once, with no restart.
-- **A page with several configs** lists them for you to pick, and a value the page left blank (`<YOUR_API_KEY>`) is asked for, typed without showing.
+- **Tools of your own.** Say "I need a tool that …" or type `/make-tool`. rak writes one small script (Python's standard library by default), shows it to you whole, and asks before saving. The tool is tried once, joins the chat with your next message, and is there in every later chat. No rebuild, nothing to install, and `rak update` leaves your tools alone. ([how it works](docs/tools.md#tools-of-your-own))
+- **Keys stay out of scripts.** A tool names the key it needs and you give it once with `/key BRAVE_API_KEY`, typed hidden. A tool gets only the keys it names, and a key it prints is hidden from the model.
+- **`/tools remove NAME`** deletes one of your tools; `/tools` lists them after rak's own.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.40:** add an MCP server from its page: `rak mcp add https://github.com/…` reads the JSON, shows what will run and asks; `rak mcp add` alone takes pasted JSON or three questions; `/mcp add` does it inside a chat.
 - **alpha.39:** a chat shows its prompt at once and connects MCP servers behind it: on a Mac with one MCP server, the time until typed text appears went from 811 ms to about 8 ms.
 - **alpha.38:** a `--tools` list holds for helper agents too; the agent no longer sends you to `/add-dir` for folders it can never open, and uses `past_chats` for earlier chats; fixes to Sign in with ChatGPT and to adding skills from very large repositories.
 - **alpha.37:** every skill is a chat command: `/sdd-plan add a login page` asks the agent to load that skill and follow it for your request.
@@ -189,6 +190,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 
 ### Extends and embeds
 
+- **Tools of your own.** Ask for one in plain words, or type `/make-tool`: rak writes a small script, shows it, and asks before saving it. No rebuild and nothing to install, a key it needs stays in rak's key file, and `rak update` leaves your tools alone ([how it works](docs/tools.md#tools-of-your-own)).
 - **MCP servers,** added from the JSON on a server's page, from the page's address (`rak mcp add https://github.com/…`), or by a few questions, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
 - **Scripts and CI:** `--json` output, `--log` of every step, clear exit codes, and progress on stderr so stdout holds only the answer.
 - **A Rust library:** the agent loop, tools and providers with no terminal code, for your own agent.

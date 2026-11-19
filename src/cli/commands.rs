@@ -9,7 +9,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/key [provider]", "give or replace an API key (pasted, not shown); no name: pick from a list"),
     ("/effort [level]", "show or switch the reasoning effort (no level: pick from a list)"),
     ("/add-dir [path]", "let the agent read and write in another folder, for this chat"),
-    ("/tools", "list the tools the agent can use"),
+    ("/tools", "list the tools the agent can use; /tools remove NAME deletes one of your own"),
     ("/mcp", "the MCP servers and their tools; /mcp add adds one (paste its JSON or its page's address)"),
     ("/resume", "this folder's saved chats; /resume N picks one up"),
     ("/skills", "the skills (each is a command too: /NAME); /skills add URL, /skills remove NAME"),

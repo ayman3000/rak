@@ -2,7 +2,7 @@
 
 What the agent can do, how every write is checked, and how rak works on a project too big to read whole. Back to the [README](../README.md).
 
-**Contents:** [Tools](#tools) · [Every write is checked first](#every-write-is-checked-first) · [Large projects](#large-projects)
+**Contents:** [Tools](#tools) · [Tools of your own](#tools-of-your-own) · [Every write is checked first](#every-write-is-checked-first) · [Large projects](#large-projects)
 
 ## Tools
 
@@ -23,9 +23,54 @@ What the agent can do, how every write is checked, and how rak works on a projec
 | `fetch_url` | Reads one public web page as Markdown, text or HTML. Addresses on this machine or a private network are refused, even through a redirect. | |
 | `remember` | Keeps a one-line note for later sessions, for this project or for all. | yes |
 | `past_chats` | In a chat: this project's earlier conversations, so "what did I ask you first?" has an answer. Lists them, reads one (your requests and rak's answers; tool output is left out), or searches them all. Read-only, this project only, the current chat left out; nothing is sent to the model unless it calls the tool. A one-off run does not have it. |
+| `save_tool` | Saves a [tool of your own](#tools-of-your-own): one script, shown whole first. | yes |
 | `save_routine`, `run_routine` | Saves steps that just worked, with `{placeholders}`, so they run again back to back with no model calls between them. Each step still asks like the model's own call. Same format as sak and Naseem. | yes |
 
 Two more appear only when needed: `load_tools` for a [large MCP server](mcp.md), and `artifact_read` / `artifact_search` once [old output has been set aside](#large-projects).
+
+## Tools of your own
+
+Ask for a tool in plain words ("I need a tool that converts CSV to JSON") or type `/make-tool`. rak writes one small script, shows it to you whole, and asks before saving it:
+
+```
+? allow save_tool "word_count" (python) for every project:
+    Count the total words and unique words in a given text.
+    runs without asking (marked as changing nothing)
+    and is run once now with {"text":"Hello world hello"}
+    │ import json, sys, re
+    │ args = json.load(sys.stdin)
+    │ words = re.findall(r"\b\w+\b", args.get("text", "").lower())
+    │ print(json.dumps({"total_words": len(words), "unique_words": len(set(words))}))
+  [y]es  [n]o  …
+```
+
+On yes the tool is saved, tried once, and joins the chat with your next message. From then on every chat has it.
+
+- **One file per tool,** in `~/.config/rak/tools` (every project) or `./.rak/tools` (one project; used once you trust the folder). rak runs the file when the tool is called: nothing starts with rak, and a broken tool breaks only itself. `rak update` leaves them alone.
+- **Languages:** Python with its standard library only (the default), a shell script, or Node. Nothing to compile and nothing to `pip install`. The tool reads its arguments as one JSON object on its input and prints its result.
+- **Asking:** a tool marked `safe` only reads or computes, and runs freely. Any other asks before each run, like an edit or a command. `--read-only` keeps only the safe ones.
+- **Keys:** a tool that calls a service names the key it needs (`# needs: BRAVE_API_KEY`) and reads it from its environment. The key is never in the script. Give it once with `/key BRAVE_API_KEY` (typed hidden, saved in rak's key file). rak hands a tool only the keys it names, takes other secrets out of its environment, and hides the key if the tool prints it. A tool whose key is missing does not run, and rak says which key to give.
+- **`/tools`** lists your own after rak's; **`/tools remove NAME`** deletes one. To change one, ask for the change: the new version replaces it.
+- **By hand:** a tool is a script with a short header, so you can write or edit one yourself.
+
+```python
+#!/usr/bin/env python3
+# rak-tool: csv_to_json
+# description: Convert a CSV file to JSON.
+# param: path (string, required) The CSV file.
+# param: indent (integer) Spaces of indentation.
+# needs: BRAVE_API_KEY
+# safe: yes
+# timeout: 30
+
+import csv, json, sys
+args = json.load(sys.stdin)
+print(json.dumps(list(csv.DictReader(open(args["path"]))), indent=args.get("indent")))
+```
+
+These tools work in rak only. For a tool other clients can use too, write an [MCP server](mcp.md).
+
+A script is a program on your machine: it can read your files like any program you run. Read it before you say yes.
 
 ## Every write is checked first
 

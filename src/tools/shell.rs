@@ -164,7 +164,7 @@ fn shell_command(command: &str, cwd: &Path) -> Command {
     cmd
 }
 
-fn kill_tree(child: &mut Child) {
+pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     unsafe {
         libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);

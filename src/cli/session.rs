@@ -53,6 +53,10 @@ pub struct Session {
     pub mcp_summary: Option<String>,
     pub mcp_problems: Vec<String>,
     pub server_of: Rc<RefCell<std::collections::HashMap<String, String>>>,
+    /// Tools of the user's own saved during a request: they join when it ends.
+    pub fresh_tools: rak::tools::user::Fresh,
+    /// Where those tools live: this project's folder, and the one for every project.
+    pub tool_folders: (PathBuf, Option<PathBuf>),
     /// MCP servers still connecting: a chat shows its prompt first, and
     /// `finish_mcp` brings their tools in before the first request.
     pub mcp_pending: Option<mcp::Connecting>,
@@ -601,6 +605,36 @@ pub fn run(mut o: Options) -> i32 {
     // The task list, for work with several steps.
     let todo = rak::tools::todo::TodoList::default();
     tools.push(Box::new(rak::tools::todo::Todo(todo.clone())));
+    // The user's own tools: one script each (tools::user). The project's are
+    // programs that came with the folder, so they wait for its trust; a
+    // read-only run keeps only the ones marked as changing nothing.
+    let tool_folders = rak::tools::user::folders(&ctx.cwd, config_dir().as_deref());
+    let fresh_tools: rak::tools::user::Fresh = Default::default();
+    let own_from: Vec<PathBuf> = trusted.then(|| tool_folders.0.clone()).into_iter().chain(tool_folders.1.clone()).collect();
+    let (own, mut own_tool_problems) = rak::tools::user::load(&own_from);
+    {
+        for spec in own {
+            if tools.iter().any(|t| t.name() == spec.name) {
+                own_tool_problems.push(format!("{}: left out, rak has a tool named {} already", spec.file.display(), spec.name));
+            } else if !o.read_only || spec.safe {
+                tools.push(Box::new(rak::tools::user::UserTool { spec, cwd: ctx.cwd.clone(), key_of: key, stop: stop.clone() }));
+            }
+        }
+        // Saving one changes what later sessions can run, so read-only leaves it out.
+        if keeps && allowed("save_tool") {
+            let mut taken: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
+            taken.extend(["save_tool", "load_tools", "run_routine", "artifact_read", "artifact_search"].map(String::from));
+            tools.push(Box::new(rak::tools::user::SaveTool {
+                project: tool_folders.0.clone(),
+                user: tool_folders.1.clone(),
+                cwd: ctx.cwd.clone(),
+                key_of: key,
+                stop: stop.clone(),
+                fresh: fresh_tools.clone(),
+                taken,
+            }));
+        }
+    }
     // The built-in tools, as the welcome panel lists them: only those a
     // --tools list keeps.
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).filter(|name| allowed(name)).collect();
@@ -625,6 +659,7 @@ pub fn run(mut o: Options) -> i32 {
     // Settings set twice in a .env file: shown with the MCP warnings.
     mcp_problems.extend(super::settings::key_notes());
     mcp_problems.extend(trust_note);
+    mcp_problems.append(&mut own_tool_problems);
     let mcp_summary = connected.summary();
     let mut deferred = connected.to_defer();
     tools.append(&mut connected.tools);
@@ -717,6 +752,8 @@ pub fn run(mut o: Options) -> i32 {
         mcp_problems,
         server_of,
         mcp_pending,
+        fresh_tools,
+        tool_folders,
         sessions_dir: config_dir().map(|d| d.join("sessions")),
         project_key: rak::sessions::project_key(&ctx.cwd),
         chat_id: rak::sessions::new_id(),
@@ -1038,6 +1075,39 @@ pub fn finish_mcp(s: &mut Session) {
     s.log.write(json!({ "event": "mcp", "servers": s.mcp_servers.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), "tools": s.agent.tool_names() }));
 }
 
+/// Tools saved with save_tool during the request that just ended become
+/// callable: the model sees them from the next request on.
+fn join_fresh_tools(s: &mut Session) {
+    let saved: Vec<rak::tools::user::Spec> = std::mem::take(&mut *s.fresh_tools.lock().unwrap());
+    for spec in saved {
+        let name = spec.name.clone();
+        let asks = if spec.safe { "runs without asking" } else { "asks before each run" };
+        s.agent.replace_tool(Box::new(rak::tools::user::UserTool { spec, cwd: s.cwd.clone(), key_of: key, stop: s.stop.clone() }));
+        if !s.core_tools.contains(&name) {
+            s.core_tools.push(name.clone());
+        }
+        s.ui.borrow_mut().progress(Some(Style::Dim), &format!("Your tool {name} is ready: it {asks}. /tools remove {name} deletes it."));
+    }
+}
+
+/// `/tools remove NAME`: deletes one of the user's own tools, here and on disk.
+pub fn remove_own_tool(s: &mut Session, name: &str) -> Result<PathBuf, String> {
+    let folders: Vec<PathBuf> = std::iter::once(s.tool_folders.0.clone()).chain(s.tool_folders.1.clone()).collect();
+    let mut last = format!("no tool of your own is named {name} (/tools lists them)");
+    for folder in folders {
+        match rak::tools::user::remove(&folder, name) {
+            Ok(file) => {
+                s.agent.remove_tool(name);
+                s.core_tools.retain(|have| have != name);
+                return Ok(file);
+            }
+            Err(why) if folder.is_dir() && !why.starts_with("no tool named") => last = why,
+            Err(_) => {}
+        }
+    }
+    Err(last)
+}
+
 /// `/mcp add [SOURCE]`: the same conversation as `rak mcp add`, and the
 /// server's tools join this chat at once.
 pub fn add_mcp_in_chat(s: &mut Session, source: &str, color: bool) {
@@ -1120,6 +1190,7 @@ pub fn run_one(s: &mut Session, task: &str) -> Outcome {
     let helper_calls = s.helper_calls.take();
     s.helper_calls_total += helper_calls;
     signals::set_running(false);
+    join_fresh_tools(s);
     let seconds = (started.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     let input = s.agent.usage.input - usage_before.input;
     let output = s.agent.usage.output - usage_before.output;

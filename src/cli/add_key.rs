@@ -59,7 +59,14 @@ pub fn target(word: &str) -> Result<Target, String> {
             Some(key) => Ok(Target { key: key.clone(), label: p.label.clone(), check: p.key_check.clone() }),
             None => Err(format!("{} needs no key.", p.label)),
         },
-        None => Err(format!("No provider named `{word}`. They are: {}, and tavily for web search.", rak::providers::names())),
+        // A key one of the user's own tools needs, by its own name.
+        None if word.contains('_') && rak::tools::user::valid_key(word) => {
+            Ok(Target { key: word.to_string(), label: "your own tools".to_string(), check: None })
+        }
+        None => Err(format!(
+            "No provider named `{word}`. They are: {}, and tavily for web search. For a key one of your own tools needs, give its name in capitals (BRAVE_API_KEY).",
+            rak::providers::names()
+        )),
     }
 }
 
@@ -220,6 +227,11 @@ mod tests {
     #[test]
     fn a_key_is_named_by_its_provider_its_own_name_or_tavily() {
         assert_eq!(target("openrouter").unwrap().key, "OPENROUTER_API_KEY");
+        // A key one of the user's own tools needs is given by its own name.
+        let own = target("BRAVE_API_KEY").unwrap();
+        assert_eq!((own.key.as_str(), own.label.as_str(), own.check), ("BRAVE_API_KEY", "your own tools", None));
+        assert!(target("brave").unwrap_err().contains("give its name in capitals"));
+        assert!(target("NOUNDERSCORE").is_err() && target("lower_case").is_err());
         assert_eq!(target(" OpenRouter ").unwrap().key, "OPENROUTER_API_KEY");
         assert_eq!(target("openrouter_api_key").unwrap().key, "OPENROUTER_API_KEY");
         assert!(target("openrouter").unwrap().check.is_some(), "its free check comes along");

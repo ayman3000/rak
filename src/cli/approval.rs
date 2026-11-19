@@ -55,6 +55,30 @@ pub fn question(name: &str, args: &Value, server: Option<&str>) -> String {
             let body: Vec<String> = text("instructions").lines().map(|l| format!("    │ {l}")).collect();
             format!("save_skill \"{}\" for {scope}:\n    {}\n{}", text("name"), text("description"), body.join("\n"))
         }
+        // A script that will run on this machine whenever the tool is called: shown whole.
+        ("save_tool", _) => {
+            let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("").trim();
+            let scope = if text("scope") == "project" { "this project only" } else { "every project" };
+            let asks = if args.get("safe") == Some(&Value::Bool(true)) {
+                "runs without asking (marked as changing nothing)"
+            } else {
+                "asks before each run"
+            };
+            let needs: Vec<&str> = args["needs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            let keys = if needs.is_empty() { String::new() } else { format!("\n    is given the keys: {}", needs.join(", ")) };
+            let tried = match args.get("test_input").filter(|v| v.is_object()) {
+                Some(input) => format!("\n    and is run once now with {input}"),
+                None => String::new(),
+            };
+            let body: Vec<String> = text("code").lines().map(|l| format!("    │ {l}")).collect();
+            format!(
+                "save_tool \"{}\" ({}) for {scope}:\n    {}\n    {asks}{keys}{tried}\n{}",
+                text("name"),
+                text("language"),
+                text("description"),
+                body.join("\n")
+            )
+        }
         // Steps a later session can run in one go: shown whole.
         ("save_routine", _) => {
             let name = args.get("name").and_then(Value::as_str).unwrap_or("");
@@ -167,6 +191,25 @@ mod tests {
             asked.starts_with("? allow run_shell (in the background):\n    mkdir -p Build\n    swiftc App.swift -o Build/App\n  [y]es"),
             "{asked}"
         );
+    }
+
+    #[test]
+    fn a_tool_is_shown_whole_with_what_it_is_given_before_it_is_saved() {
+        let tool = json!({ "name": "search_brave", "description": "Searches the web.", "language": "python",
+            "code": "import os\nprint(os.environ['BRAVE_API_KEY'][:0])", "needs": ["BRAVE_API_KEY"], "test_input": { "q": "x" } });
+        let asked = question("save_tool", &tool, None);
+        assert!(
+            asked.starts_with(
+                "? allow save_tool \"search_brave\" (python) for every project:\n    Searches the web.\n    asks before each run"
+            ),
+            "{asked}"
+        );
+        assert!(asked.contains("is given the keys: BRAVE_API_KEY") && asked.contains("run once now with {\"q\":\"x\"}"), "{asked}");
+        assert!(asked.contains("    │ import os\n    │ print(os.environ['BRAVE_API_KEY'][:0])\n  [y]es"), "{asked}");
+        let safe = json!({ "name": "wc", "description": "d", "language": "shell", "code": "wc -w", "safe": true, "scope": "project" });
+        let asked = question("save_tool", &safe, None);
+        assert!(asked.contains("for this project only") && asked.contains("runs without asking (marked as changing nothing)"), "{asked}");
+        assert!(!asked.contains("is given the keys") && !asked.contains("run once"), "{asked}");
     }
 
     #[test]

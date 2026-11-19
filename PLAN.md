@@ -12,6 +12,35 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.41
+
+- **Tools of the user's own** (tools::user, skills/make-tool.md; asked for
+  2026-11-19 after looking at jcode, which has users rebuild a fork). One
+  script per tool in ~/.config/rak/tools or ./.rak/tools (the project's
+  wait for folder trust), with a header in comments: rak-tool, description,
+  param, needs, safe, timeout. rak hosts them: no server, nothing starts
+  until a call, arguments as JSON on stdin, stdout is the result. Decided
+  against one MCP server per tool (N programs, protocol code in each) and
+  one server for all (a bad tool breaks the rest), and against Rust (a
+  toolchain to install). Python (standard library), shell or node; the
+  first installed runner is used.
+  - save_tool shows the whole script in the approval question, with what
+    keys it is given and whether it runs once now; test_input tries it.
+  - A saved tool joins the chat when the request ends
+    (session::join_fresh_tools, Agent::replace_tool): a tool cannot add to
+    the agent's tools while the agent is running it.
+  - Keys: `needs` names them, the script gets only those, variables whose
+    names read as secrets are taken out of its environment, and a key it
+    prints is masked. A missing key stops the call and names `/key NAME`;
+    `/key` and `rak keys set` accept any NAME_IN_CAPITALS for this.
+  - /tools lists them, /tools remove NAME deletes one; the built-in skill
+    "Make tool" gives /make-tool.
+  - Limits known: the script is an ordinary program (it can read files,
+    the key file included); these tools are rak's only, not MCP.
+  Real chat (kimi-k2.6:cloud, scratch project, scope project): /make-tool
+  → the script shown → y → tried ("3 total, 2 unique") → next message
+  called word_count → /tools remove. The key path is unit-tested only.
+
 ### In v0.1.0-alpha.40
 
 - **`rak mcp add` from what the person has in hand** (mcp::find, cli::mcp_add;

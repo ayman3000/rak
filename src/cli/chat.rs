@@ -630,6 +630,13 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 println!("{}", dim("You can still switch by name: /model <name>"));
             }
         }
+        "tools" if args.starts_with("remove ") || args.starts_with("rm ") => {
+            let name = args.split_once(' ').map(|(_, name)| name.trim()).unwrap_or("");
+            match super::session::remove_own_tool(s, name) {
+                Ok(file) => println!("{}", dim(&format!("Removed your tool {name} ({}).", file.display()))),
+                Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
+            }
+        }
         "tools" => {
             super::session::finish_mcp(s);
             let mut tools: Vec<_> = s.agent.tools().iter().collect();
@@ -641,6 +648,21 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             }
             if s.o.read_only {
                 println!("{}", dim("  read-only mode: no edit or shell tools"));
+            }
+            let folders: Vec<std::path::PathBuf> = std::iter::once(s.tool_folders.0.clone()).chain(s.tool_folders.1.clone()).collect();
+            let yours: Vec<String> = rak::tools::user::load(&folders)
+                .0
+                .into_iter()
+                .map(|t| t.name)
+                .filter(|name| s.agent.tool_names().contains(&name.as_str()))
+                .collect();
+            if yours.is_empty() {
+                println!("{}", dim("  Want one of your own? Ask for it in plain words, or type /make-tool."));
+            } else {
+                println!(
+                    "{}",
+                    dim(&format!("  Your own: {}. /tools remove NAME deletes one; /make-tool makes another.", yours.join(", ")))
+                );
             }
         }
         "mcp" if args == "add" || args.starts_with("add ") => {

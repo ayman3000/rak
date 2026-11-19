@@ -9,6 +9,7 @@ pub mod map;
 pub mod patch;
 pub mod shell;
 pub mod todo;
+pub mod user;
 pub mod verify;
 pub mod web;
 

@@ -189,6 +189,7 @@ pub fn load(folders: &[PathBuf]) -> Vec<Skill> {
 const BUILT_IN: &[(&str, &str, &[&str])] = &[
     ("skills/ios-app.md", include_str!("../../skills/ios-app.md"), &["macos"]),
     ("skills/write-skill.md", include_str!("../../skills/write-skill.md"), &[]),
+    ("skills/make-tool.md", include_str!("../../skills/make-tool.md"), &[]),
 ];
 
 /// The skills built into rak that apply on this system (`std::env::consts::OS`).
@@ -328,6 +329,8 @@ mod tests {
         let linux = built_in("linux");
         assert!(linux.iter().all(|s| s.name != "iOS app"), "no iOS skill off a Mac");
         assert!(linux.iter().any(|s| s.name == "Write a skill"), "writing skills works everywhere");
+        let make = linux.iter().find(|s| s.name == "Make tool").expect("making tools works everywhere");
+        assert!(make.instructions.contains("save_tool") && make.instructions.contains("/key"), "it says how to save and where keys go");
     }
 
     #[test]
