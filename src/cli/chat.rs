@@ -149,6 +149,11 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
     }
     let color = s.ui.borrow().out_color;
     tip_notes(s, color);
+    // A newer release, as the last check saw it; then a new look behind the prompt, once a day.
+    if let Some(newer) = super::update::notice() {
+        println!("{}", paint(color, Style::Yellow, &newer));
+    }
+    super::update::check_in_background();
     loop {
         // The chat's commands, then one for each skill (they come and go in a chat).
         let skill_commands = skill_commands(s);
@@ -220,26 +225,60 @@ pub fn skill_start(name: &str, commands: &[(menu::Command, String)]) -> String {
 /// skills, the plain list.
 fn pick_skill(s: &mut Session, color: bool) {
     use std::io::IsTerminal;
-    let skills: Vec<(String, String, bool)> =
-        s.skills.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone(), skill.builtin)).collect();
-    if skills.is_empty() || !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        skills_command::print_list(&s.skills.read().unwrap(), color);
-        return;
-    }
     let dim = |text: &str| paint(color, Style::Dim, text);
-    println!("{}", dim("Pick a skill with ↑/↓ and Enter (type to filter, Esc to leave). You then type your request."));
-    let choices: Vec<Choice> =
-        skills.iter().map(|(name, description, _)| Choice { name: name.clone(), note: description.clone(), dim: false }).collect();
-    match picker::pick(&choices, None, false, color) {
-        Picked::Item(i) => {
-            let start = skill_start(&skills[i].0, &skill_commands(s));
-            println!("{}", dim(&format!("{}— type what you want done, or press Enter to run it as it is.", start)));
-            s.next_line = Some(start);
+    loop {
+        let on: Vec<(String, String)> =
+            s.skills.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone())).collect();
+        let off: Vec<(String, String)> =
+            s.skills_off.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone())).collect();
+        if (on.is_empty() && off.is_empty()) || !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            skills_command::print_list(&s.skills.read().unwrap(), &s.skills_off.read().unwrap(), color);
+            return;
         }
-        _ => println!(
+        println!(
             "{}",
-            dim("No skill picked. /skills list shows where each one is kept; /skills add URL and /skills remove NAME change them.")
+            dim("Pick a skill with ↑/↓ and Enter, then type your request. Tab switches a skill off or on. Type to filter, Esc to leave.")
+        );
+        // The ones that are off come last, dim.
+        let choices: Vec<Choice> = on
+            .iter()
+            .map(|(name, description)| Choice { name: name.clone(), note: description.clone(), dim: false })
+            .chain(off.iter().map(|(name, description)| Choice { name: name.clone(), note: format!("(off) {description}"), dim: true }))
+            .collect();
+        match picker::pick(&choices, None, false, color) {
+            Picked::Item(i) if i < on.len() => {
+                let start = skill_start(&on[i].0, &skill_commands(s));
+                println!("{}", dim(&format!("{}— type what you want done, or press Enter to run it as it is.", start)));
+                s.next_line = Some(start);
+                return;
+            }
+            // Enter on one that is off, or Tab on any: switch it, and show the list again.
+            Picked::Item(i) | Picked::Tab(i) => {
+                let turn_on = i >= on.len();
+                let name = if turn_on { off[i - on.len()].0.clone() } else { on[i].0.clone() };
+                set_skill(s, &name, turn_on, color);
+            }
+            _ => {
+                println!("{}", dim("No skill picked. /skills list shows where each one is kept; /skills add URL, remove NAME, off NAME and on NAME change them."));
+                return;
+            }
+        }
+    }
+}
+
+/// Switches a skill off or on and says what that means.
+fn set_skill(s: &mut Session, name: &str, turn_on: bool, color: bool) {
+    match rak::skills::switch(&s.skills, &s.skills_off, s.skills_off_file.as_deref(), name, turn_on) {
+        Ok(name) if turn_on => println!("{}", paint(color, Style::Dim, &format!("{name} is on: the agent can use it again."))),
+        Ok(name) => println!(
+            "{}",
+            paint(
+                color,
+                Style::Dim,
+                &format!("{name} is off: the agent no longer sees or uses it. Its file is kept; /skills on {name} brings it back.")
+            )
         ),
+        Err(why) => println!("{}", paint(color, Style::Yellow, &why)),
     }
 }
 
@@ -386,7 +425,7 @@ pub fn pick_from(mut models: Vec<String>, current: Option<&str>, color: bool) ->
     match picker::pick(&choices, start, true, color) {
         Picked::Item(i) => Some(models[i].clone()),
         Picked::Typed(name) => Some(name),
-        Picked::Cancelled => None,
+        Picked::Cancelled | Picked::Tab(_) => None,
     }
 }
 
@@ -820,7 +859,10 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 }
             }
             ("remove" | "rm", _) => println!("{}", dim("usage: /skills remove NAME")),
-            ("list" | "ls", _) => skills_command::print_list(&s.skills.read().unwrap(), color),
+            ("list" | "ls", _) => skills_command::print_list(&s.skills.read().unwrap(), &s.skills_off.read().unwrap(), color),
+            ("off" | "disable", name) if !name.trim().is_empty() => set_skill(s, name.trim(), false, color),
+            ("on" | "enable", name) if !name.trim().is_empty() => set_skill(s, name.trim(), true, color),
+            ("off" | "disable" | "on" | "enable", _) => println!("{}", dim("usage: /skills off NAME, /skills on NAME")),
             _ => pick_skill(s, color),
         },
         "notes" => {

@@ -44,6 +44,9 @@ pub struct Session {
     /// Notes from earlier sessions put in this session's prompt.
     pub memory_notes: usize,
     pub skills: rak::skills::Shared,
+    /// The skills switched off, and the file that remembers them.
+    pub skills_off: rak::skills::Shared,
+    pub skills_off_file: Option<PathBuf>,
     /// Where `/skills add` saves: the user's skills folder, else the project's.
     pub skill_folder: PathBuf,
     pub requests: usize,
@@ -505,7 +508,11 @@ pub fn run(mut o: Options) -> i32 {
     // them out, and so does a --tools list without use_skill.
     let skills_on = !o.no_skills && allowed("use_skill");
     let skill_sources: Vec<PathBuf> = if trusted { skill_folders.clone() } else { skill_folders[1..].to_vec() };
-    let loaded = if !skills_on { Vec::new() } else { rak::skills::load_with_built_in(&skill_sources, std::env::consts::OS) };
+    let all_skills = if !skills_on { Vec::new() } else { rak::skills::load_with_built_in(&skill_sources, std::env::consts::OS) };
+    // The ones the person switched off stay on disk and out of the agent's sight.
+    let skills_off_file = config_dir().map(|dir| rak::skills::off_file(&dir));
+    let off_names = skills_off_file.as_deref().map(rak::skills::read_off).unwrap_or_default();
+    let (loaded, loaded_off) = rak::skills::split_off(all_skills, &off_names);
     // The index is fixed for the session, so the prompt stays cacheable; a skill
     // saved now is loadable at once and listed from the next session.
     config.system_prompt.push_str(&rak::skills::index(&loaded));
@@ -519,6 +526,7 @@ pub fn run(mut o: Options) -> i32 {
         project_notes.len() + user_notes.len()
     };
     let skills: rak::skills::Shared = std::sync::Arc::new(std::sync::RwLock::new(loaded));
+    let skills_off: rak::skills::Shared = std::sync::Arc::new(std::sync::RwLock::new(loaded_off));
     let log = Log::open(o.log.as_ref());
     let live = stdout_tty && !o.json && !o.no_stream;
     let ui = Rc::new(RefCell::new(Ui {
@@ -552,6 +560,10 @@ pub fn run(mut o: Options) -> i32 {
     }
     if skills_on {
         tools.push(Box::new(rak::skills::UseSkill::new(skills.clone())));
+        // Switching one off or on changes what later sessions see, so read-only leaves it out.
+        if keeps && allowed("set_skill") {
+            tools.push(Box::new(rak::skills::SetSkill { on: skills.clone(), off: skills_off.clone(), file: skills_off_file.clone() }));
+        }
         // Writing skills changes what later sessions do, so read-only leaves it out.
         if keeps && allowed("save_skill") {
             config.system_prompt.push_str(rak::skills::save::LEARNING);
@@ -759,6 +771,8 @@ pub fn run(mut o: Options) -> i32 {
         memory_notes,
         skill_folder: skill_folders.last().cloned().unwrap_or_default(),
         skills,
+        skills_off,
+        skills_off_file,
         requests: 0,
         core_tools: core_tool_names,
         mcp_servers: connected.servers,

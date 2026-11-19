@@ -12,7 +12,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/tools", "list the tools the agent can use; /tools remove NAME deletes one of your own"),
     ("/mcp", "the MCP servers and their tools; /mcp add adds one (paste its JSON or its page's address)"),
     ("/resume", "this folder's saved chats; /resume N picks one up"),
-    ("/skills", "pick a skill and type your request (each is a command too: /NAME); /skills list, add URL, remove NAME"),
+    ("/skills", "pick a skill and type your request (each is a command too: /NAME); /skills list, add URL, remove NAME, off NAME, on NAME"),
     ("/init", "set up this project's notes in rak/ (or bring them up to date)"),
     ("/notes", "the project's rules and its notes in rak/ (project, roadmap, journal)"),
     ("/yes", "toggle auto-approve for edits and shell commands (also turns asking back on after an A)"),

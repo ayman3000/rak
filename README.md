@@ -36,13 +36,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.45** (2026-11-19)
+**v0.1.0-alpha.46** (2026-11-19)
 
-- **The notes question is now a tip.** alpha.43 and alpha.44 asked "Set them up now?" before the prompt in a project with no notes. That stood in the way: a request typed at it was lost and counted as a no. Now there is one line, "No rak notes in this project yet. Type /init to set them up", for the first three chats in a folder, and the prompt is ready at once. Update if you are on alpha.43 or alpha.44.
+- **A chat tells you when a newer rak is out.** One line at the start, "rak 0.1.0-alpha.47 is out (you have alpha.46). Run: rak update". Start-up is not slowed: the line comes from a check an earlier chat made, and the next check runs once a day after the prompt is up. `RAK_UPDATE_CHECK=0` turns it off. Nothing is installed until you run `rak update`.
+- **Switch a skill off without deleting it.** `/skills off NAME` and `/skills on NAME`, Tab in the `/skills` list, or just say it: "turn off the sdd-yolo skill". An off skill stays on disk, and the agent no longer sees or uses it, in this chat and later ones.
+- **A smaller binary.** The release build is now optimised for size: 17% smaller on an Apple Silicon Mac (4.03 MB to 3.36 MB), with no slowdown measured.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.45:** the notes question from alpha.43 became a one-line tip, so the prompt is ready at once in a project with no notes.
 - **alpha.44:** `/skills` is a list to pick from (↑/↓, Enter, type to filter); the prompt then starts with the skill's command and you type only the request.
 - **alpha.43:** the first chat in a project offers to set up its notes; a chat continued with `rak -c` remembers what you allowed (`A`, `a`, `s`) for 24 hours, says so, and `RAK_ALLOW_HOURS` changes the length.
 - **alpha.42:** a key pressed early can no longer answer an approval question, and an answer rak doesn't recognise is asked about again where it used to count as a no. Update if you use an earlier release.
@@ -233,7 +236,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 - **MCP servers,** added from the JSON on a server's page, from the page's address (`rak mcp add https://github.com/…`), or by a few questions, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
 - **Scripts and CI:** `--json` output, `--log` of every step, clear exit codes, and progress on stderr so stdout holds only the answer.
 - **A Rust library:** the agent loop, tools and providers with no terminal code, for your own agent.
-- **`rak update`** installs the newest release in place, checked against its SHA-256.
+- **`rak update`** installs the newest release in place, checked against its SHA-256. A chat says in one line when a newer release is out, from a once-a-day check that never delays the prompt.
 
 ## Providers
 

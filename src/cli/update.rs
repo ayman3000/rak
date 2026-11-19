@@ -137,7 +137,13 @@ fn agent() -> ureq::Agent {
 
 /// Every release tag on GitHub, pre-releases included (rak is in alpha).
 fn release_tags() -> Result<Vec<String>, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100");
+    release_tags_page(100)
+}
+
+/// The newest `count` release tags (GitHub lists the newest first). The
+/// daily check asks for a few: the whole list is hundreds of kilobytes.
+fn release_tags_page(count: usize) -> Result<Vec<String>, String> {
+    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page={count}");
     let releases: serde_json::Value = agent()
         .get(&url)
         .set("User-Agent", "rak")
@@ -222,10 +228,107 @@ fn compare(a: &str, b: &str) -> Ordering {
     })
 }
 
+// MARK: - Telling a chat that a newer release exists
+//
+// A chat never waits for the network to start. So the two halves are apart
+// in time: the notice is read from a small file the last check left, and a
+// new check runs on a thread once the prompt is up, at most once a day,
+// leaving its answer for the next chat. Nothing is installed: the person
+// runs `rak update`.
+
+/// Hours between two looks at GitHub.
+const CHECK_EVERY_HOURS: u64 = 24;
+
+fn check_file() -> Option<PathBuf> {
+    super::settings::config_dir().map(|dir| dir.join("update-check"))
+}
+
+/// Pure — unit-tested. The saved check: when it was made (seconds since
+/// 1970) and the newest release it saw.
+pub fn parse_check(text: &str) -> (u64, Option<String>) {
+    let value = |key: &str| text.lines().find_map(|line| line.strip_prefix(key)).map(str::trim).filter(|v| !v.is_empty());
+    (value("checked=").and_then(|v| v.parse().ok()).unwrap_or(0), value("newest=").map(str::to_string))
+}
+
+/// Pure — unit-tested. Whether `RAK_UPDATE_CHECK` turns the check off.
+pub fn check_off(setting: Option<&str>) -> bool {
+    matches!(setting.map(|s| s.trim().to_lowercase()).as_deref(), Some("0" | "off" | "no" | "false" | "never"))
+}
+
+/// Pure — unit-tested. Whether it is time to look again.
+pub fn check_due(checked: u64, now: u64) -> bool {
+    now.saturating_sub(checked) >= CHECK_EVERY_HOURS * 3600
+}
+
+/// Pure — unit-tested. The line a chat shows when the saved check saw a
+/// release newer than this rak; None when there is none, or it is this one.
+pub fn notice_for(newest: Option<&str>, current: &str) -> Option<String> {
+    let newest = newest?;
+    (compare(newest, current) == Ordering::Greater)
+        .then(|| format!("rak {} is out (you have {}). Run: rak update", newest.trim_start_matches('v'), current.trim_start_matches('v')))
+}
+
+/// The notice for this chat, from the last check. Reads one small file:
+/// no network, nothing to wait for.
+pub fn notice() -> Option<String> {
+    if check_off(super::settings::key("RAK_UPDATE_CHECK").as_deref()) {
+        return None;
+    }
+    let (_, newest) = parse_check(&std::fs::read_to_string(check_file()?).ok()?);
+    notice_for(newest.as_deref(), &format!("v{}", env!("CARGO_PKG_VERSION")))
+}
+
+/// Looks for a newer release on a thread of its own, when the last look was
+/// a day ago or more, and saves what it saw for the next chat. Any failure
+/// (no network, GitHub busy) saves nothing and says nothing.
+pub fn check_in_background() {
+    if check_off(super::settings::key("RAK_UPDATE_CHECK").as_deref()) {
+        return;
+    }
+    let Some(file) = check_file() else { return };
+    let now = rak::sessions::now_seconds();
+    let (checked, _) = parse_check(&std::fs::read_to_string(&file).unwrap_or_default());
+    if !check_due(checked, now) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Ok(tags) = release_tags_page(5) else { return };
+        let Some(newest) = newest(&tags) else { return };
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, format!("checked={now}\nnewest={newest}\n"));
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_chat_is_told_of_a_newer_release_from_the_last_check() {
+        assert_eq!(parse_check("checked=1700000000\nnewest=v0.1.0-alpha.46\n"), (1_700_000_000, Some("v0.1.0-alpha.46".to_string())));
+        assert_eq!(parse_check(""), (0, None));
+        assert_eq!(parse_check("checked=soon\nnewest=\n"), (0, None));
+        // Newer: said, with both versions and what to run. The same or older: nothing.
+        assert_eq!(
+            notice_for(Some("v0.1.0-alpha.46"), "v0.1.0-alpha.45").as_deref(),
+            Some("rak 0.1.0-alpha.46 is out (you have 0.1.0-alpha.45). Run: rak update")
+        );
+        assert_eq!(notice_for(Some("v0.1.0-alpha.45"), "v0.1.0-alpha.45"), None);
+        assert_eq!(notice_for(Some("v0.1.0-alpha.9"), "v0.1.0-alpha.45"), None, "alpha.9 is older than alpha.45");
+        assert!(notice_for(Some("v0.1.0"), "v0.1.0-alpha.45").is_some(), "the release after its alphas");
+        assert_eq!(notice_for(None, "v0.1.0-alpha.45"), None);
+        // Once a day; and the setting turns it off.
+        let day = 24 * 3600;
+        assert!(check_due(0, 1_700_000_000) && check_due(1_700_000_000 - day, 1_700_000_000));
+        assert!(!check_due(1_700_000_000 - day + 1, 1_700_000_000) && !check_due(1_700_000_100, 1_700_000_000));
+        for off in ["0", "off", "No", " false ", "never"] {
+            assert!(check_off(Some(off)), "{off}");
+        }
+        assert!(!check_off(None) && !check_off(Some("")) && !check_off(Some("1")) && !check_off(Some("yes")));
+    }
 
     fn tags(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()

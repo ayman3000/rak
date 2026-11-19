@@ -217,6 +217,114 @@ pub fn load_with_built_in(folders: &[PathBuf], os: &str) -> Vec<Skill> {
     skills
 }
 
+// MARK: - Switching a skill off
+//
+// A skill that is off stays on disk and is left out of everything the agent
+// sees: the index, use_skill and its chat command. The names are kept in one
+// small file, so it holds for every chat until the skill is switched on.
+
+/// Where the names of the skills that are off are kept.
+pub fn off_file(config_dir: &Path) -> PathBuf {
+    config_dir.join("skills-off")
+}
+
+/// The names in that file, one a line.
+pub fn read_off(file: &Path) -> Vec<String> {
+    std::fs::read_to_string(file).unwrap_or_default().lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
+}
+
+/// Pure — unit-tested. The skills that are on, and the ones named in `off`.
+pub fn split_off(skills: Vec<Skill>, off: &[String]) -> (Vec<Skill>, Vec<Skill>) {
+    skills.into_iter().partition(|skill| !off.iter().any(|name| name.eq_ignore_ascii_case(&skill.name)))
+}
+
+/// Pure — unit-tested. The skill the person means: its name, whatever the
+/// capitals, or its chat command's name ("write-a-skill").
+fn position_of(skills: &[Skill], wanted: &str) -> Option<usize> {
+    let wanted = wanted.trim().trim_start_matches('/');
+    skills
+        .iter()
+        .position(|s| s.name.eq_ignore_ascii_case(wanted))
+        .or_else(|| skills.iter().position(|s| save::slug(&s.name) == save::slug(wanted)))
+}
+
+/// Switches a skill off or on, here and for later chats. Returns the skill's
+/// name; an error says which skills are on and which are off.
+pub fn switch(on: &Shared, off: &Shared, file: Option<&Path>, wanted: &str, turn_on: bool) -> Result<String, String> {
+    let (mut on_list, mut off_list) = (on.write().unwrap(), off.write().unwrap());
+    let (from, to) = if turn_on { (&mut *off_list, &mut *on_list) } else { (&mut *on_list, &mut *off_list) };
+    let Some(at) = position_of(from, wanted) else {
+        let names = |list: &[Skill]| {
+            if list.is_empty() {
+                "none".to_string()
+            } else {
+                list.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")
+            }
+        };
+        let already = position_of(to, wanted).map(|i| to[i].name.clone());
+        return Err(match already {
+            Some(name) => format!("The skill \"{name}\" is {} already.", if turn_on { "on" } else { "off" }),
+            None => format!("No skill named \"{}\". On: {}. Off: {}.", wanted.trim(), names(&on_list), names(&off_list)),
+        });
+    };
+    let skill = from.remove(at);
+    let name = skill.name.clone();
+    to.push(skill);
+    to.sort_by_key(|s| s.name.to_lowercase());
+    if let Some(file) = file {
+        let text: String = off_list.iter().map(|s| format!("{}\n", s.name)).collect();
+        if let Some(folder) = file.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
+        std::fs::write(file, text).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+    }
+    Ok(name)
+}
+
+/// set_skill: the agent switches a skill off or on when the person asks in words.
+pub struct SetSkill {
+    pub on: Shared,
+    pub off: Shared,
+    pub file: Option<PathBuf>,
+}
+
+impl Tool for SetSkill {
+    fn name(&self) -> &str {
+        "set_skill"
+    }
+    fn description(&self) -> &str {
+        "Switch a skill off (you stop seeing and using it, in this and later sessions; its file is kept) or back on. \
+         Only when the user asks. A name that matches nothing gets the lists of skills that are on and off."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "The skill's name." },
+                "on": { "type": "boolean", "description": "false: switch it off. true: switch it back on." }
+            },
+            "required": ["name", "on"]
+        })
+    }
+    fn needs_approval(&self) -> bool {
+        true
+    }
+    fn run(&self, args: &Value) -> ToolResult {
+        let (Some(name), Some(turn_on)) =
+            (str_arg(args, "name").map(str::trim).filter(|n| !n.is_empty()), args.get("on").and_then(Value::as_bool))
+        else {
+            return ToolResult::err("set_skill requires `name` and `on` (true or false).");
+        };
+        match switch(&self.on, &self.off, self.file.as_deref(), name, turn_on) {
+            Ok(name) if turn_on => ToolResult::ok(format!("The skill \"{name}\" is on again: use_skill loads it now, and it is in the skills index from the next session.")),
+            Ok(name) => ToolResult::ok(format!(
+                "The skill \"{name}\" is off: use_skill no longer loads it, and later sessions will not list it. Its file is kept; it can be switched on again."
+            )),
+            Err(why) => ToolResult::err(why),
+        }
+    }
+}
+
 /// Pure — unit-tested. The part of the system prompt that lists the skills.
 /// Empty when there are none.
 pub fn index(skills: &[Skill]) -> String {
@@ -278,6 +386,54 @@ impl Tool for UseSkill {
 mod tests {
     use super::*;
     use crate::tools::testing::temp_dir;
+
+    fn named(name: &str) -> Skill {
+        Skill {
+            name: name.into(),
+            description: format!("{name} things."),
+            instructions: "Do it.".into(),
+            resources: None,
+            file: PathBuf::from(format!("/s/{name}.md")),
+            builtin: false,
+        }
+    }
+
+    #[test]
+    fn a_skill_is_switched_off_and_on_and_the_choice_is_kept() {
+        let dir = temp_dir("skills-off");
+        let file = off_file(&dir);
+        let (on, off) = split_off(vec![named("Deploy"), named("sdd-yolo"), named("Write a skill")], &["SDD-YOLO".to_string()]);
+        assert_eq!(on.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Deploy", "Write a skill"]);
+        assert_eq!(off.len(), 1);
+        let (on, off): (Shared, Shared) = (Arc::new(RwLock::new(on)), Arc::new(RwLock::new(off)));
+        let names = |list: &Shared| list.read().unwrap().iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+
+        // Off by its name in any capitals, or by its command's name; the file lists what is off.
+        assert_eq!(switch(&on, &off, Some(&file), "deploy", false).unwrap(), "Deploy");
+        assert_eq!(switch(&on, &off, Some(&file), "/write-a-skill", false).unwrap(), "Write a skill");
+        assert!(names(&on).is_empty());
+        assert_eq!(read_off(&file), ["Deploy", "sdd-yolo", "Write a skill"]);
+        // use_skill no longer finds one that is off.
+        let use_skill = UseSkill::new(on.clone());
+        assert!(!use_skill.run(&json!({ "name": "Deploy" })).ok);
+        // Back on; said when it is on already; an unknown name gets both lists.
+        assert_eq!(switch(&on, &off, Some(&file), "sdd-yolo", true).unwrap(), "sdd-yolo");
+        assert_eq!(names(&on), ["sdd-yolo"]);
+        assert_eq!(read_off(&file), ["Deploy", "Write a skill"]);
+        assert!(switch(&on, &off, Some(&file), "sdd-yolo", true).unwrap_err().contains("is on already"));
+        let unknown = switch(&on, &off, Some(&file), "nope", false).unwrap_err();
+        assert!(unknown.contains("On: sdd-yolo.") && unknown.contains("Off: Deploy, Write a skill."), "{unknown}");
+
+        // The agent's tool does the same and says what it means.
+        let tool = SetSkill { on: on.clone(), off: off.clone(), file: Some(file.clone()) };
+        let result = tool.run(&json!({ "name": "sdd-yolo", "on": false }));
+        assert!(result.ok && result.text.contains("is off") && result.text.contains("Its file is kept"), "{}", result.text);
+        assert!(tool.run(&json!({ "name": "Deploy", "on": true })).text.contains("is on again"));
+        assert!(!tool.run(&json!({ "name": "Deploy" })).ok, "on or off must be said");
+        assert!(tool.needs_approval());
+        assert!(read_off(&dir.join("missing")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn swiftagentkit_files_are_read() {

@@ -23,6 +23,7 @@ What the agent can do, how every write is checked, and how rak works on a projec
 | `fetch_url` | Reads one public web page as Markdown, text or HTML. Addresses on this machine or a private network are refused, even through a redirect. | |
 | `remember` | Keeps a one-line note for later sessions, for this project or for all. | yes |
 | `past_chats` | In a chat: this project's earlier conversations, so "what did I ask you first?" has an answer. Lists them, reads one (your requests and rak's answers; tool output is left out), or searches them all. Read-only, this project only, the current chat left out; nothing is sent to the model unless it calls the tool. A one-off run does not have it. |
+| `set_skill` | Switches a [skill](memory-and-skills.md) off or back on when you ask in words. | yes |
 | `save_tool` | Saves a [tool of your own](#tools-of-your-own): one script, shown whole first. | yes |
 | `save_routine`, `run_routine` | Saves steps that just worked, with `{placeholders}`, so they run again back to back with no model calls between them. Each step still asks like the model's own call. Same format as sak and Naseem. | yes |
 

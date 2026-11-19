@@ -22,6 +22,10 @@ pub enum Picked {
     /// A name typed that matches no row (only when `allow_typed`).
     Typed(String),
     Cancelled,
+    /// Tab on the row at this index: a second thing to do with a row (the
+    /// skills list switches a skill off or on). Callers with no use for it
+    /// take it as cancelled.
+    Tab(usize),
 }
 
 /// Pure — unit-tested. The rows whose name or note contains the filter,
@@ -127,6 +131,11 @@ pub fn pick(choices: &[Choice], start: Option<usize>, allow_typed: bool, color: 
                 None if allow_typed && !filter.trim().is_empty() => break Picked::Typed(filter.trim().to_string()),
                 None => {}
             },
+            Key::Tab => {
+                if let Some(&i) = shown.get(selected) {
+                    break Picked::Tab(i);
+                }
+            }
             Key::Esc | Key::CtrlC | Key::CtrlD | Key::Eof => break Picked::Cancelled,
             Key::Backspace => {
                 filter.pop();

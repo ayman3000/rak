@@ -1,6 +1,6 @@
 [package]
 name = "rak"
-version = "0.1.0-alpha.45"
+version = "0.1.0-alpha.46"
 edition = "2021"
 license = "MIT"
 description = "Rust Agent Kit: a small coding agent for the terminal, for Linux and macOS."
@@ -30,6 +30,12 @@ ring = "0.17"
 libc = "0.2"
 
 [profile.release]
+# Optimised for size, not speed: about 17% smaller (4.03 MB to 3.36 MB on an
+# Apple Silicon Mac) with no slowdown measured on the file tools or at
+# start-up. "z" was 33% smaller and is left alone: it gives up more inlining
+# for no need. panic = "abort" would save more and is not used: rak relies on
+# unwinding to put the terminal back and to stop the programs it started.
+opt-level = "s"
 lto = true
 strip = true
 codegen-units = 1

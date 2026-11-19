@@ -12,6 +12,50 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.46
+
+Two requests from 2026-11-19: "notify users if a new release exists,
+without delaying rak initialization" and "the ability to disable any
+skill, even by words".
+
+- **A chat says when a newer release is out** (update::notice,
+  check_in_background). Split in time so start-up never waits: the line is
+  read from ~/.config/rak/update-check (checked=, newest=), and a look at
+  GitHub runs on a thread after the prompt is up, at most every 24 hours,
+  saving its answer for the next chat. Chats only; RAK_UPDATE_CHECK=0 turns
+  both halves off; any failure is silent. The check asks for the 5 newest
+  releases (78 KB, 1.3 s here); the full list `rak update` reads was 690 KB
+  and took 25 s on this connection, too slow for a chat that may close.
+  Measured, scratch home, median of 10: 15.3 ms on alpha.45, 13.4 ms with
+  the check starting, 13.6 ms with a notice shown. A chat open 3 s saved
+  the check; with newest=v9.9.9 the line showed; with the setting at 0 it
+  did not.
+- **A skill can be switched off** (skills::switch, split_off, SetSkill,
+  ~/.config/rak/skills-off). Off: out of the index, use_skill and the "/"
+  commands, file kept. /skills off NAME and on NAME; Tab in the /skills
+  picker (Picked::Tab; off ones listed last, dim, Enter on one switches it
+  on); set_skill for the agent, which asks first; /skills list and
+  `rak skills` mark the off ones. The index in a running chat's system
+  prompt is not rewritten (it is fixed for the session, for the cache), so
+  an off skill is still named there until the next chat, but cannot be
+  loaded.
+  Tried: by command and by Tab in a scratch chat, remembered across runs;
+  and with kimi-k2.6:cloud, "please turn off the sdd-yolo skill" called
+  set_skill, asked, and switched it off (switched back on after).
+
+- **The release build is optimised for size** (`opt-level = "s"`). Linux
+  x86-64 had reached 4.95 MB on alpha.45, with the banner saying "under
+  5 MB". Measured on an Apple Silicon Mac: 4.03 MB at the default, 3.36 MB
+  with "s" (17% less), 2.70 MB with "z" (33% less). Speed, a stand-in model
+  calling code_map, search_files and read_file 30 times on rak's own
+  source, median of 7 runs, two rounds: 266 and 313 ms at the default, 276
+  and 278 with "s", 314 and 292 with "z": no difference outside the noise.
+  Start-up 13.9, 14.6, 14.7 ms. "s" was kept; "z" gives up more inlining
+  for size nobody needs. panic = "abort" was not tried: joined threads and
+  destructors (the terminal's raw mode, the MCP servers' and tools'
+  programs) depend on unwinding. `cargo test --release` passes on the "s"
+  build, and a real request to kimi-k2.6:cloud with a tool call worked.
+
 ### In v0.1.0-alpha.45
 
 - **The notes question became a tip** (chat::tip_notes, tips_notes). The

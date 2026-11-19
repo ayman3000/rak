@@ -56,7 +56,9 @@ pub fn run(args: &[String]) -> ! {
     match args.first().map(String::as_str) {
         None | Some("list" | "ls") => {
             let all = skills::load_with_built_in(&folders, std::env::consts::OS);
-            print_list(&all, color);
+            let off_names = super::settings::config_dir().map(|dir| skills::read_off(&skills::off_file(&dir))).unwrap_or_default();
+            let (on, off) = skills::split_off(all, &off_names);
+            print_list(&on, &off, color);
         }
         Some("add") => {
             let [source] = words.as_slice() else { usage_error("rak skills add needs one URL or file (see rak skills --help)") };
@@ -116,9 +118,9 @@ pub fn remove_in_chat(name: &str, all: &[Skill]) -> Result<bool, String> {
 }
 
 /// The list `rak skills` and `/skills` print.
-pub fn print_list(skills: &[Skill], color: bool) {
+pub fn print_list(skills: &[Skill], off: &[Skill], color: bool) {
     let dim = |text: &str| paint(color, Style::Dim, text);
-    if skills.is_empty() {
+    if skills.is_empty() && off.is_empty() {
         println!("{}", dim("No skills. A skill is a Markdown file of know-how the agent loads when a task needs it:"));
         println!("{}", dim("  .rak/skills/NAME.md in a project, or ~/.config/rak/skills/NAME.md for every project."));
     }
@@ -126,6 +128,12 @@ pub fn print_list(skills: &[Skill], color: bool) {
         println!("  {}  {}", paint(color, Style::Cyan, &skill.name), dim(&cut(&skill.description, 90)));
         let place = if skill.builtin { "built into rak".to_string() } else { short_path(&skill.file.to_string_lossy(), &home(), 70) };
         println!("    {}", dim(&place));
+    }
+    for skill in off {
+        println!("  {}  {}", dim(&skill.name), dim(&format!("(off) {}", cut(&skill.description, 84))));
+    }
+    if !off.is_empty() {
+        println!("{}", dim("In a chat, /skills on NAME switches one back on; /skills off NAME switches one off."));
     }
     println!("{}", dim("Add one: rak skills add URL, or ask the agent to write one with you. Remove one: rak skills remove NAME."));
 }

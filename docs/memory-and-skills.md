@@ -56,6 +56,8 @@ rak skills remove pdf
 
 **Pick one from a list.** `/skills` in a chat shows your skills; choose with ↑/↓ and Enter, or type a few letters to narrow the list. The prompt then starts with that skill's command, and you type what you want done (or press Enter to run it as it is). `/skills list` prints them with where each is kept.
 
+**Switch one off.** A skill you don't want used, but don't want to delete: `/skills off NAME` in a chat (and `/skills on NAME` to bring it back), or press Tab on it in the `/skills` list, or say it in words ("turn off the sdd-yolo skill"; the agent asks before it does). An off skill keeps its file. The agent no longer sees it in its list, cannot load it, and it has no chat command, in this chat and every later one. `/skills list` and `rak skills` show the ones that are off. Built-in skills can be switched off too. The names are kept in `~/.config/rak/skills-off`.
+
 **Each skill is a command.** In a chat, `/sdd-plan` (the skill's name, with dashes for spaces) asks the agent to load that skill and follow it; what you type after it is the request. The agent still loads a skill by itself when a task matches its description; the command is for when you want one for sure, or for step-by-step sets where you choose the step. A skill named like one of rak's own commands gets no command and is loaded by asking for it.
 
 In a chat, `/skills add URL` and `/skills remove NAME` do the same. `/skills remove` asks before deleting, and finds the skill whether it is this project's or yours; a skill built into rak can't be removed.
