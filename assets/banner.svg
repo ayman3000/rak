@@ -19,7 +19,7 @@
     <text x="96" y="196" font-size="132" font-weight="700" fill="url(#accent)" letter-spacing="-4">rak</text>
     <text x="100" y="246" font-size="24" fill="#e2e8f0">The coding agent in a binary under 5 MB.</text>
     <text x="100" y="280" font-size="17" fill="#94a3b8">nothing else to install · lean on tokens · asks first</text>
-    <text x="100" y="306" font-size="17" fill="#94a3b8">any model, or your ChatGPT plan</text>
+    <text x="100" y="306" font-size="17" fill="#94a3b8">any model, or your ChatGPT plan · writes the tools you ask for</text>
     <!-- terminal sketch -->
     <rect x="800" y="78" width="360" height="204" rx="12" fill="#0f172a" stroke="#1e293b" stroke-width="2"/>
     <text x="822" y="116" font-size="17" fill="#facc15">❯ <tspan fill="#e2e8f0">rak "make the tests pass"</tspan></text>
