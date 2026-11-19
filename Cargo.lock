@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "rak"
-version = "0.1.0-alpha.44"
+version = "0.1.0-alpha.45"
 dependencies = [
  "libc",
  "ring",

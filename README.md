@@ -36,14 +36,14 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.44** (2026-11-19)
+**v0.1.0-alpha.45** (2026-11-19)
 
-- **Pick a skill from a list.** `/skills` now shows your skills to choose from with ↑/↓ and Enter (type to filter). The prompt then starts with that skill's command, and you type only what you want done. No names to remember.
-- `/skills list` is the old list, with where each skill is kept.
+- **The notes question is now a tip.** alpha.43 and alpha.44 asked "Set them up now?" before the prompt in a project with no notes. That stood in the way: a request typed at it was lost and counted as a no. Now there is one line, "No rak notes in this project yet. Type /init to set them up", for the first three chats in a folder, and the prompt is ready at once. Update if you are on alpha.43 or alpha.44.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.44:** `/skills` is a list to pick from (↑/↓, Enter, type to filter); the prompt then starts with the skill's command and you type only the request.
 - **alpha.43:** the first chat in a project offers to set up its notes; a chat continued with `rak -c` remembers what you allowed (`A`, `a`, `s`) for 24 hours, says so, and `RAK_ALLOW_HOURS` changes the length.
 - **alpha.42:** a key pressed early can no longer answer an approval question, and an answer rak doesn't recognise is asked about again where it used to count as a no. Update if you use an earlier release.
 - **alpha.41:** [tools of your own](#make-your-own-tools): say "I need a tool that …" or type `/make-tool`; rak writes a small script, shows it, and asks before saving. Keys stay out of scripts (`/key NAME`), and `/tools remove NAME` deletes one.
@@ -168,7 +168,7 @@ rak -c "and now add the tests"         # continue this folder's last chat
 ```
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
-2. **Say yes to the notes.** The first chat in a project offers to look around and write rak's notes in `rak/` (Enter for yes), so every later session starts already knowing the project. `/init` does the same any time, and brings the notes up to date later.
+2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project. A project with no notes reminds you with one line for its first three chats.
 3. **Type `/`** for every chat command. `/mcp add` (or `rak mcp add`) adds an MCP server from the JSON on its page or the page's address. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak login chatgpt` signs in with ChatGPT to use your ChatGPT plan; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).

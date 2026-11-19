@@ -26,75 +26,62 @@ pub fn mode_label(s: &Session) -> &'static str {
     }
 }
 
-/// What decides whether a chat offers to set up the project's notes.
-pub struct NotesOffer {
+/// What decides whether a chat says how to set up the project's notes.
+pub struct NotesTip {
     pub has_notes: bool,
     /// --read-only or --no-notes: nothing would be written.
     pub writes_off: bool,
     /// `rak -c`: the person came to carry on, not to set up.
     pub continuing: bool,
-    /// Someone is at a terminal to answer.
-    pub can_ask: bool,
     /// The home folder or the top of the disk: not a project.
     pub broad: bool,
     /// Nothing in the folder to look at yet.
     pub empty: bool,
-    /// The person said no here before.
+    /// The person said no here (alpha.43 asked a question).
     pub declined: bool,
+    /// Chats in this folder that showed the tip already.
+    pub shown: usize,
 }
 
-/// Pure — unit-tested. Whether to offer the notes now: once, in a project
-/// that has none, to someone who can answer and has not said no.
-pub fn offers_notes(o: &NotesOffer) -> bool {
-    !o.has_notes && !o.writes_off && !o.continuing && o.can_ask && !o.broad && !o.empty && !o.declined
+/// A tip is for learning that /init exists, not a standing notice.
+pub const NOTES_TIP_TIMES: usize = 3;
+
+/// Pure — unit-tested. Whether to show the tip: in a project that has no
+/// notes, the first few chats there.
+pub fn tips_notes(t: &NotesTip) -> bool {
+    !t.has_notes && !t.writes_off && !t.continuing && !t.broad && !t.empty && !t.declined && t.shown < NOTES_TIP_TIMES
 }
 
-/// A project with no notes yet: says what they are and sets them up unless
-/// the person says no. /init is the same thing by hand; many never find it.
-fn offer_notes(s: &mut Session, color: bool) {
-    use std::io::{IsTerminal, Write};
+/// A project with no notes yet: one line saying /init sets them up. Many
+/// never find /init. It is a line and not a question: a question stood
+/// between the person and the prompt, swallowed a request typed at it, and
+/// took that request for a no.
+fn tip_notes(s: &Session, color: bool) {
     let empty = std::fs::read_dir(&s.cwd)
         .map(|entries| !entries.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.')))
         .unwrap_or(true);
-    let offer = NotesOffer {
+    let tip = NotesTip {
         has_notes: s.has_notes,
         writes_off: s.o.read_only || s.o.no_notes,
         continuing: s.o.continue_last,
-        can_ask: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
         broad: super::session::broad_folder_warning(&s.cwd, &home(), true).is_some(),
         empty,
         declined: super::trust::notes_declined(&s.cwd),
+        shown: super::trust::notes_tips_shown(&s.cwd),
     };
-    if !offers_notes(&offer) {
+    if !tips_notes(&tip) {
         return;
     }
     println!();
-    println!("This project has no rak notes yet.");
     println!(
         "{}",
         paint(
             color,
             Style::Dim,
-            "rak can look around and write them (rak/project.md and rak/roadmap.md), so every chat here starts already\n\
-             knowing the project. It takes about a minute and one request to the model; you approve what it writes."
+            "No rak notes in this project yet. Type /init to set them up (about a minute), so every chat here starts knowing the project."
         )
     );
-    term::discard_typed_ahead();
-    eprint!("{}", paint(color, Style::Bold, "Set them up now? [Y/n] › "));
-    let _ = std::io::stderr().flush();
-    let mut typed = String::new();
-    if !matches!(std::io::stdin().read_line(&mut typed), Ok(n) if n > 0) {
-        return;
-    }
-    match typed.trim().to_lowercase().as_str() {
-        "" | "y" | "yes" => {
-            run_command(s, "/init");
-        }
-        _ => {
-            super::trust::decline_notes(&s.cwd);
-            println!("{}", paint(color, Style::Dim, "Skipped; rak won't ask here again. /init sets them up any time."));
-        }
-    }
+    super::trust::note_tip_shown(&s.cwd);
 }
 
 pub fn banner(s: &Session) {
@@ -161,7 +148,7 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
         println!("{}", paint(s.ui.borrow().out_color, Style::Yellow, &warning));
     }
     let color = s.ui.borrow().out_color;
-    offer_notes(s, color);
+    tip_notes(s, color);
     loop {
         // The chat's commands, then one for each skill (they come and go in a chat).
         let skill_commands = skill_commands(s);
@@ -952,6 +939,8 @@ fn resume(s: &mut Session, args: &str, color: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rak::tools::shell::JobInfo;
+    use std::path::PathBuf;
 
     #[test]
     fn a_picked_skill_starts_the_prompt_with_its_command() {
@@ -968,27 +957,19 @@ mod tests {
     }
 
     #[test]
-    fn the_notes_are_offered_once_in_a_project_that_has_none() {
-        let fresh = || NotesOffer {
-            has_notes: false,
-            writes_off: false,
-            continuing: false,
-            can_ask: true,
-            broad: false,
-            empty: false,
-            declined: false,
-        };
-        assert!(offers_notes(&fresh()));
-        assert!(!offers_notes(&NotesOffer { has_notes: true, ..fresh() }), "it has them");
-        assert!(!offers_notes(&NotesOffer { writes_off: true, ..fresh() }), "--read-only or --no-notes");
-        assert!(!offers_notes(&NotesOffer { continuing: true, ..fresh() }), "rak -c carries on");
-        assert!(!offers_notes(&NotesOffer { can_ask: false, ..fresh() }), "nobody to ask");
-        assert!(!offers_notes(&NotesOffer { broad: true, ..fresh() }), "the home folder is not a project");
-        assert!(!offers_notes(&NotesOffer { empty: true, ..fresh() }), "nothing to look at");
-        assert!(!offers_notes(&NotesOffer { declined: true, ..fresh() }), "said no before");
+    fn the_notes_tip_shows_a_few_times_in_a_project_that_has_none() {
+        let fresh =
+            || NotesTip { has_notes: false, writes_off: false, continuing: false, broad: false, empty: false, declined: false, shown: 0 };
+        assert!(tips_notes(&fresh()));
+        assert!(tips_notes(&NotesTip { shown: NOTES_TIP_TIMES - 1, ..fresh() }));
+        assert!(!tips_notes(&NotesTip { shown: NOTES_TIP_TIMES, ..fresh() }), "a tip, not a standing notice");
+        assert!(!tips_notes(&NotesTip { has_notes: true, ..fresh() }), "it has them");
+        assert!(!tips_notes(&NotesTip { writes_off: true, ..fresh() }), "--read-only or --no-notes");
+        assert!(!tips_notes(&NotesTip { continuing: true, ..fresh() }), "rak -c carries on");
+        assert!(!tips_notes(&NotesTip { broad: true, ..fresh() }), "the home folder is not a project");
+        assert!(!tips_notes(&NotesTip { empty: true, ..fresh() }), "nothing to look at");
+        assert!(!tips_notes(&NotesTip { declined: true, ..fresh() }), "said no before");
     }
-    use rak::tools::shell::JobInfo;
-    use std::path::PathBuf;
 
     #[test]
     fn no_effort_reads_as_the_model_s_own() {

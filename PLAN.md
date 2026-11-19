@@ -12,6 +12,20 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.45
+
+- **The notes question became a tip** (chat::tip_notes, tips_notes). The
+  user felt a delay at start after alpha.43. Measured on alpha.44: 9 ms to
+  the prompt at home and in a project with notes; in a project without,
+  typed text never showed, because "Set them up now? [Y/n]" stood before
+  the prompt. A request typed there was read as the answer, taken for a no
+  (remembered for the folder), and lost; text typed before it was dropped.
+  Now one dim line, "No rak notes in this project yet. Type /init …", for
+  the first three chats in a folder (~/.config/rak/notes-tips, a line per
+  showing), then nothing. A folder that said no under alpha.43 gets no tip.
+  Measured after: 14 ms until typed text shows in a project with no notes,
+  10 of 10 launches.
+
 ### In v0.1.0-alpha.44
 
 - **`/skills` is a list to pick from** (chat::pick_skill, skill_start;

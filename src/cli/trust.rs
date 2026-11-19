@@ -51,28 +51,36 @@ pub fn project_settings(project: &Path) -> Vec<String> {
     out
 }
 
-/// Folders where the person said no to setting up rak's notes: not asked again.
+/// Folders where the person said no to setting up rak's notes (alpha.43 asked): no tip there.
 fn no_notes_store() -> Option<PathBuf> {
     super::settings::config_dir().map(|dir| dir.join("no-notes"))
 }
 
-/// Whether the person declined the notes offer in this folder before.
+/// Whether the person declined the notes in this folder before.
 pub fn notes_declined(project: &Path) -> bool {
     no_notes_store().and_then(|file| std::fs::read_to_string(file).ok()).is_some_and(|list| listed(&list, &canonical(project)))
 }
 
-/// Remembers that the person does not want the notes offer in this folder.
-pub fn decline_notes(project: &Path) {
-    let Some(file) = no_notes_store() else { return };
+fn notes_tips_store() -> Option<PathBuf> {
+    super::settings::config_dir().map(|dir| dir.join("notes-tips"))
+}
+
+/// How many chats in this folder have shown the notes tip: one line each.
+pub fn notes_tips_shown(project: &Path) -> usize {
     let folder = canonical(project);
-    let list = std::fs::read_to_string(&file).unwrap_or_default();
-    if listed(&list, &folder) {
-        return;
-    }
+    notes_tips_store()
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .map_or(0, |list| list.lines().filter(|line| line.trim() == folder).count())
+}
+
+/// Counts one more showing of the notes tip in this folder.
+pub fn note_tip_shown(project: &Path) {
+    let Some(file) = notes_tips_store() else { return };
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&file, format!("{list}{folder}\n"));
+    let list = std::fs::read_to_string(&file).unwrap_or_default();
+    let _ = std::fs::write(&file, format!("{list}{}\n", canonical(project)));
 }
 
 fn store() -> Option<PathBuf> {

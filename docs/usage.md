@@ -33,7 +33,7 @@ RAK_MODEL=claude-sonnet-5-5
 
 Scripts and CI never get questions: without a terminal, rak reads the environment and the key file, and says what is missing.
 
-**4. In a project, say yes to the notes.** The first chat in a folder that has none says "This project has no rak notes yet" and asks "Set them up now? [Y/n]". Enter starts it: rak looks at the project and writes its notes in `rak/`, so every later session starts already knowing it; you approve what it writes. `n` skips it and rak does not ask in that folder again. `/init` does the same any time. The offer is not made in your home folder, in an empty folder, with `-c`, `--read-only` or `--no-notes`, or when nobody is at the terminal.
+**4. In a project, type `/init`** once. rak looks at the project and writes its notes in `rak/`, so every later session starts already knowing it; you approve what it writes. A project with no notes says so in one line above the prompt for its first three chats ("No rak notes in this project yet. Type /init to set them up"). The line is not shown in your home folder, in an empty folder, or with `-c`, `--read-only` or `--no-notes`.
 
 <details>
 <summary><b>Upgrading from an older key file</b></summary>
