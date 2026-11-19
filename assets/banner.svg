@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="rak: the coding agent in a 4 MB binary">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="rak: the coding agent in a binary under 5 MB">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0b1220"/>
@@ -17,7 +17,7 @@
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
     <!-- wordmark -->
     <text x="96" y="196" font-size="132" font-weight="700" fill="url(#accent)" letter-spacing="-4">rak</text>
-    <text x="100" y="246" font-size="24" fill="#e2e8f0">The coding agent in a 4 MB binary.</text>
+    <text x="100" y="246" font-size="24" fill="#e2e8f0">The coding agent in a binary under 5 MB.</text>
     <text x="100" y="280" font-size="17" fill="#94a3b8">nothing else to install · lean on tokens · asks first</text>
     <text x="100" y="306" font-size="17" fill="#94a3b8">any model, or your ChatGPT plan</text>
     <!-- terminal sketch -->
