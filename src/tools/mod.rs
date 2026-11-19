@@ -152,6 +152,9 @@ impl Ctx {
         if self.any_path || real.starts_with(&self.cwd) || self.extra.lock().unwrap().iter().any(|folder| real.starts_with(folder)) {
             return None;
         }
+        if let Some(why) = never_reason(&real, &secret_folders(&real_path(&home()))) {
+            return Some(why);
+        }
         // Said so the model stops here: going round it (a shell command, a
         // copy inside the project) is not what the person asked for.
         Some(format!(
@@ -214,6 +217,20 @@ fn home() -> PathBuf {
 /// Where keys and credentials usually live under a home folder.
 fn secret_folders(home: &Path) -> Vec<PathBuf> {
     [".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/rak"].iter().map(|name| home.join(name)).collect()
+}
+
+/// Pure — unit-tested. What the model is told about a path inside a place
+/// where keys live, or None for any other path. /add-dir refuses these
+/// folders, so the model must not send the person to it; for rak's own
+/// folder it is pointed at the tool that reads earlier chats.
+pub fn never_reason(path: &Path, never: &[PathBuf]) -> Option<String> {
+    let secret = never.iter().find(|secret| path.starts_with(secret))?;
+    let chats =
+        if secret.ends_with(".config/rak") { " For this project's earlier chats, use the past_chats tool when you have it." } else { "" };
+    Some(format!(
+        "it is in {}, where keys are kept. This folder is never opened, and /add-dir does not open it either: do not ask the user to add it, and do not work around this. Say in one line that you can't read it.{chats}",
+        secret.display()
+    ))
 }
 
 /// Pure — unit-tested. Why a folder is never added, or None when it may be:
@@ -372,6 +389,22 @@ mod tests {
         assert_eq!(refuse_folder(&home.join("projects/shell-coach"), &never), None);
         assert_eq!(refuse_folder(&home.join("projects"), &never), None);
         assert_eq!(refuse_folder(Path::new("/tmp/work"), &never), None);
+    }
+
+    #[test]
+    fn a_path_where_keys_live_is_never_sent_to_add_dir() {
+        let home = Path::new("/Users/me");
+        let never = secret_folders(home);
+        for name in [".ssh/id_ed25519", ".gnupg/x", ".aws/credentials", ".kube/config", ".docker/config.json"] {
+            let why = never_reason(&home.join(name), &never).unwrap();
+            assert!(why.contains("never opened") && why.contains("do not ask"), "{why}");
+            assert!(!why.contains("past_chats"), "{why}");
+        }
+        let why = never_reason(&home.join(".config/rak/sessions/rak-1/chat.json"), &never).unwrap();
+        assert!(why.contains("/Users/me/.config/rak,") && why.contains("past_chats"), "{why}");
+        assert_eq!(never_reason(&home.join("projects/other/file.txt"), &never), None);
+        assert_eq!(never_reason(&home.join(".config/other"), &never), None);
+        assert_eq!(never_reason(home, &never), None, "the home folder itself gets the usual message");
     }
 
     #[cfg(unix)]

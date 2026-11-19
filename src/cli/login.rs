@@ -284,9 +284,18 @@ fn wait_for_callback(listener: &TcpListener, state: &str) -> Result<auth::Callba
             respond(&mut stream, "404 Not Found", "Not found.");
             continue;
         };
+        // A request that is not this sign-in's answer (another program, an
+        // old tab) is turned away and the wait goes on: only the browser
+        // rak opened knows this state.
+        if !auth::answers(&query, state) {
+            respond(&mut stream, "400 Bad Request", "This is not the sign-in rak is waiting for.");
+            continue;
+        }
         let outcome = auth::read_callback(&query, state);
         match &outcome {
-            Ok(_) => respond(&mut stream, "200 OK", "You are signed in. Close this tab and go back to rak in your terminal."),
+            Ok(_) => {
+                respond(&mut stream, "200 OK", "Almost done: rak finishes the sign-in in your terminal. Close this tab and go back to it.")
+            }
             Err(_) => respond(&mut stream, "400 Bad Request", "The sign-in did not finish. See rak in your terminal."),
         }
         return outcome;
@@ -370,13 +379,21 @@ mod tests {
                 stream.read_to_string(&mut answer).unwrap();
                 answer
             };
-            (get("/favicon.ico"), get("/auth/callback?code=abc&state=st&client_id=oaiapp_7"))
+            (
+                get("/favicon.ico"),
+                get("/auth/callback?code=stray&state=someone-elses"),
+                get("/auth/callback?code=stray"),
+                get("/auth/callback?code=abc&state=st&client_id=oaiapp_7"),
+            )
         });
         let callback = wait_for_callback(&listener, "st").unwrap();
         assert_eq!(callback, auth::Callback { code: "abc".into(), client_id: Some("oaiapp_7".into()) });
-        let (favicon, page) = browser.join().unwrap();
+        let (favicon, stray, stateless, page) = browser.join().unwrap();
         assert!(favicon.starts_with("HTTP/1.1 404"));
-        assert!(page.starts_with("HTTP/1.1 200 OK") && page.contains("You are signed in"));
+        // Requests that are not this sign-in's answer are turned away, and the wait goes on.
+        assert!(stray.starts_with("HTTP/1.1 400") && stray.contains("not the sign-in rak is waiting for"), "{stray}");
+        assert!(stateless.starts_with("HTTP/1.1 400"), "{stateless}");
+        assert!(page.starts_with("HTTP/1.1 200 OK") && page.contains("rak finishes the sign-in in your terminal"));
     }
 
     #[test]

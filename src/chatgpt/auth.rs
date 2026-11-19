@@ -323,6 +323,20 @@ pub struct Callback {
     pub client_id: Option<String>,
 }
 
+/// Pure — unit-tested. Whether a request to the callback path is the answer
+/// to this attempt: it carries this attempt's state. One with another state,
+/// or none, is not, and the wait for the real answer goes on. The exception
+/// is a refusal with no state at all, which is still reported, so a refused
+/// sign-in never looks like a browser that did not come back.
+pub fn answers(query: &str, state: &str) -> bool {
+    let pairs = parse_query(query);
+    let get = |name: &str| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty());
+    match get("state") {
+        Some(theirs) => theirs == state,
+        None => get("error").is_some(),
+    }
+}
+
 /// Pure — unit-tested. Reads the callback's query: the state must be this
 /// attempt's, an error stops it, and a code is needed.
 pub fn read_callback(query: &str, state: &str) -> Result<Callback, String> {
@@ -681,6 +695,11 @@ mod tests {
             .unwrap_err()
             .contains("server_error (try later)"));
         assert!(read_callback("state=st", "st").unwrap_err().contains("no code"));
+        // Whose answer a request is: this attempt's state, or a refusal that names none.
+        assert!(answers("code=abc&state=st", "st") && answers("error=access_denied&state=st", "st"));
+        assert!(!answers("code=abc&state=other", "st") && !answers("code=abc", "st") && !answers("", "st"));
+        assert!(!answers("error=access_denied&state=other", "st"));
+        assert!(answers("error=server_error", "st"), "a refusal with no state is still reported");
         assert_eq!(parse_query("a=1%zz&b"), [("a".to_string(), "1%zz".to_string()), ("b".to_string(), String::new())]);
     }
 

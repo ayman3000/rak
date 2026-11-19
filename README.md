@@ -35,13 +35,18 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.37** (2026-11-18)
+**v0.1.0-alpha.38** (2026-11-19)
 
-- **Every skill is a chat command.** `/sdd-plan add a login page` asks the agent to load that skill and follow it for your request. The `/` menu lists your skills after rak's own commands, and `/help` names them. The agent still picks a skill by itself when a task matches.
+- **A `--tools` list holds for helper agents too.** A tool you leave out of a run can no longer be reached through `delegate`, so `--tools` without `fetch_url` really is a run with no page fetching.
+- **No more dead end at rak's own folder.** When the agent tries to read where keys are kept (`~/.config/rak`, `~/.ssh` and the like), it is told the folder is never opened, and it stops sending you to `/add-dir`, which refuses those folders. For earlier chats it is pointed at `past_chats`.
+- **A folder that last used your ChatGPT plan** starts on the default, with a note, when you have signed out since.
+- **A very large GitHub repository** is no longer half-read when adding skills: rak asks for the skill's own folder, or says the repository is too large to list.
+- **Sign in with ChatGPT** ignores requests that are not the browser's answer, and a chat on the plan asks for the model list once, not twice.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.37:** every skill is a chat command: `/sdd-plan add a login page` asks the agent to load that skill and follow it for your request.
 - **alpha.36:** `rak skills add … -y` sums each skill up in a few lines, and a repository of skills costs GitHub two requests, not one more per skill.
 - **alpha.35:** add every skill in a GitHub repository (`rak skills add https://github.com/OWNER/REPO`), remove one from a chat (`/skills remove NAME`), and skill descriptions written over several lines are read whole.
 - **alpha.34:** a ChatGPT plan uses the prompt cache: on two real tasks the cached share went from 24% to 90% and from 1% to 84%.
@@ -80,7 +85,7 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
 ## Why rak
 
 <table>
-<tr><td><b>Small and light</b></td><td>One binary that starts at once. A short request used about <b>4 MB</b> of memory, against 357 MB for Hermes Agent on the same task (<a href="docs/benchmarks.md#head-to-head-with-hermes">measured</a>).</td></tr>
+<tr><td><b>Small and light</b></td><td>One binary of <b>under 5 MB</b> that starts at once. A short request uses about <b>18 MB</b> of memory on a Mac (measured on alpha.33); Hermes Agent used 357 MB in the <a href="docs/benchmarks.md#head-to-head-with-hermes">head-to-head</a>.</td></tr>
 <tr><td><b>Cheap per call</b></td><td>A short prompt and a lean tool set, so every model call sends less. On the same six tasks rak sent <b>314K</b> input tokens where Hermes Agent sent 1,660K.</td></tr>
 <tr><td><b>Any model</b></td><td>Sixteen providers by name, your ChatGPT plan by signing in, any OpenAI-compatible server by address, Claude through Anthropic's own API with prompt caching, and automatic fallback to another provider when one fails.</td></tr>
 <tr><td><b>Asks first</b></td><td>Every edit and command waits for your yes and shows exactly what will run. A no stops the request.</td></tr>

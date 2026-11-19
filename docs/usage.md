@@ -141,7 +141,7 @@ Started without a task, rak opens a chat:
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp`, `--no-skills`, `--no-memory`, `--no-notes` | Leave out MCP servers, skills, memory notes, or the after-request notes update. |
 | `--trust` | Use this folder's own `.rak/` settings and `.env` this run, as if trusted (see [Safety](safety.md)). |
-| `--tools LIST` | Only these tools, comma-separated (`--tools read_file,search_files,code_map`); MCP tools by their `server__tool` name. `--tools none` sends no tools at all: for a model that can't call tools, or a plain question for less (a one-word question measured 2,232 input tokens with every tool and 256 with none, kimi-k2.6:cloud). A name that matches no tool is said at the start. |
+| `--tools LIST` | Only these tools, comma-separated (`--tools read_file,search_files,code_map`); MCP tools by their `server__tool` name. `--tools none` sends no tools at all: for a model that can't call tools, or a plain question for less (a one-word question measured 2,232 input tokens with every tool and 256 with none, kimi-k2.6:cloud). A name that matches no tool is said at the start. The list holds for helper agents too: a tool left out is not reachable through `delegate`. |
 | `-c`, `--continue` | Continue this folder's last chat (`rak -c "and now the tests"`). |
 | `-C`, `--cwd DIR` | The project folder. |
 | `--max-turns N` | Model calls allowed per request. Default: 30 in a chat (where you can say "go on"), no limit for one request; `0` for no limit. |

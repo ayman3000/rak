@@ -12,6 +12,41 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.38
+
+Five findings from a review of alpha.37 on the laptop, one dead end met on
+another machine, and helpers following `--tools`.
+
+- **Helpers follow `--tools`** (session::tool_allowed, Helpers::make): a
+  helper's tools are cut by the same list as the run's. Before, a helper
+  kept fetch_url whatever the list said. Proven against a stand-in server:
+  with fetch_url left out, the helper's request carried list_dir,
+  search_files, code_map, read_file; with it in, fetch_url too.
+- **Paths where keys live** (tools::never_reason): block_reason told the
+  model to ask for /add-dir for every outside path, and /add-dir refuses
+  ~/.config/rak, ~/.ssh, ~/.gnupg, ~/.aws, ~/.kube and ~/.docker. Now those
+  get their own message (never opened, do not ask to add it), and
+  ~/.config/rak also names past_chats. Seen on a Linux machine: a model
+  asked twice for `/add-dir ~/.config/rak` to read the last chat.
+- **A folder pick of ChatGPT while signed out** (start_at_pick) falls back
+  to the default with a note, as a missing key does.
+- **GitHub's `truncated` flag** (fetch::tree, cut_short, placed_under): a
+  repository too large to list in one request is an error that asks for the
+  skill's folder; a skill folder in one is listed by its own tree
+  (`git/trees/BRANCH:FOLDER`, checked against anthropics/skills).
+- **One model-list fetch per ChatGPT model object** (models_once): the
+  context window and "sees images" each fetched it before.
+- **Sign-in callback** (auth::answers): a request with another state, or
+  none, gets a 400 and the wait goes on; a refusal with no state is still
+  reported. The browser page no longer says "signed in" before the code is
+  exchanged.
+- README: the Features table said "about 4 MB of memory", an alpha.1
+  figure; now 18 MB on a Mac (alpha.33) and the binary as under 5 MB.
+- The leaderboard command was run whole against the stand-in server: -y,
+  --json, --log, --base-url, -m, --context, --max-tokens, --time-limit and
+  --tools are all accepted, RAK_API_KEY is sent as the bearer token,
+  max_tokens arrives as given, and no effort is sent.
+
 ### In v0.1.0-alpha.37
 
 - **Every skill is a chat command**: `/sdd-plan add login` sends "Use the
@@ -465,6 +500,78 @@ that ships files (anthropics/skills pdf) came with its 11 files.
 - [x] release.yml: upload-artifact v7, download-artifact v8 (Node 24), done
       2026-11-13; confirmed by the alpha.9 release build.
 - [ ] Announce rak once the providers people will try first are confirmed.
+
+### 4. A mic: speaking a request (planned 2026-11-18, not started)
+
+The aim: say a request instead of typing it, in a chat. Asked for on
+2026-11-18; set down here for later. Nothing is built.
+
+**What works today with no code.** macOS dictation types into rak's prompt
+like a keyboard: the mic key, or Fn twice, in the terminal. Arabic and
+English. Try this first: if it is enough, rak needs no mic of its own, and
+the README can say so in one line.
+
+**Why it is not a small feature.** Two separate parts, neither in rak now:
+
+1. *Recording.* A terminal program does not get the mic for free.
+   - Bundled audio code (the cpal crate: CoreAudio on macOS, ALSA on
+     Linux) makes the binary bigger and breaks the static musl Linux
+     builds, which have no ALSA to link. Not this way.
+   - Calling a recorder that is already installed: `ffmpeg` (macOS:
+     `-f avfoundation -i ":0"`; Linux: `-f pulse -i default` or `-f alsa`),
+     or `sox`/`rec`, or `arecord` on Linux. No new dependency in rak; said
+     plainly when none is found. This way.
+   - macOS asks once for microphone permission, for the terminal app, not
+     for rak.
+2. *Speech to text.* Needs a speech model.
+   - A provider with a transcription endpoint and its own key: Groq
+     (whisper-large-v3, OpenAI-shaped `POST /audio/transcriptions`) and
+     OpenAI (`OPENAI_API_KEY`). One multipart upload; ureq has no
+     multipart helper, so the body is built by hand (small).
+   - Not the ChatGPT plan: OpenAI's Sign in with ChatGPT docs say the
+     transcription API is not supported on that route.
+   - A local model (whisper.cpp) is a download of hundreds of MB and a
+     program to install: only as "a command of your own", below.
+
+**The design to build, lightest first.**
+
+- `/mic` in a chat: records until Enter (or Ctrl-C to drop it), shows
+  `Listening… 4s` on the Thinking line's thread, transcribes, and puts the
+  text **in the prompt for the person to read and edit**, never sent on
+  its own: a misheard word must not run a command.
+- Settings, in the key file like the vision model's:
+  `RAK_STT_PROVIDER` (groq or openai), `RAK_STT_MODEL`, and
+  `RAK_STT_COMMAND` for a command of the person's own that takes a WAV
+  path and prints text (whisper.cpp, a script). With none set, `/mic` says
+  what to set and points at macOS dictation.
+- `RAK_MIC_COMMAND` for a recorder of the person's own; otherwise the
+  first of ffmpeg, rec, arecord found on PATH.
+- The recording is a temporary 16 kHz mono WAV, deleted after
+  transcription; nothing is kept, logged or sent anywhere but the chosen
+  transcription provider. Said in docs/safety.md.
+- Language: left to the model to detect; `RAK_STT_LANGUAGE` (ar, en) to
+  fix it when detection is wrong.
+
+**Where the code goes.** `src/stt.rs` (lib: the multipart request, reading
+the answer, the settings; pure parts unit-tested), `src/cli/mic.rs` (the
+recorder process, the Listening line, Enter/Ctrl-C), a `/mic` row in
+commands.rs, the settings in keys_command's KNOWN and .env.example.
+
+**To check before building.**
+- That Groq's and OpenAI's transcription endpoints still take a WAV in a
+  multipart form and answer `{"text": …}` (read their docs then).
+- Stopping ffmpeg cleanly so the WAV header is written: SIGINT to its
+  process group, not SIGKILL.
+- How it behaves over SSH (no mic there: say so, don't hang).
+- Arabic quality on the chosen model, with real speech.
+
+**Later, only if /mic is used:** a push-to-talk key in the editor; spoken
+answers (text to speech) are a separate idea and not planned.
+
+**Done when:** `/mic` on macOS and Linux turns a spoken sentence into text
+in the prompt with Groq and with a local command; no recorder and no
+provider each give a one-line answer saying what to set; the binary's size
+and its dependency list are unchanged.
 
 ## From maki (github.com/tontinton/maki, read 2026-11-14)
 

@@ -159,6 +159,12 @@ pub fn start_at_pick(o: &mut Options, pick: &super::settings::Pick, has_key: &dy
     if o.provider.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(&provider.name)) {
         return None;
     }
+    if provider.chatgpt && !has_key(providers::CHATGPT_SIGN_IN) {
+        return Some(format!(
+            "this folder's last pick was {}, but you are not signed in to ChatGPT now; starting with the default. /provider {} signs in.",
+            provider.label, provider.name
+        ));
+    }
     if let Some(name) = provider.key.as_ref().filter(|name| !has_key(name)) {
         return Some(format!(
             "this folder's last pick was {}, but {name} is not set now; starting with the default. /provider {} asks for the key.",
@@ -369,7 +375,11 @@ pub fn run(mut o: Options) -> i32 {
     o.provider = o.provider.or_else(|| key("RAK_PROVIDER"));
     o.base_url = o.base_url.or_else(|| key("RAK_BASE_URL"));
     if let Some(pick) = pick.as_ref().filter(|_| !named) {
-        if let Some(note) = start_at_pick(&mut o, pick, &|name| key(name).is_some()) {
+        let is_set = |name: &str| match name {
+            providers::CHATGPT_SIGN_IN => rak::chatgpt::auth::status().is_some(),
+            _ => key(name).is_some(),
+        };
+        if let Some(note) = start_at_pick(&mut o, pick, &is_set) {
             eprintln!("rak: {note}");
         }
     }
@@ -471,7 +481,7 @@ pub fn run(mut o: Options) -> i32 {
     // Skills: the project's own (.rak/skills) win over the user's (~/.config/rak/skills).
     let skill_folders = rak::skills::folders(&ctx.cwd, config_dir().as_deref());
     // --tools: only the tools named there (none: no tools at all).
-    let allowed = |name: &str| o.tools.as_ref().is_none_or(|list| list.iter().any(|n| n == name));
+    let allowed = |name: &str| tool_allowed(o.tools.as_deref(), name);
     // Plus the ones built into rak for this system; --no-skills leaves all of
     // them out, and so does a --tools list without use_skill.
     let skills_on = !o.no_skills && allowed("use_skill");
@@ -807,6 +817,12 @@ fn update_notes(s: &mut Session, task: &str, answer: &str, outcome: &Outcome) {
 /// delegate's side on the chat's thread: makes each helper on the chat's
 /// current model, shows its steps indented, and asks the fallback questions
 /// for it (each helper has its own place in the chain).
+/// Pure — unit-tested. Whether a `--tools` list keeps this tool: no list
+/// keeps every tool, and an empty one (`--tools none`) keeps none.
+pub fn tool_allowed(list: Option<&[String]>, name: &str) -> bool {
+    list.is_none_or(|list| list.iter().any(|n| n == name))
+}
+
 struct Helpers {
     current: Rc<RefCell<(Backend, String, usize)>>,
     effort: Rc<RefCell<(Option<String>, bool)>>,
@@ -827,6 +843,9 @@ impl rak::delegate::Host for Helpers {
         if let Some(tavily) = &self.tavily {
             tools.push(Box::new(WebSearch::new(tavily.clone())));
         }
+        // A --tools list holds for a helper too: a tool left out of the run
+        // is not reachable through delegate.
+        tools.retain(|t| tool_allowed(self.o.tools.as_deref(), t.name()));
         let mut system_prompt = system_prompt(&self.ctx.cwd, true, self.notes.as_deref());
         system_prompt.push_str(rak::delegate::HELPER_NOTE);
         rak::delegate::Helper {
@@ -1174,6 +1193,21 @@ mod tests {
     }
 
     #[test]
+    fn a_tools_list_keeps_only_what_it_names_and_a_helpers_tools_follow_it() {
+        let list = vec!["read_file".to_string(), "delegate".to_string()];
+        assert!(tool_allowed(None, "fetch_url"), "no list: every tool");
+        assert!(tool_allowed(Some(&list), "read_file") && !tool_allowed(Some(&list), "fetch_url"));
+        assert!(!tool_allowed(Some(&[]), "read_file"), "--tools none");
+        // What a helper is given, cut the same way: fetch_url is gone when the run left it out.
+        let ctx = Ctx::new(&std::env::temp_dir(), false);
+        let names = |list: Option<&[String]>| -> Vec<String> {
+            rak::tools::reading_tools(&ctx).iter().map(|t| t.name().to_string()).filter(|n| tool_allowed(list, n)).collect()
+        };
+        assert!(names(None).contains(&"fetch_url".to_string()));
+        assert_eq!(names(Some(&list)), ["read_file"]);
+    }
+
+    #[test]
     fn a_chat_starts_at_the_folders_pick_unless_its_key_is_gone() {
         use super::super::settings::Pick;
         let pick = |provider: &str| Pick { provider: Some(provider.into()), model: Some("m".into()), effort: None };
@@ -1195,6 +1229,14 @@ mod tests {
         let mut o = options(None, false, None, false);
         assert_eq!(start_at_pick(&mut o, &pick("ollama"), &|_| false), None);
         assert_eq!(o.provider.as_deref(), Some("ollama"));
+        // The ChatGPT plan has no key: it is the sign-in that may be gone.
+        let mut o = options(Some("openrouter"), false, None, false);
+        let note = start_at_pick(&mut o, &pick("chatgpt"), &|name| name != providers::CHATGPT_SIGN_IN).unwrap();
+        assert!(note.contains("not signed in") && note.contains("/provider chatgpt"), "{note}");
+        assert_eq!((o.provider.as_deref(), o.provider_flag), (Some("openrouter"), false));
+        let mut o = options(Some("openrouter"), false, None, false);
+        assert_eq!(start_at_pick(&mut o, &pick("chatgpt"), &|_| true), None);
+        assert_eq!(o.provider.as_deref(), Some("chatgpt"));
         let mut o = options(Some("openrouter"), false, None, false);
         assert_eq!(start_at_pick(&mut o, &pick("https://elsewhere/v1"), &|_| true), None);
         assert_eq!(o.provider.as_deref(), Some("openrouter"), "an address in the file moves nothing");

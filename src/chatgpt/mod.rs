@@ -57,6 +57,9 @@ pub struct ChatGpt {
     /// same prompt cache (see the top of this file).
     session: String,
     clients: crate::stall::Clients,
+    /// The account's model list, asked for once: the context window and
+    /// "can it see images" are both read from it at every chat start.
+    listed: std::sync::OnceLock<Value>,
 }
 
 impl ChatGpt {
@@ -73,6 +76,7 @@ impl ChatGpt {
             fixed_token: None,
             session: auth::random_token(),
             clients: Default::default(),
+            listed: Default::default(),
         }
     }
 
@@ -140,6 +144,15 @@ impl ChatGpt {
             },
             other => other,
         }
+    }
+
+    /// The model list as first fetched; a failed fetch is not kept.
+    fn models_once(&self) -> Option<Value> {
+        if let Some(listed) = self.listed.get() {
+            return Some(listed.clone());
+        }
+        let fetched = self.models().ok()?;
+        Some(self.listed.get_or_init(|| fetched).clone())
     }
 
     fn models(&self) -> Result<Value, String> {
@@ -229,12 +242,12 @@ impl Model for ChatGpt {
     }
 
     fn context_window(&self) -> Option<usize> {
-        context_of(&self.models().ok()?, &self.model)
+        context_of(&self.models_once()?, &self.model)
     }
 
     /// From the account's model list (`input_modalities`), else from the name.
     fn sees_images(&self) -> Option<bool> {
-        self.models().ok().and_then(|body| sees_of(&body, &self.model)).or_else(|| crate::provider::known_to_see(&self.model))
+        self.models_once().and_then(|body| sees_of(&body, &self.model)).or_else(|| crate::provider::known_to_see(&self.model))
     }
 }
 
@@ -781,6 +794,24 @@ mod tests {
             seen
         });
         (url, handle)
+    }
+
+    #[test]
+    fn the_model_list_is_asked_for_once_however_often_it_is_read() {
+        let list = json!({ "models": [
+            { "slug": "gpt-once", "visibility": "list", "context_window": 400_000, "input_modalities": ["text", "image"] },
+        ]})
+        .to_string();
+        // One answer only: a second request would find nothing listening.
+        let (url, handle) = server(vec![(200, list)]);
+        let mut m = ChatGpt::new(&url, "gpt-once");
+        m.fixed_token = Some("tok-1".into());
+        assert_eq!(m.context_window(), Some(400_000));
+        assert_eq!(m.sees_images(), Some(true));
+        assert_eq!(m.context_window(), Some(400_000));
+        let seen = handle.join().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].0.starts_with("GET /v1/models "), "{}", seen[0].0);
     }
 
     fn sse(events: &[Value]) -> String {

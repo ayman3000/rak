@@ -72,14 +72,14 @@ pub fn github_folder(url: &str) -> Option<(String, String, String, String)> {
 /// API two requests, not one per skill (it allows 60 an hour unsigned).
 pub fn github_files(url: &str) -> Result<Vec<(String, String)>, String> {
     let Some((owner, repo, branch, folder)) = github_folder(url) else { return Ok(Vec::new()) };
-    let files = files_in(&tree(&owner, &repo, &branch)?, &folder);
+    let files = files_in(&tree(&owner, &repo, &branch, &folder)?, &folder);
     if files.len() > MAX_FILES {
         return Err(format!("the folder has over {MAX_FILES} files, too many for a skill"));
     }
     Ok(files
         .into_iter()
         .map(|inside| {
-            let path = format!("{folder}/{inside}").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F");
+            let path = url_path(&format!("{folder}/{inside}"));
             (inside, format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"))
         })
         .collect())
@@ -102,20 +102,71 @@ pub fn files_in(tree: &serde_json::Value, folder: &str) -> Vec<String> {
     files
 }
 
-/// A repository's whole file list at a branch, from GitHub's tree API; kept
-/// for the rest of the run.
-fn tree(owner: &str, repo: &str, branch: &str) -> Result<serde_json::Value, String> {
+/// A repository's file list at a branch, from GitHub's tree API; kept for
+/// the rest of the run. GitHub cuts the list of a very large repository
+/// short and says so: then only the files under `under` are asked for, and
+/// with no folder to narrow to it is an error, never a list with skills
+/// silently missing.
+fn tree(owner: &str, repo: &str, branch: &str, under: &str) -> Result<serde_json::Value, String> {
     static TREES: std::sync::Mutex<Vec<(String, serde_json::Value)>> = std::sync::Mutex::new(Vec::new());
-    let key = format!("{owner}/{repo}@{branch}");
-    if let Some((_, tree)) = TREES.lock().unwrap().iter().find(|(k, _)| *k == key) {
-        return Ok(tree.clone());
+    let cached = |key: &str, url: &str, what: &str| -> Result<serde_json::Value, String> {
+        if let Some((_, tree)) = TREES.lock().unwrap().iter().find(|(k, _)| k == key) {
+            return Ok(tree.clone());
+        }
+        let tree = github_json(url, what)?;
+        TREES.lock().unwrap().push((key.to_string(), tree.clone()));
+        Ok(tree)
+    };
+    let api = format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}");
+    let whole = cached(&format!("{owner}/{repo}@{branch}"), &format!("{api}?recursive=1"), &format!("{owner}/{repo} at {branch}"))?;
+    if !cut_short(&whole) {
+        return Ok(whole);
     }
-    let tree = github_json(
-        &format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"),
-        &format!("{owner}/{repo} at {branch}"),
+    let too_big = |place: &str| {
+        format!(
+            "{place} has more files than GitHub lists in one request, so skills could be missed; \
+             give the address of the skill's own folder (https://github.com/{owner}/{repo}/tree/{branch}/FOLDER)"
+        )
+    };
+    if under.is_empty() {
+        return Err(too_big(&format!("{owner}/{repo}")));
+    }
+    let part = cached(
+        &format!("{owner}/{repo}@{branch}:{under}"),
+        &format!("{api}:{}?recursive=1", url_path(under)),
+        &format!("{under} in {owner}/{repo} at {branch}"),
     )?;
-    TREES.lock().unwrap().push((key, tree.clone()));
-    Ok(tree)
+    if cut_short(&part) {
+        return Err(too_big(&format!("{under} in {owner}/{repo}")));
+    }
+    Ok(placed_under(&part, under))
+}
+
+fn url_path(path: &str) -> String {
+    path.replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F")
+}
+
+/// Pure — unit-tested. Whether GitHub left files out of this list.
+pub fn cut_short(tree: &serde_json::Value) -> bool {
+    tree["truncated"] == true
+}
+
+/// Pure — unit-tested. A folder's own file list with every path written from
+/// the repository's top, as the whole repository's list has them.
+pub fn placed_under(tree: &serde_json::Value, under: &str) -> serde_json::Value {
+    let entries: Vec<serde_json::Value> = tree["tree"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            if let Some(path) = entry["path"].as_str().map(|path| format!("{under}/{path}")) {
+                entry["path"] = serde_json::Value::String(path);
+            }
+            entry
+        })
+        .collect();
+    serde_json::json!({ "tree": entries })
 }
 
 /// Pure — unit-tested. A GitHub repository's own page → (owner, repo): the
@@ -193,7 +244,7 @@ pub fn expand(source: &str) -> Result<Vec<String>, String> {
         (None, Some(parts)) => parts,
         (None, None) => return Ok(vec![source.to_string()]),
     };
-    let tree = tree(&owner, &repo, &branch)?;
+    let tree = tree(&owner, &repo, &branch, &under)?;
     let folders = skill_folders(&tree, &under);
     // The folder is a skill itself: as before.
     if !under.is_empty() && folders.contains(&under) {
@@ -337,6 +388,24 @@ mod tests {
         ]});
         assert_eq!(files_in(&tree, "skills/pdf"), ["forms.md", "scripts/fill.py"]);
         assert!(files_in(&tree, "skills/none").is_empty());
+    }
+
+    #[test]
+    fn a_file_list_github_cut_short_is_noticed_and_a_folders_own_list_fits_in() {
+        use serde_json::json;
+        assert!(cut_short(&json!({ "truncated": true, "tree": [] })));
+        assert!(!cut_short(&json!({ "truncated": false, "tree": [] })));
+        assert!(!cut_short(&json!({ "tree": [] })));
+        // A folder's own list has paths from that folder; placed, it reads like the whole repository's.
+        let part = json!({ "truncated": false, "tree": [
+            { "path": "SKILL.md", "type": "blob" },
+            { "path": "scripts", "type": "tree" },
+            { "path": "scripts/fill.py", "type": "blob" },
+        ]});
+        let placed = placed_under(&part, "skills/pdf");
+        assert_eq!(files_in(&placed, "skills/pdf"), ["scripts/fill.py"]);
+        assert_eq!(skill_folders(&placed, "skills/pdf"), ["skills/pdf"]);
+        assert!(!cut_short(&placed));
     }
 
     #[test]
