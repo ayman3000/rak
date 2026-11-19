@@ -186,6 +186,9 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
                 color
             )
         );
+        if let Some(text) = s.next_line.take() {
+            editor.start_with(&text);
+        }
         let Some(mut line) = editor.read_line("❯ ", Style::C45, true) else { break };
         // A trailing backslash continues the request on the next line.
         while line.ends_with('\\') {
@@ -214,6 +217,45 @@ pub fn run(s: &mut Session, editor: &mut Editor) {
 }
 
 /// A "/" command for each skill the agent can load in this chat.
+/// Pure — unit-tested. What the prompt starts with once a skill is picked:
+/// its command and a space, ready for the request. A skill with no command
+/// of its own (its name is one of rak's commands) is asked for in words.
+pub fn skill_start(name: &str, commands: &[(menu::Command, String)]) -> String {
+    match commands.iter().find(|(_, skill)| skill == name) {
+        Some((command, _)) => format!("{} ", command.name),
+        None => format!("Use the skill \"{name}\": "),
+    }
+}
+
+/// `/skills`: the skills as a list to pick from. Nobody remembers their
+/// names, so picking one starts the next prompt with its command and the
+/// person types only the request. Without a terminal to draw on, or with no
+/// skills, the plain list.
+fn pick_skill(s: &mut Session, color: bool) {
+    use std::io::IsTerminal;
+    let skills: Vec<(String, String, bool)> =
+        s.skills.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone(), skill.builtin)).collect();
+    if skills.is_empty() || !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        skills_command::print_list(&s.skills.read().unwrap(), color);
+        return;
+    }
+    let dim = |text: &str| paint(color, Style::Dim, text);
+    println!("{}", dim("Pick a skill with ↑/↓ and Enter (type to filter, Esc to leave). You then type your request."));
+    let choices: Vec<Choice> =
+        skills.iter().map(|(name, description, _)| Choice { name: name.clone(), note: description.clone(), dim: false }).collect();
+    match picker::pick(&choices, None, false, color) {
+        Picked::Item(i) => {
+            let start = skill_start(&skills[i].0, &skill_commands(s));
+            println!("{}", dim(&format!("{}— type what you want done, or press Enter to run it as it is.", start)));
+            s.next_line = Some(start);
+        }
+        _ => println!(
+            "{}",
+            dim("No skill picked. /skills list shows where each one is kept; /skills add URL and /skills remove NAME change them.")
+        ),
+    }
+}
+
 fn skill_commands(s: &Session) -> Vec<(menu::Command, String)> {
     let skills: Vec<(String, String)> =
         s.skills.read().unwrap().iter().map(|skill| (skill.name.clone(), skill.description.clone())).collect();
@@ -791,7 +833,8 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 }
             }
             ("remove" | "rm", _) => println!("{}", dim("usage: /skills remove NAME")),
-            _ => skills_command::print_list(&s.skills.read().unwrap(), color),
+            ("list" | "ls", _) => skills_command::print_list(&s.skills.read().unwrap(), color),
+            _ => pick_skill(s, color),
         },
         "notes" => {
             let snapshot = rak::notes::read(&s.cwd);
@@ -909,6 +952,20 @@ fn resume(s: &mut Session, args: &str, color: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_skill_starts_the_prompt_with_its_command() {
+        let skills = vec![
+            ("sdd-plan".to_string(), "Plans.".to_string()),
+            ("Write a skill".to_string(), "Makes skills.".to_string()),
+            ("Help".to_string(), "Named like a command.".to_string()),
+        ];
+        let commands = menu::skill_commands(&skills, commands::KNOWN);
+        assert_eq!(skill_start("sdd-plan", &commands), "/sdd-plan ");
+        assert_eq!(skill_start("Write a skill", &commands), "/write-a-skill ");
+        // Its name is one of rak's own commands, so it has none: asked for in words.
+        assert_eq!(skill_start("Help", &commands), "Use the skill \"Help\": ");
+    }
 
     #[test]
     fn the_notes_are_offered_once_in_a_project_that_has_none() {

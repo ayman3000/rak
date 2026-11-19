@@ -310,6 +310,9 @@ pub struct Editor {
     history_file: Option<PathBuf>,
     commands: Vec<Command>,
     color: bool,
+    /// Text the next line starts with (a skill picked from /skills), for the
+    /// person to finish and send.
+    starts_with: Option<String>,
 }
 
 impl Editor {
@@ -319,7 +322,12 @@ impl Editor {
             .and_then(|f| std::fs::read_to_string(f).ok())
             .map(|text| text.lines().filter(|l| !l.is_empty()).map(decode_entry).collect())
             .unwrap_or_default();
-        Editor { history, history_file, commands, color }
+        Editor { history, history_file, commands, color, starts_with: None }
+    }
+
+    /// The next line read begins with this text, the cursor after it.
+    pub fn start_with(&mut self, text: &str) {
+        self.starts_with = Some(text.to_string());
     }
 
     /// The "/" menu's commands from here on (the skills come and go in a chat).
@@ -358,6 +366,9 @@ impl Editor {
         let _ = out.write_all(b"\x1b[?2004h"); // pasted text arrives marked as a paste
 
         let mut buffer = Buffer::default();
+        if let Some(text) = self.starts_with.take() {
+            buffer.set(&text);
+        }
         let mut row = 0;
         let mut selected = 0;
         let mut menu_for = String::new();

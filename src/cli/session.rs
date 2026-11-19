@@ -53,6 +53,8 @@ pub struct Session {
     pub mcp_summary: Option<String>,
     pub mcp_problems: Vec<String>,
     pub server_of: Rc<RefCell<std::collections::HashMap<String, String>>>,
+    /// What the next prompt starts with: a skill picked from /skills, waiting for its request.
+    pub next_line: Option<String>,
     /// After a chat is continued: what is still allowed, or that it lapsed. None: nothing was.
     pub continued_note: Option<String>,
     /// What the person allowed without asking (A, a, s): saved with the chat.
@@ -764,6 +766,7 @@ pub fn run(mut o: Options) -> i32 {
         mcp_problems,
         server_of,
         continued_note: None,
+        next_line: None,
         granted,
         mcp_pending,
         fresh_tools,

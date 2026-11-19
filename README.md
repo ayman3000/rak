@@ -36,15 +36,15 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.43** (2026-11-19)
+**v0.1.0-alpha.44** (2026-11-19)
 
-- **The first chat in a project offers to set up its notes.** rak says what the notes are and asks once; Enter starts it, `n` skips it for good. Before, you had to know about `/init`.
-- **A continued chat remembers what you allowed.** If you answered `A` (everything), `a` (a tool) or `s` (a server), then `rak -c` or `/resume` picks that up, says so in one line, and shows "runs without asking" in the status line. `/yes` turns asking back on.
-- **It expires.** What you allowed lasts 24 hours from when you first allowed it; after that a continued chat says so and asks again. `RAK_ALLOW_HOURS` in `~/.config/rak/.env` changes the length, and `0` means a continued chat always asks.
+- **Pick a skill from a list.** `/skills` now shows your skills to choose from with ↑/↓ and Enter (type to filter). The prompt then starts with that skill's command, and you type only what you want done. No names to remember.
+- `/skills list` is the old list, with where each skill is kept.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.43:** the first chat in a project offers to set up its notes; a chat continued with `rak -c` remembers what you allowed (`A`, `a`, `s`) for 24 hours, says so, and `RAK_ALLOW_HOURS` changes the length.
 - **alpha.42:** a key pressed early can no longer answer an approval question, and an answer rak doesn't recognise is asked about again where it used to count as a no. Update if you use an earlier release.
 - **alpha.41:** [tools of your own](#make-your-own-tools): say "I need a tool that …" or type `/make-tool`; rak writes a small script, shows it, and asks before saving. Keys stay out of scripts (`/key NAME`), and `/tools remove NAME` deletes one.
 - **alpha.40:** add an MCP server from its page: `rak mcp add https://github.com/…` reads the JSON, shows what will run and asks; `rak mcp add` alone takes pasted JSON or three questions; `/mcp add` does it inside a chat.

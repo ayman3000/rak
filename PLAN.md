@@ -12,6 +12,20 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.44
+
+- **`/skills` is a list to pick from** (chat::pick_skill, skill_start;
+  asked for 2026-11-19: "users don't remember skill names, so why not
+  select the skill from here and continue prompting"). The picker rak
+  already uses for /model: ↑/↓, Enter, type to filter, Esc. A pick sets
+  what the next prompt starts with (Editor::start_with, Session::next_line):
+  the skill's command and a space, so the person types only the request,
+  or Enter alone to run it. A skill with no command of its own starts
+  "Use the skill "NAME": ". `/skills list` is the old list with files; with
+  no terminal or no skills /skills prints that list as before.
+  Tried in a scratch chat: /skills, ↓, Enter gave "❯ /make-tool ", and the
+  typed request ran.
+
 ### In v0.1.0-alpha.43
 
 Two requests from 2026-11-19: "users may not be aware of /init" and "if
