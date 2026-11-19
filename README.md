@@ -14,6 +14,7 @@
   <a href="#whats-new">What's new</a> ·
   <a href="#install">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#make-your-own-tools">Your own tools</a> ·
   <a href="#features">Features</a> ·
   <a href="#providers">Providers</a> ·
   <a href="#benchmarks">Benchmarks</a> ·
@@ -83,6 +84,41 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
   8 turns · 8 tool calls · 12127 tokens in · 653 out
 ```
 
+## Make your own tools
+
+Tell rak what you need, in plain words. It writes the tool, shows you the whole script, and asks before saving. From your next message on, the agent can use it, in this chat and every later one.
+
+```
+❯ /make-tool count the words in a text, and how many are unique
+
+? allow save_tool "word_count" (python) for every project:
+    Count the total words and unique words in a given text.
+    runs without asking (marked as changing nothing)
+    and is run once now with {"text":"Hello world hello"}
+    │ import json, sys, re
+    │ args = json.load(sys.stdin)
+    │ words = re.findall(r"\b\w+\b", args.get("text", "").lower())
+    │ print(json.dumps({"total_words": len(words), "unique_words": len(set(words))}))
+  [y]es  [n]o  [a]lways for save_tool  [A] everything this session › y
+  ✓ Saved the tool word_count to ~/.config/rak/tools/word_count.py. …
+Your tool word_count is ready: it runs without asking. /tools remove word_count deletes it.
+
+❯ Call word_count on this text: the cat and the hat
+→ word_count text=the cat and the hat
+  ✓ {"total_words": 5, "unique_words": 4}
+total_words: 5, unique_words: 4 ("the" appears twice).
+```
+
+<table>
+<tr><td><b>Nothing to install or rebuild</b></td><td>A tool is one small script, in Python's standard library by default. No compiler, no <code>pip install</code>, no plugin to build. rak stays one binary.</td></tr>
+<tr><td><b>You see it first</b></td><td>The whole script is shown before it is saved, with what it will be given and whether it runs once now. A tool that changes anything asks before every run.</td></tr>
+<tr><td><b>Keys stay out of scripts</b></td><td>A tool names the key it needs. You give it once with <code>/key BRAVE_API_KEY</code>, typed hidden. A tool gets only the keys it names, and a key it prints is hidden from the model.</td></tr>
+<tr><td><b>Yours to keep</b></td><td>One file per tool in <code>~/.config/rak/tools</code>, or <code>.rak/tools</code> to share with a project. <code>rak update</code> never touches them, and <code>/tools remove NAME</code> deletes one.</td></tr>
+<tr><td><b>No cost until used</b></td><td>Nothing starts with rak. A tool's script runs only when the agent calls it, and a broken tool breaks only itself.</td></tr>
+</table>
+
+Ask in plain words ("I need a tool that converts CSV to JSON") or type `/make-tool`. The details, the file format and how to write one by hand are in [docs/tools.md](docs/tools.md#tools-of-your-own).
+
 ## Why rak
 
 <table>
@@ -90,6 +126,7 @@ All 3 tests pass. I fixed two bugs in `calc.py`: …
 <tr><td><b>Cheap per call</b></td><td>A short prompt and a lean tool set, so every model call sends less. On the same six tasks rak sent <b>314K</b> input tokens where Hermes Agent sent 1,660K.</td></tr>
 <tr><td><b>Any model</b></td><td>Sixteen providers by name, your ChatGPT plan by signing in, any OpenAI-compatible server by address, Claude through Anthropic's own API with prompt caching, and automatic fallback to another provider when one fails.</td></tr>
 <tr><td><b>Asks first</b></td><td>Every edit and command waits for your yes and shows exactly what will run. A no stops the request.</td></tr>
+<tr><td><b>Grows with you</b></td><td>Ask for a tool and rak <a href="#make-your-own-tools">writes it for you</a>: one script you approve, usable from your next message, with nothing to install or rebuild.</td></tr>
 <tr><td><b>Remembers the project</b></td><td>Notes, roadmap and journal in a plain <code>rak/</code> folder you can read and commit, loaded at the start of every session.</td></tr>
 <tr><td><b>Built for big codebases</b></td><td>A code map, line-range reads, a task list, parallel helper agents and context compaction keep it working when the project is too big to read whole.</td></tr>
 </table>
@@ -190,7 +227,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 
 ### Extends and embeds
 
-- **Tools of your own.** Ask for one in plain words, or type `/make-tool`: rak writes a small script, shows it, and asks before saving it. No rebuild and nothing to install, a key it needs stays in rak's key file, and `rak update` leaves your tools alone ([how it works](docs/tools.md#tools-of-your-own)).
+- **[Tools of your own](#make-your-own-tools):** ask for one and rak writes it, shows it and asks. One script per tool, keys kept out of the script, and `rak update` leaves them alone.
 - **MCP servers,** added from the JSON on a server's page, from the page's address (`rak mcp add https://github.com/…`), or by a few questions, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
 - **Scripts and CI:** `--json` output, `--log` of every step, clear exit codes, and progress on stderr so stdout holds only the answer.
 - **A Rust library:** the agent loop, tools and providers with no terminal code, for your own agent.
@@ -229,7 +266,7 @@ The tasks are easy: a perfect score says the pipeline works, not how rak ranks. 
 |---|---|
 | [Using rak](docs/usage.md) | Setup, the chat and its commands, every command-line option, exit codes |
 | [Providers and models](docs/providers.md) | The sixteen providers, signing in with ChatGPT, choosing a model, keys, fallback, prompt caching |
-| [Tools and large projects](docs/tools.md) | Every tool, the write check, working on big codebases |
+| [Tools and large projects](docs/tools.md) | Every tool, tools of your own, the write check, working on big codebases |
 | [Project notes and skills](docs/memory-and-skills.md) | The `rak/` folder, the gate, writing and adding skills |
 | [MCP servers](docs/mcp.md) | Adding a server from its page, its JSON or a few questions; approvals; large servers |
 | [Safety](docs/safety.md) | What asks first, folder trust, keys, the limits |
