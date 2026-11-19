@@ -47,7 +47,11 @@ pub fn banner(s: &Session) {
             })
             .chain(vision_note(s).map(|note| ("vision".to_string(), note)))
             .collect(),
-        tool_groups: welcome::group(&s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(), &s.mcp_servers),
+        tool_groups: welcome::group(
+            &s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(),
+            &s.mcp_servers,
+            &s.mcp_pending.as_ref().map(|pending| pending.names()).unwrap_or_default(),
+        ),
         tool_count: s.agent.tool_names().len(),
         warnings: s.mcp_problems.clone(),
     };
@@ -627,6 +631,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             }
         }
         "tools" => {
+            super::session::finish_mcp(s);
             let mut tools: Vec<_> = s.agent.tools().iter().collect();
             tools.sort_by_key(|t| t.name());
             for tool in tools {
@@ -639,6 +644,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             }
         }
         "mcp" => {
+            super::session::finish_mcp(s);
             if s.mcp_servers.is_empty() && s.mcp_problems.is_empty() {
                 println!("{}", dim("No MCP servers. Add one from the shell, then start rak again:"));
                 println!("{}", dim("  rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem ."));
@@ -650,7 +656,7 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                     paint(color, Style::Bold, server),
                     dim(&format!("{count} tool{}", if *count == 1 { "" } else { "s" }))
                 );
-                for tool in s.agent.tools().iter().filter(|t| s.server_of.get(t.name()) == Some(server)) {
+                for tool in s.agent.tools().iter().filter(|t| s.server_of.borrow().get(t.name()) == Some(server)) {
                     let gate = if tool.needs_approval() && !s.auto.get() { paint(color, Style::Yellow, " (asks)") } else { String::new() };
                     println!("    {}{gate}  {}", paint(color, Style::Cyan, tool.name()), dim(&cut(&one_line(tool.description(), 200), 70)));
                 }

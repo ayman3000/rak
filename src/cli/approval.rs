@@ -85,7 +85,9 @@ pub struct Prompter {
     pub auto: Rc<Cell<bool>>,
     pub stop: Stop,
     /// MCP tool name → its server.
-    pub server_of: HashMap<String, String>,
+    /// Shared with the session: servers still connecting when the chat
+    /// starts add their tools here later.
+    pub server_of: Rc<RefCell<HashMap<String, String>>>,
     /// Someone is at a terminal to answer.
     pub interactive: bool,
     pub color: bool,
@@ -98,8 +100,8 @@ pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
     let mut servers: HashSet<String> = HashSet::new();
     let mut everything = false;
     move |name, args| {
-        let server = p.server_of.get(name);
-        if p.auto.get() || everything || tools.contains(name) || server.is_some_and(|s| servers.contains(s)) {
+        let server: Option<String> = p.server_of.borrow().get(name).cloned();
+        if p.auto.get() || everything || tools.contains(name) || server.as_ref().is_some_and(|s| servers.contains(s)) {
             return Approval::Yes;
         }
         p.ui.borrow_mut().end_line();
@@ -107,7 +109,7 @@ pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
             eprintln!("  {name} needs approval and there's no terminal to ask — stopping (use -y to allow)");
             return Approval::No;
         }
-        eprint!("{}", paint(p.color, Style::Yellow, &question(name, args, server.map(String::as_str))));
+        eprint!("{}", paint(p.color, Style::Yellow, &question(name, args, server.as_deref())));
         let _ = std::io::stderr().flush();
         let mut typed = String::new();
         let _ = std::io::stdin().lock().read_line(&mut typed);
@@ -119,7 +121,7 @@ pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
             Answer::AlwaysTool => {
                 tools.insert(name.to_string());
             }
-            Answer::AlwaysServer => servers.extend(server.cloned()),
+            Answer::AlwaysServer => servers.extend(server),
             Answer::Everything => everything = true,
             Answer::No => return Approval::No,
         }

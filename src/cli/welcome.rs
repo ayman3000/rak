@@ -262,7 +262,7 @@ pub fn wrap(names: &[String], width: usize, max_lines: usize) -> Vec<String> {
 
 /// Groups tool names the way the panel shows them. MCP tools go under their
 /// server, as a count: one server alone can bring dozens.
-pub fn group(tools: &[&str], mcp_servers: &[(String, usize)]) -> Vec<(String, Vec<String>)> {
+pub fn group(tools: &[&str], mcp_servers: &[(String, usize)], connecting: &[String]) -> Vec<(String, Vec<String>)> {
     let known: [(&str, &[&str]); 5] = [
         ("files", &["list_dir", "search_files", "code_map", "read_file", "view_image", "edit_file", "apply_patch", "write_file"]),
         ("shell", &["run_shell"]),
@@ -283,9 +283,13 @@ pub fn group(tools: &[&str], mcp_servers: &[(String, usize)]) -> Vec<(String, Ve
         rest.sort();
         groups.push(("more".to_string(), rest.into_iter().map(str::to_string).collect()));
     }
-    if !mcp_servers.is_empty() {
-        let servers =
-            mcp_servers.iter().map(|(name, count)| format!("{name} ({count} tool{})", if *count == 1 { "" } else { "s" })).collect();
+    if !mcp_servers.is_empty() || !connecting.is_empty() {
+        let servers = mcp_servers
+            .iter()
+            .map(|(name, count)| format!("{name} ({count} tool{})", if *count == 1 { "" } else { "s" }))
+            // Still connecting as the panel is drawn: their tools join before the first request.
+            .chain(connecting.iter().map(|name| format!("{name} (connecting)")))
+            .collect();
         groups.push(("mcp".to_string(), servers));
     }
     groups
@@ -337,7 +341,7 @@ mod tests {
             mode: "asks before changes".into(),
             window: 262_144,
             notes: vec![("notes".into(), "AGENTS.md".into())],
-            tool_groups: group(&["list_dir", "search_files", "read_file", "write_file", "edit_file", "run_shell"], &[]),
+            tool_groups: group(&["list_dir", "search_files", "read_file", "write_file", "edit_file", "run_shell"], &[], &[]),
             tool_count: 6,
             warnings: vec![],
         }
@@ -422,7 +426,11 @@ mod tests {
 
     #[test]
     fn tools_are_grouped_and_unknown_ones_kept() {
-        let groups = group(&["run_shell", "read_file", "zap", "list_dir"], &[("docs".to_string(), 1), ("browser".to_string(), 26)]);
+        let groups = group(&["run_shell", "read_file", "zap", "list_dir"], &[("docs".to_string(), 1), ("browser".to_string(), 26)], &[]);
+        // Servers still connecting when the panel is drawn are named as such.
+        let waiting = group(&["read_file"], &[("docs".to_string(), 1)], &["browser".to_string()]);
+        assert_eq!(waiting.last().unwrap(), &("mcp".to_string(), vec!["docs (1 tool)".to_string(), "browser (connecting)".to_string()]));
+        assert_eq!(group(&["read_file"], &[], &["browser".to_string()]).last().unwrap().1, ["browser (connecting)"]);
         assert_eq!(groups[0], ("files".to_string(), vec!["list_dir".to_string(), "read_file".to_string()]));
         assert_eq!(groups[1].0, "shell");
         assert_eq!(groups[2], ("more".to_string(), vec!["zap".to_string()]));

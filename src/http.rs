@@ -13,7 +13,26 @@ use std::sync::{Arc, OnceLock};
 
 /// A ureq agent builder with rak's certificates; add timeouts and build.
 pub fn builder() -> ureq::AgentBuilder {
-    ureq::AgentBuilder::new().tls_config(tls_config())
+    ureq::AgentBuilder::new().tls_connector(Arc::new(WhenNeeded))
+}
+
+/// The certificates, read at the first HTTPS connection and not when a
+/// client is made: reading the system's takes about a tenth of a second on a
+/// Mac, and a chat makes its clients before it shows its prompt.
+struct WhenNeeded;
+
+impl ureq::TlsConnector for WhenNeeded {
+    fn connect(&self, dns_name: &str, io: Box<dyn ureq::ReadWrite>) -> Result<Box<dyn ureq::ReadWrite>, ureq::Error> {
+        tls_config().connect(dns_name, io)
+    }
+}
+
+/// Reads the certificates on a thread of its own, so the first request does
+/// not wait for them either. A chat calls it as it starts.
+pub fn warm_up() {
+    std::thread::spawn(|| {
+        tls_config();
+    });
 }
 
 fn tls_config() -> Arc<rustls::ClientConfig> {

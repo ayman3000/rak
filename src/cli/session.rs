@@ -52,7 +52,10 @@ pub struct Session {
     pub mcp_servers: Vec<(String, usize)>,
     pub mcp_summary: Option<String>,
     pub mcp_problems: Vec<String>,
-    pub server_of: std::collections::HashMap<String, String>,
+    pub server_of: Rc<RefCell<std::collections::HashMap<String, String>>>,
+    /// MCP servers still connecting: a chat shows its prompt first, and
+    /// `finish_mcp` brings their tools in before the first request.
+    pub mcp_pending: Option<mcp::Connecting>,
     /// Where chats are saved (`~/.config/rak/sessions`), this project's folder
     /// in it, and this chat's id.
     pub sessions_dir: Option<PathBuf>,
@@ -605,7 +608,19 @@ pub fn run(mut o: Options) -> i32 {
     // Tools from MCP servers join the built-in ones.
     let (listed, mut mcp_problems) = if o.no_mcp { (Vec::new(), Vec::new()) } else { mcp::load(&mcp_files(&ctx.cwd, trusted)) };
     let servers: Vec<mcp::ServerConfig> = listed.into_iter().map(|(server, _)| server).collect();
-    let mut connected = mcp::connect_all(&servers, &ctx.cwd, o.read_only, &stop);
+    // A chat shows its prompt first and connects behind it: a server started
+    // with npx takes most of a second. With a --tools list the servers'
+    // tool names are needed now, to say which names match nothing.
+    let behind = chat && o.tools.is_none() && !servers.is_empty();
+    let (mut connected, mcp_pending) = if behind {
+        (mcp::Connected::default(), Some(mcp::start(&servers, &ctx.cwd, o.read_only, &stop)))
+    } else {
+        (mcp::connect_all(&servers, &ctx.cwd, o.read_only, &stop), None)
+    };
+    if chat {
+        // The certificates, read while the person types their first request.
+        rak::http::warm_up();
+    }
     mcp_problems.append(&mut connected.problems);
     // Settings set twice in a .env file: shown with the MCP warnings.
     mcp_problems.extend(super::settings::key_notes());
@@ -663,11 +678,12 @@ pub fn run(mut o: Options) -> i32 {
     // Approvals: -y (or /yes) runs everything; otherwise ask at the terminal,
     // and with no terminal to ask, stop rather than let the model look for
     // another way.
+    let server_of = Rc::new(RefCell::new(std::mem::take(&mut connected.server_of)));
     agent.on_approval(approval::prompter(approval::Prompter {
         ui: ui.clone(),
         auto: auto.clone(),
         stop: stop.clone(),
-        server_of: connected.server_of.clone(),
+        server_of: server_of.clone(),
         interactive,
         color: err_color,
     }));
@@ -699,7 +715,8 @@ pub fn run(mut o: Options) -> i32 {
         mcp_servers: connected.servers,
         mcp_summary,
         mcp_problems,
-        server_of: connected.server_of,
+        server_of,
+        mcp_pending,
         sessions_dir: config_dir().map(|d| d.join("sessions")),
         project_key: rak::sessions::project_key(&ctx.cwd),
         chat_id: rak::sessions::new_id(),
@@ -994,7 +1011,35 @@ fn attach_images(s: &mut Session, task: &str) -> Result<(String, Vec<rak::tools:
     }
 }
 
+/// Brings in the MCP servers a chat started connecting behind its prompt:
+/// waits for them, adds their tools, and says what joined. Nothing when
+/// there are none pending. Called before a request and by /tools and /mcp.
+pub fn finish_mcp(s: &mut Session) {
+    let Some(pending) = s.mcp_pending.take() else { return };
+    if !pending.ready() {
+        s.ui.borrow_mut().progress(Some(Style::Dim), &format!("waiting for MCP: {}…", pending.names().join(", ")));
+    }
+    let mut connected = pending.finish();
+    let summary = connected.summary();
+    s.agent.defer(connected.to_defer());
+    s.agent.add_tools(std::mem::take(&mut connected.tools));
+    s.server_of.borrow_mut().extend(std::mem::take(&mut connected.server_of));
+    s.mcp_servers.append(&mut connected.servers);
+    let mut ui = s.ui.borrow_mut();
+    if let Some(summary) = &summary {
+        ui.progress(Some(Style::Dim), summary);
+    }
+    for problem in &connected.problems {
+        ui.progress(Some(Style::Yellow), problem);
+    }
+    drop(ui);
+    s.mcp_summary = summary;
+    s.mcp_problems.append(&mut connected.problems);
+    s.log.write(json!({ "event": "mcp", "servers": s.mcp_servers.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), "tools": s.agent.tool_names() }));
+}
+
 pub fn run_one(s: &mut Session, task: &str) -> Outcome {
+    finish_mcp(s);
     let started = Instant::now();
     let (usage_before, calls_before) = (s.agent.usage, s.agent.tool_calls);
     s.log.write(json!({ "event": "request", "text": task }));

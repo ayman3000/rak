@@ -12,6 +12,26 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.39
+
+- **A chat shows its prompt before the slow start-up work** (measured as
+  "time to first input": start rak in a pty with the terminal's own echo
+  off, type four letters at once, stop when rak shows them; median of 10
+  launches after a warm-up, Mac mini, 2026-11-19).
+  alpha.38: 811 ms with the chrome-devtools MCP server (npx), 127 ms with
+  --no-mcp. Now: 7.5 ms and 10 ms.
+  - Certificates (http::WhenNeeded, http::warm_up): the system's were read
+    when the first HTTP client was made, about 115 ms on a Mac. Now at the
+    first HTTPS connection, and a chat reads them on a thread as it starts.
+  - MCP servers (mcp::start, Connecting, session::finish_mcp): a chat with
+    no --tools list starts connecting and goes on; the welcome panel names
+    them "(connecting)", and their tools join before the first request and
+    on /tools and /mcp, with the summary line said then. One-off runs and
+    runs with --tools connect first, as before. A chat that ends first
+    stops the attempts and their programs.
+  Checked in a real chat: 11 tools at start, 19 after the join (8 read-only
+  chrome-devtools ones), and no server program left behind after exit.
+
 ### In v0.1.0-alpha.38
 
 Five findings from a review of alpha.37 on the laptop, one dead end met on

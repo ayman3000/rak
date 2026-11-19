@@ -174,23 +174,80 @@ impl Connected {
     }
 }
 
+/// What connecting one server gives: the connection and its tools, or why not.
+type Answer = Result<(Client, Vec<ToolInfo>), String>;
+
+/// Servers being connected on threads of their own, so a chat can show its
+/// prompt meanwhile; `finish` waits for them and gathers their tools.
+/// Dropped unfinished (the chat ended first), it stops the attempts and the
+/// programs they started.
+pub struct Connecting {
+    servers: Vec<ServerConfig>,
+    handles: Vec<std::thread::JoinHandle<Answer>>,
+    read_only: bool,
+    stop: Stop,
+}
+
+/// Starts connecting every server, all at once, and returns at once.
+pub fn start(servers: &[ServerConfig], project: &Path, read_only: bool, stop: &Stop) -> Connecting {
+    let handles = servers
+        .iter()
+        .map(|server| {
+            let (server, project, stop) = (server.clone(), project.to_path_buf(), stop.clone());
+            std::thread::spawn(move || {
+                let client = Client::connect(&server, &project, &stop)?;
+                let tools = client.list_tools()?;
+                Ok((client, tools))
+            })
+        })
+        .collect();
+    Connecting { servers: servers.to_vec(), handles, read_only, stop: stop.clone() }
+}
+
+impl Connecting {
+    /// The servers' names, in the order they were given.
+    pub fn names(&self) -> Vec<String> {
+        self.servers.iter().map(|server| server.name.clone()).collect()
+    }
+
+    /// Whether every server has answered or failed already.
+    pub fn ready(&self) -> bool {
+        self.handles.iter().all(|handle| handle.is_finished())
+    }
+
+    /// Waits for every server and gathers their tools. A server that fails
+    /// is a line in `problems`, not a reason to stop.
+    pub fn finish(mut self) -> Connected {
+        let results = std::mem::take(&mut self.handles)
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err("the connection crashed".to_string())))
+            .collect();
+        gather(&self.servers, results, self.read_only)
+    }
+}
+
+impl Drop for Connecting {
+    fn drop(&mut self) {
+        if self.handles.is_empty() {
+            return;
+        }
+        // Each attempt gives up at its next look at the stop flag; a client
+        // that had connected stops its program as it is dropped here.
+        self.stop.request();
+        for handle in std::mem::take(&mut self.handles) {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// Connects every server, all at once, and gathers their tools. A server
 /// that fails is a line in `problems`, not a reason to stop.
 pub fn connect_all(servers: &[ServerConfig], project: &Path, read_only: bool, stop: &Stop) -> Connected {
+    start(servers, project, read_only, stop).finish()
+}
+
+fn gather(servers: &[ServerConfig], results: Vec<Answer>, read_only: bool) -> Connected {
     let mut out = Connected::default();
-    let results: Vec<Result<(Client, Vec<ToolInfo>), String>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = servers
-            .iter()
-            .map(|server| {
-                scope.spawn(move || {
-                    let client = Client::connect(server, project, stop)?;
-                    let tools = client.list_tools()?;
-                    Ok((client, tools))
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("the connection crashed".to_string()))).collect()
-    });
     for (server, result) in servers.iter().zip(results) {
         let (client, tools) = match result {
             Ok(connected) => connected,
@@ -336,6 +393,29 @@ done
         assert!(seen.ok && seen.text == "seen", "{}", seen.text);
         let refused = connected.tools[1].run(&json!({ "what": "x" }));
         assert!(!refused.ok && refused.text == "refused by the server");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn servers_connect_behind_the_caller_and_an_unfinished_start_is_stopped() {
+        let dir = temp_dir("mcp-behind");
+        // A server that never answers: starting returns at once, and dropping
+        // the attempt ends it without waiting out its timeout.
+        let silent = stdio("silent", "sh", &["-c", "sleep 30"]);
+        let began = Instant::now();
+        let pending = start(&[silent], &dir, false, &Stop::new());
+        assert!(began.elapsed() < Duration::from_millis(500), "start does not wait");
+        assert_eq!(pending.names(), ["silent"]);
+        assert!(!pending.ready());
+        drop(pending);
+        assert!(began.elapsed() < Duration::from_secs(5), "dropped, not waited for: {:?}", began.elapsed());
+
+        // One that answers: finish gathers the same as connect_all.
+        let pending = start(&[fake("fake")], &dir, false, &Stop::new());
+        let connected = pending.finish();
+        assert!(connected.problems.is_empty(), "{:?}", connected.problems);
+        assert_eq!(connected.summary().unwrap(), "2 MCP tools from fake");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

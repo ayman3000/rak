@@ -301,6 +301,12 @@ impl Agent {
         &self.tools
     }
 
+    /// More tools, for the requests still to come (MCP servers that
+    /// finished connecting after the chat's prompt was shown).
+    pub fn add_tools(&mut self, mut tools: Vec<Box<dyn Tool>>) {
+        self.tools.append(&mut tools);
+    }
+
     /// Hide these groups' tools until the model loads them; the system prompt
     /// gets their index. Call before the first request.
     pub fn defer(&mut self, groups: Vec<ToolGroup>) {
