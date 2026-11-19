@@ -643,12 +643,15 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
                 println!("{}", dim("  read-only mode: no edit or shell tools"));
             }
         }
+        "mcp" if args == "add" || args.starts_with("add ") => {
+            super::session::add_mcp_in_chat(s, args.strip_prefix("add").unwrap_or(""), color);
+        }
         "mcp" => {
             super::session::finish_mcp(s);
             if s.mcp_servers.is_empty() && s.mcp_problems.is_empty() {
-                println!("{}", dim("No MCP servers. Add one from the shell, then start rak again:"));
-                println!("{}", dim("  rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem ."));
-                println!("{}", dim("  rak mcp add docs --url https://example.com/mcp"));
+                println!("{}", dim("No MCP servers. Add one here:"));
+                println!("{}", dim("  /mcp add            paste the JSON from the server's page, or its address"));
+                println!("{}", dim("  /mcp add https://github.com/ChromeDevTools/chrome-devtools-mcp"));
             }
             for (server, count) in &s.mcp_servers {
                 println!(

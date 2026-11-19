@@ -19,6 +19,7 @@
 
 mod client;
 mod config;
+pub mod find;
 
 #[cfg(unix)]
 pub use client::stop_all_servers_now;

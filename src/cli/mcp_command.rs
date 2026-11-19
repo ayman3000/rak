@@ -10,10 +10,19 @@ use std::path::PathBuf;
 pub const MCP_HELP: &str = "\
 rak mcp — tools from MCP servers
 
+  rak mcp add                                     paste the JSON from a server's page,
+                                                  or its address, or answer questions
+  rak mcp add ADDRESS                             read the JSON from a page (a GitHub
+                                                  repository, a README, a docs page)
+  rak mcp add 'JSON'                              the JSON itself (- reads it from a pipe)
   rak mcp add NAME [options] -- COMMAND [ARG…]    a program rak starts
   rak mcp add NAME [options] --url URL            a server at a web address
   rak mcp list                                    the servers, and whether each connects
   rak mcp remove NAME [--project]
+
+rak shows what it found and asks before it saves: a server is a program that
+runs on your machine. In a chat, /mcp add does the same and the server's tools
+are usable at once.
 
 OPTIONS FOR add
   -e, --env KEY=VALUE     an environment variable for the program (repeatable)
@@ -21,14 +30,58 @@ OPTIONS FOR add
       --timeout SECONDS   how long one tool call may take (default 120)
       --project           write ./.rak/mcp.json (this project only) instead of
                           the file for all projects
+  -y, --yes               with an address or JSON: don't ask (one server, nothing
+                          left to fill in)
 
 EXAMPLES
+  rak mcp add https://github.com/ChromeDevTools/chrome-devtools-mcp
   rak mcp add files -- npx -y @modelcontextprotocol/server-filesystem .
   rak mcp add docs --url https://example.com/mcp -H 'Authorization: Bearer KEY'
 
-The files are in the shape Claude Code and Cursor use: an entry can be pasted
-across. A project's file wins over the one for all projects.
+You can also edit the files yourself: ~/.config/rak/mcp.json for all projects
+and ./.rak/mcp.json for one, in the shape Claude Code and Cursor use, so an
+entry can be pasted across. A project's file wins over the one for all projects.
 ";
+
+/// Pure — unit-tested. Whether `rak mcp add …` is the form that takes what
+/// the person has in hand (an address, JSON, a pipe, or nothing) and not the
+/// older `NAME -- COMMAND` / `NAME --url URL`. Returns that source.
+pub fn in_hand(args: &[String]) -> Option<String> {
+    let words: Vec<&str> = args.iter().map(String::as_str).filter(|a| !matches!(*a, "--project" | "-y" | "--yes")).collect();
+    match words.as_slice() {
+        [] => Some(String::new()),
+        [one] if *one == "-" || one.starts_with("http://") || one.starts_with("https://") || one.trim_start().starts_with('{') => {
+            Some(one.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Saves each chosen server in its file. Returns what was saved and where.
+pub fn save(
+    chosen: Vec<super::mcp_add::Chosen>,
+    project_file: &std::path::Path,
+    user_file: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<Vec<mcp::ServerConfig>, String> {
+    let mut saved = Vec::new();
+    for pick in chosen {
+        let file = if pick.project { project_file } else { user_file };
+        if pick.project {
+            // The person put it there: this folder is theirs to trust.
+            super::trust::remember(cwd);
+        }
+        let replaced = mcp::add_to_file(file, &pick.server)?;
+        println!("{} {} in {}", if replaced { "Replaced" } else { "Added" }, pick.server.name, file.display());
+        saved.push(pick.server);
+    }
+    Ok(saved)
+}
+
+/// The names in these files, for "this replaces it".
+pub fn names_in(files: &[PathBuf]) -> Vec<String> {
+    mcp::load(files).0.into_iter().map(|(server, _)| server.name).collect()
+}
 
 /// `rak mcp add|list|remove`: edits the list of MCP servers. Never returns.
 pub fn run(args: &[String]) -> ! {
@@ -45,6 +98,45 @@ pub fn run(args: &[String]) -> ! {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
 
     match args.first().map(String::as_str) {
+        Some("add") if in_hand(&args[1..]).is_some() => {
+            use std::io::{IsTerminal, Read};
+            let mut source = in_hand(&args[1..]).unwrap_or_default();
+            let piped = !std::io::stdin().is_terminal();
+            if source == "-" || (source.is_empty() && piped) {
+                source.clear();
+                let _ = std::io::stdin().read_to_string(&mut source);
+                if source.trim().is_empty() {
+                    usage_error("rak mcp add: nothing came in on the pipe");
+                }
+            }
+            let request = super::mcp_add::Request {
+                source,
+                project: args[1..].iter().any(|a| a == "--project"),
+                yes: args[1..].iter().any(|a| a == "-y" || a == "--yes"),
+                can_ask: !piped && std::io::stderr().is_terminal(),
+                windows: cfg!(windows),
+                have: names_in(&files),
+            };
+            let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+            let chosen = super::mcp_add::choose_at_terminal(&request, color).unwrap_or_else(|why| fail(why));
+            if chosen.is_empty() {
+                std::process::exit(0);
+            }
+            let saved = save(chosen, &project_file, &user_file, &cwd).unwrap_or_else(|why| fail(why));
+            // Try them now, so a mistake shows here and not in the next chat.
+            let connected = mcp::connect_all(&saved, &cwd, false, &Stop::new());
+            for (name, count) in &connected.servers {
+                println!("{name} connected: {count} tool{}", plural(*count));
+            }
+            for problem in &connected.problems {
+                println!("Saved, but it did not connect: {problem}");
+            }
+            println!("To change it by hand, the files are {} and {}.", user_file.display(), project_file.display());
+            let code = if connected.problems.is_empty() { 0 } else { 1 };
+            // exit skips destructors: stop the servers' programs first.
+            drop(connected);
+            std::process::exit(code);
+        }
         Some("add") => {
             let (mut name, mut command, mut url) = (None::<String>, Vec::<String>::new(), None::<String>);
             let (mut env, mut headers) = (std::collections::BTreeMap::new(), std::collections::BTreeMap::new());
@@ -124,7 +216,7 @@ pub fn run(args: &[String]) -> ! {
                 println!("{problem}");
             }
             if servers.is_empty() {
-                println!("No MCP servers yet. Add one with:\n  rak mcp add NAME -- COMMAND [ARG…]\n  rak mcp add NAME --url URL");
+                println!("No MCP servers yet. Add one with:\n  rak mcp add            (paste the JSON from the server's page, or its address)\n  rak mcp add NAME -- COMMAND [ARG…]\n  rak mcp add NAME --url URL");
                 std::process::exit(0);
             }
             // A project's servers are programs: started only in a trusted folder.
@@ -189,5 +281,23 @@ pub fn run(args: &[String]) -> ! {
             std::process::exit(0);
         }
         Some(other) => usage_error(&format!("rak mcp has add, list and remove, not `{other}` (see rak mcp --help)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_address_json_a_pipe_or_nothing_is_the_new_form_and_a_name_is_the_old() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<String>>();
+        assert_eq!(in_hand(&args(&[])), Some(String::new()));
+        assert_eq!(in_hand(&args(&["--project", "-y"])), Some(String::new()));
+        assert_eq!(in_hand(&args(&["https://github.com/o/r", "--project"])).as_deref(), Some("https://github.com/o/r"));
+        assert_eq!(in_hand(&args(&["{\"mcpServers\":{}}"])).as_deref(), Some("{\"mcpServers\":{}}"));
+        assert_eq!(in_hand(&args(&["-"])).as_deref(), Some("-"));
+        assert_eq!(in_hand(&args(&["files", "--", "npx", "-y", "fs"])), None);
+        assert_eq!(in_hand(&args(&["docs", "--url", "https://example.com/mcp"])), None);
+        assert_eq!(in_hand(&args(&["files"])), None);
     }
 }

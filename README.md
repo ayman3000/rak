@@ -35,14 +35,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.39** (2026-11-19)
+**v0.1.0-alpha.40** (2026-11-19)
 
-- **The prompt is there at once.** A chat now shows its prompt first and does the slow start-up work behind it. On a Mac with one MCP server set up, the time until typed text appears went from 811 ms to about 8 ms; with no MCP server, from 127 ms to 10 ms.
-- **MCP servers connect behind the prompt.** The welcome panel lists them as "(connecting)", and their tools join before your first request is sent. One-off runs connect first, as before.
+- **Add an MCP server from its page.** `rak mcp add https://github.com/ChromeDevTools/chrome-devtools-mcp` reads the JSON the page tells you to add to your MCP client, shows you what will run, and asks before it saves. With no address, `rak mcp add` asks you to paste the JSON, or to answer three questions. ([how it works](docs/mcp.md#adding-one))
+- **`/mcp add` inside a chat** does the same, and the server's tools are usable at once, with no restart.
+- **A page with several configs** lists them for you to pick, and a value the page left blank (`<YOUR_API_KEY>`) is asked for, typed without showing.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.39:** a chat shows its prompt at once and connects MCP servers behind it: on a Mac with one MCP server, the time until typed text appears went from 811 ms to about 8 ms.
 - **alpha.38:** a `--tools` list holds for helper agents too; the agent no longer sends you to `/add-dir` for folders it can never open, and uses `past_chats` for earlier chats; fixes to Sign in with ChatGPT and to adding skills from very large repositories.
 - **alpha.37:** every skill is a chat command: `/sdd-plan add a login page` asks the agent to load that skill and follow it for your request.
 - **alpha.36:** `rak skills add … -y` sums each skill up in a few lines, and a repository of skills costs GitHub two requests, not one more per skill.
@@ -127,7 +129,7 @@ rak -c "and now add the tests"         # continue this folder's last chat
 
 1. **Run `rak`.** The first time, it asks for a provider (Ollama on your machine comes first when it is running, and needs no key), the provider's key (hidden as you type, saved readable by you only, checked before your first message), and a model from the provider's own list.
 2. **Type `/init` in a project.** rak looks around and writes its notes in `rak/`, so every later session starts already knowing the project.
-3. **Type `/`** for every chat command. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak login chatgpt` signs in with ChatGPT to use your ChatGPT plan; `rak update` gets the newest release.
+3. **Type `/`** for every chat command. `/mcp add` (or `rak mcp add`) adds an MCP server from the JSON on its page or the page's address. `rak setup` switches provider, model or key any time; `rak keys` shows what is set and `rak keys set NAME` (or `/key` in a chat) adds one; `rak login chatgpt` signs in with ChatGPT to use your ChatGPT plan; `rak update` gets the newest release.
 
 The full walkthrough, every chat command and every option are in [docs/usage.md](docs/usage.md).
 
@@ -187,7 +189,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 
 ### Extends and embeds
 
-- **MCP servers,** by program or URL, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
+- **MCP servers,** added from the JSON on a server's page, from the page's address (`rak mcp add https://github.com/…`), or by a few questions, in the same `mcp.json` shape as Claude Code and Cursor. Large servers load their tools only when needed.
 - **Scripts and CI:** `--json` output, `--log` of every step, clear exit codes, and progress on stderr so stdout holds only the answer.
 - **A Rust library:** the agent loop, tools and providers with no terminal code, for your own agent.
 - **`rak update`** installs the newest release in place, checked against its SHA-256.
@@ -227,7 +229,7 @@ The tasks are easy: a perfect score says the pipeline works, not how rak ranks. 
 | [Providers and models](docs/providers.md) | The sixteen providers, signing in with ChatGPT, choosing a model, keys, fallback, prompt caching |
 | [Tools and large projects](docs/tools.md) | Every tool, the write check, working on big codebases |
 | [Project notes and skills](docs/memory-and-skills.md) | The `rak/` folder, the gate, writing and adding skills |
-| [MCP servers](docs/mcp.md) | Adding servers, approvals, large servers |
+| [MCP servers](docs/mcp.md) | Adding a server from its page, its JSON or a few questions; approvals; large servers |
 | [Safety](docs/safety.md) | What asks first, folder trust, keys, the limits |
 | [Development](docs/development.md) | rak as a library, the code layout, checks and releases |
 | [Benchmarks](docs/benchmarks.md) · [Field notes](docs/field-notes.md) | How rak was measured; what happened with real models |

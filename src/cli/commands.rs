@@ -10,7 +10,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("/effort [level]", "show or switch the reasoning effort (no level: pick from a list)"),
     ("/add-dir [path]", "let the agent read and write in another folder, for this chat"),
     ("/tools", "list the tools the agent can use"),
-    ("/mcp", "the MCP servers and their tools"),
+    ("/mcp", "the MCP servers and their tools; /mcp add adds one (paste its JSON or its page's address)"),
     ("/resume", "this folder's saved chats; /resume N picks one up"),
     ("/skills", "the skills (each is a command too: /NAME); /skills add URL, /skills remove NAME"),
     ("/init", "set up this project's notes in rak/ (or bring them up to date)"),

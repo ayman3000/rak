@@ -12,6 +12,32 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.40
+
+- **`rak mcp add` from what the person has in hand** (mcp::find, cli::mcp_add;
+  asked for 2026-11-19: "many MCPs have the same JSON… if he pastes the URL
+  we can retrieve that JSON and ask a confirmation"). `rak mcp add` with
+  nothing asks for the JSON, the page's address, or Enter for three
+  questions; `rak mcp add ADDRESS` reads a GitHub repository's README (raw,
+  no API call) or any page; `rak mcp add 'JSON'` and `-` (a pipe) take the
+  JSON. Shapes read: mcpServers, servers, either under mcp, a bare map, one
+  entry alone, command as a list, JSON with comments or trailing commas.
+  The server is always shown (what runs, variable names never values, a
+  caution for npx/uvx/docker/web) and asked about; several are numbered,
+  stand-ins are asked for (keys hidden), -y works for one complete server.
+  The older `NAME -- COMMAND` and `NAME --url URL` are unchanged.
+  `/mcp add` in a chat does the same and connects at once
+  (session::add_mcp_in_chat, Agent::defer_more).
+  Tried on 12 real repositories without saving: chrome-devtools, supabase
+  and exa give one server; playwright 4, firecrawl 2, tavily 4, brave 4,
+  sentry 4, notion 7, github 9, modelcontextprotocol/servers 4 (a list to
+  pick from); context7 has no JSON in its README (the paste or questions
+  path). What that run changed: repeats merged (name spelling, npx -y, no
+  name), a tool call's example arguments no longer read as a server,
+  trailing commas accepted (exa's README has one).
+  End to end in a scratch home: the chrome-devtools page → y → saved
+  (mode 600) → 33 tools; `/mcp add` in a chat → tools in the next request.
+
 ### In v0.1.0-alpha.39
 
 - **A chat shows its prompt before the slow start-up work** (measured as

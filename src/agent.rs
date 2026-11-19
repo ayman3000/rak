@@ -317,6 +317,24 @@ impl Agent {
         self.loaded.clear();
     }
 
+    /// More groups to hide until loaded, beside the ones there already (a
+    /// server added or connected after the chat began). What is loaded stays
+    /// loaded; the system prompt's index is rewritten to list them all.
+    pub fn defer_more(&mut self, mut groups: Vec<ToolGroup>) {
+        if groups.is_empty() {
+            return;
+        }
+        let old = group_index(&self.groups);
+        if !old.is_empty() {
+            if let Some(at) = self.config.system_prompt.rfind(&old) {
+                self.config.system_prompt.replace_range(at..at + old.len(), "");
+            }
+        }
+        self.groups.append(&mut groups);
+        self.config.system_prompt.push_str(&group_index(&self.groups));
+        self.messages[0] = json!({ "role": "system", "content": self.config.system_prompt });
+    }
+
     /// Offer the routines saved in these folders through `run_routine`.
     pub fn enable_routines(&mut self, folders: Vec<std::path::PathBuf>) {
         self.routine_folders = folders;
@@ -1620,6 +1638,25 @@ mod tests {
         let mut s = setup("readonly-approval", vec![Ok(call("list_dir", json!({}))), Ok(text("empty"))], 10);
         s.agent.on_approval(|_, _| panic!("list_dir must not ask"));
         assert_eq!(s.agent.run("look").outcome, Outcome::Done);
+    }
+
+    #[test]
+    fn groups_added_later_join_the_index_and_what_was_loaded_stays() {
+        let group = |id: &str| ToolGroup { id: id.into(), description: format!("{id} things"), tools: vec![format!("{id}__t")] };
+        let mut s = setup("groups-later", vec![], 10);
+        let base = s.agent.messages[0]["content"].as_str().unwrap().to_string();
+        s.agent.defer(vec![group("first")]);
+        s.agent.loaded.push("first".to_string());
+        s.agent.defer_more(vec![group("second")]);
+        let prompt = s.agent.messages[0]["content"].as_str().unwrap().to_string();
+        assert!(
+            prompt.starts_with(&base) && prompt.contains("- first: first things") && prompt.contains("- second: second things"),
+            "{prompt}"
+        );
+        assert_eq!(prompt.matches("Tool groups you can load").count(), 1, "one index, not two: {prompt}");
+        assert_eq!(s.agent.loaded, ["first"]);
+        s.agent.defer_more(Vec::new());
+        assert_eq!(s.agent.messages[0]["content"].as_str().unwrap(), prompt);
     }
 
     #[test]

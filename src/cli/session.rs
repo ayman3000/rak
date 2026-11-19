@@ -1021,7 +1021,7 @@ pub fn finish_mcp(s: &mut Session) {
     }
     let mut connected = pending.finish();
     let summary = connected.summary();
-    s.agent.defer(connected.to_defer());
+    s.agent.defer_more(connected.to_defer());
     s.agent.add_tools(std::mem::take(&mut connected.tools));
     s.server_of.borrow_mut().extend(std::mem::take(&mut connected.server_of));
     s.mcp_servers.append(&mut connected.servers);
@@ -1036,6 +1036,60 @@ pub fn finish_mcp(s: &mut Session) {
     s.mcp_summary = summary;
     s.mcp_problems.append(&mut connected.problems);
     s.log.write(json!({ "event": "mcp", "servers": s.mcp_servers.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), "tools": s.agent.tool_names() }));
+}
+
+/// `/mcp add [SOURCE]`: the same conversation as `rak mcp add`, and the
+/// server's tools join this chat at once.
+pub fn add_mcp_in_chat(s: &mut Session, source: &str, color: bool) {
+    use super::mcp_command::{names_in, save};
+    // Servers still connecting come in first, so "you already have" is right.
+    finish_mcp(s);
+    let files = mcp::config_files(&s.cwd, config_dir().as_deref());
+    let Some(user_file) = files.get(1).cloned() else {
+        println!("{}", paint(color, Style::Yellow, "No home folder to keep mcp.json in."));
+        return;
+    };
+    let request = super::mcp_add::Request {
+        source: source.trim().to_string(),
+        project: false,
+        yes: false,
+        can_ask: true,
+        windows: cfg!(windows),
+        have: names_in(&files),
+    };
+    let saved = match super::mcp_add::choose_at_terminal(&request, color).and_then(|chosen| save(chosen, &files[0], &user_file, &s.cwd)) {
+        Ok(saved) => saved,
+        Err(why) => {
+            println!("{}", paint(color, Style::Yellow, &why));
+            return;
+        }
+    };
+    if saved.is_empty() {
+        return;
+    }
+    let later = if s.o.no_mcp {
+        Some("This chat was started with --no-mcp")
+    } else if s.o.tools.is_some() {
+        Some("This chat has a --tools list")
+    } else {
+        None
+    };
+    if let Some(why) = later {
+        println!("{}", paint(color, Style::Dim, &format!("{why}: the server is used from the next chat.")));
+        return;
+    }
+    // One that replaces a server this chat is using waits for the next chat.
+    let (fresh, replaced): (Vec<_>, Vec<_>) =
+        saved.into_iter().partition(|server| !s.mcp_servers.iter().any(|(name, _)| name == &server.name));
+    for server in &replaced {
+        let note = format!("{} is connected in this chat as it was: the new one is used from the next chat.", server.name);
+        println!("{}", paint(color, Style::Dim, &note));
+    }
+    if !fresh.is_empty() {
+        s.stop.clear();
+        s.mcp_pending = Some(mcp::start(&fresh, &s.cwd, s.o.read_only, &s.stop));
+        finish_mcp(s);
+    }
 }
 
 pub fn run_one(s: &mut Session, task: &str) -> Outcome {

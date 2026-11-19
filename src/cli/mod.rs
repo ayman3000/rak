@@ -30,6 +30,7 @@ pub mod keys_command;
 pub mod log;
 pub mod login;
 pub mod markdown;
+pub mod mcp_add;
 pub mod mcp_command;
 pub mod menu;
 pub mod output;
