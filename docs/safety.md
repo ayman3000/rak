@@ -3,6 +3,7 @@
 What rak does before it changes anything, and where its limits are. Back to the [README](../README.md).
 
 - **Edits and commands ask first**, every time, unless you answer "always" or start with `-y`. The prompt shows the whole command, every line of it.
+- **Only an answer typed after the question counts.** Keys pressed while rak was busy are thrown away before it asks, so an early `y` cannot approve something you have not read (macOS and Linux; not yet on Windows). An answer that is not `y`, `n`, `a` or `A` is shown back and asked about again: it is never a yes, and Enter alone or `n` is the only no.
 - **A no stops the request.** The model doesn't get another turn to try the same change a different way.
 - **No terminal, no changes.** In a script or CI without `-y`, rak stops with exit code 3 instead of guessing.
 - **A tool error is not passed off as done.** When the step before the answer had a tool error (an edit that didn't apply), rak asks the model once to fix it or say plainly what failed; at most three times a request.

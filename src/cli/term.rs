@@ -65,6 +65,21 @@ impl Raw {
     }
 }
 
+/// Throws away what was typed before now and not yet read. Called before a
+/// question whose answer allows something: a key pressed while rak was busy
+/// must not answer a question the person has not seen, or be joined to the
+/// answer they then type.
+#[cfg(unix)]
+pub fn discard_typed_ahead() {
+    // SAFETY: tcflush only drops the terminal's unread input; on a pipe it fails and changes nothing.
+    unsafe {
+        libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn discard_typed_ahead() {}
+
 /// One byte from the keyboard. With `wait_ms`, None when nothing arrives in
 /// that time; without, waits. None also at end of input.
 #[cfg(unix)]

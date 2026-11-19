@@ -36,15 +36,16 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.41** (2026-11-19)
+**v0.1.0-alpha.42** (2026-11-19)
 
-- **Tools of your own.** Say "I need a tool that …" or type `/make-tool`. rak writes one small script (Python's standard library by default), shows it to you whole, and asks before saving. The tool is tried once, joins the chat with your next message, and is there in every later chat. No rebuild, nothing to install, and `rak update` leaves your tools alone. ([how it works](docs/tools.md#tools-of-your-own))
-- **Keys stay out of scripts.** A tool names the key it needs and you give it once with `/key BRAVE_API_KEY`, typed hidden. A tool gets only the keys it names, and a key it prints is hidden from the model.
-- **`/tools remove NAME`** deletes one of your tools; `/tools` lists them after rak's own.
+- **A key pressed early can no longer answer a question.** Before this release, `y` and Enter typed while rak was busy approved the next edit or command the moment its question appeared. Now only what you type after the question is on screen counts. Update if you use an earlier release.
+- **A slip no longer ends the request.** An answer that is not `y`, `n`, `a` or `A` is shown back to you and asked about again, where it used to count as a no and stop everything.
+- macOS and Linux. On Windows the second point applies; the first does not yet.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.41:** [tools of your own](#make-your-own-tools): say "I need a tool that …" or type `/make-tool`; rak writes a small script, shows it, and asks before saving. Keys stay out of scripts (`/key NAME`), and `/tools remove NAME` deletes one.
 - **alpha.40:** add an MCP server from its page: `rak mcp add https://github.com/…` reads the JSON, shows what will run and asks; `rak mcp add` alone takes pasted JSON or three questions; `/mcp add` does it inside a chat.
 - **alpha.39:** a chat shows its prompt at once and connects MCP servers behind it: on a Mac with one MCP server, the time until typed text appears went from 811 ms to about 8 ms.
 - **alpha.38:** a `--tools` list holds for helper agents too; the agent no longer sends you to `/add-dir` for folders it can never open, and uses `past_chats` for earlier chats; fixes to Sign in with ChatGPT and to adding skills from very large repositories.

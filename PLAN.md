@@ -12,6 +12,25 @@ Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking 
 
 Nothing yet.
 
+### In v0.1.0-alpha.42
+
+- **An approval answers only what was typed after the question appeared**
+  (term::discard_typed_ahead, approval::answer). Seen on another machine:
+  `a` typed at "allow edit_file" was read as a no at turn 53 of a 57-minute
+  request. `a` alone is accepted, so the line read was not `a`: keys
+  pressed while rak was busy wait in the terminal and are joined to the
+  answer. Worse the other way, and reproduced on alpha.41 with a stand-in
+  server: `y` and Enter typed while the model was thinking approved the
+  next run_shell before its question could be read.
+  - The terminal's unread input is dropped (tcflush) right before an
+    approval question and before "Continue with …?".
+  - An answer that is not y, n, a, s or A is asked about again, up to
+    twice, showing what was read with invisible keys made visible
+    (`<Esc>[Aa`). Only Enter alone or n is a no. Unix only: on Windows
+    nothing is dropped yet.
+  Proved in a pty on the new build: the early `y` approved nothing, an
+  arrow key plus `a` was asked about again, and `a` then ran the command.
+
 ### In v0.1.0-alpha.41
 
 - **Tools of the user's own** (tools::user, skills/make-tool.md; asked for

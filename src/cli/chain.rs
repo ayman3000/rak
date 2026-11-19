@@ -127,6 +127,8 @@ pub fn offer(asker: &Asker, st: &mut State, why: &str, failure: Failure) -> Offe
         let to = label(&backend, &link.model);
         if !asker.auto.get() && asker.interactive {
             asker.ui.borrow_mut().end_line();
+            // A key pressed while the request ran does not answer this.
+            super::term::discard_typed_ahead();
             let question = format!("{} failed: {}\n  Continue with {to}? [y/n] › ", st.current_label, one_line(why, 120));
             eprint!("{}", paint(asker.color, Style::Yellow, &question));
             asker.ui.borrow_mut().asked = true;

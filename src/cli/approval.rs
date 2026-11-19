@@ -22,18 +22,30 @@ pub enum Answer {
     AlwaysServer,
     Everything,
     No,
+    /// Not one of the answers: asked again, never taken as a no or a yes.
+    Unclear,
 }
 
 /// Pure — unit-tested. `A` (capital) is "everything"; `a` is "always for this
-/// tool"; `s` only means something for an MCP server's tool.
+/// tool"; `s` only means something for an MCP server's tool. Enter alone and
+/// `n` are a no. Anything else is unclear: a slip of the hand should not end
+/// an hour's request, and must not allow anything either.
 pub fn answer(typed: &str, has_server: bool) -> Answer {
     match typed.trim() {
-        "y" | "Y" | "yes" => Answer::Once,
+        "y" | "Y" | "yes" | "Yes" => Answer::Once,
         "a" | "always" => Answer::AlwaysTool,
         "s" | "server" if has_server => Answer::AlwaysServer,
         "A" | "all" | "everything" => Answer::Everything,
-        _ => Answer::No,
+        "" | "n" | "N" | "no" | "No" => Answer::No,
+        _ => Answer::Unclear,
     }
+}
+
+/// Pure — unit-tested. What was typed, with keys that show nothing on screen
+/// (an arrow, a control key) made visible, cut short.
+pub fn as_typed(typed: &str) -> String {
+    let shown: String = typed.trim_end_matches(['\n', '\r']).chars().flat_map(|c| c.escape_debug()).take(40).collect();
+    shown.replace("\\u{1b}", "<Esc>")
 }
 
 /// Pure — unit-tested. The question, for `name` called with `args`.
@@ -133,23 +145,41 @@ pub fn prompter(p: Prompter) -> impl FnMut(&str, &Value) -> Approval {
             eprintln!("  {name} needs approval and there's no terminal to ask — stopping (use -y to allow)");
             return Approval::No;
         }
+        // Only what is typed after the question is on screen counts.
+        super::term::discard_typed_ahead();
         eprint!("{}", paint(p.color, Style::Yellow, &question(name, args, server.as_deref())));
-        let _ = std::io::stderr().flush();
-        let mut typed = String::new();
-        let _ = std::io::stdin().lock().read_line(&mut typed);
-        if p.stop.requested() {
-            return Approval::No;
-        }
-        match answer(&typed, server.is_some()) {
-            Answer::Once => {}
-            Answer::AlwaysTool => {
-                tools.insert(name.to_string());
+        let options = if server.is_some() { "y, n, a, s or A" } else { "y, n, a or A" };
+        for attempt in 0..3 {
+            let _ = std::io::stderr().flush();
+            let mut typed = String::new();
+            let read = std::io::stdin().lock().read_line(&mut typed);
+            if p.stop.requested() {
+                return Approval::No;
             }
-            Answer::AlwaysServer => servers.extend(server),
-            Answer::Everything => everything = true,
-            Answer::No => return Approval::No,
+            match answer(&typed, server.is_some()) {
+                Answer::Once => return Approval::Yes,
+                Answer::AlwaysTool => {
+                    tools.insert(name.to_string());
+                    return Approval::Yes;
+                }
+                Answer::AlwaysServer => {
+                    servers.extend(server);
+                    return Approval::Yes;
+                }
+                Answer::Everything => {
+                    everything = true;
+                    return Approval::Yes;
+                }
+                Answer::No => return Approval::No,
+                // No more input (the terminal closed) is a no, not a loop.
+                Answer::Unclear if attempt == 2 || !matches!(read, Ok(n) if n > 0) => return Approval::No,
+                Answer::Unclear => {
+                    let again = format!("  rak read \"{}\", which is not an answer. Type {options}, then Enter › ", as_typed(&typed));
+                    eprint!("{}", paint(p.color, Style::Yellow, &again));
+                }
+            }
         }
-        Approval::Yes
+        Approval::No
     }
 }
 
@@ -165,10 +195,18 @@ mod tests {
         assert_eq!(answer("a", false), Answer::AlwaysTool);
         assert_eq!(answer("A", false), Answer::Everything);
         assert_eq!(answer("s", true), Answer::AlwaysServer);
-        assert_eq!(answer("s", false), Answer::No, "no server to allow");
-        for typed in ["", "n", "no", "maybe", "yy", "Yes please"] {
+        for typed in ["", "\n", "n", "N", "no", " no \n"] {
             assert_eq!(answer(typed, true), Answer::No, "{typed:?}");
         }
+        // Anything else is asked about again: never a yes, and not a no that ends the request.
+        for typed in ["maybe", "yy", "Yes please", "ya", "\u{1b}[Aa", "aa", "ش", "s x"] {
+            assert_eq!(answer(typed, true), Answer::Unclear, "{typed:?}");
+        }
+        assert_eq!(answer("s", false), Answer::Unclear, "no server to allow: asked again");
+        // Keys that show nothing on screen are made visible in the second question.
+        assert_eq!(as_typed("\u{1b}[Aa\n"), "<Esc>[Aa");
+        assert_eq!(as_typed("ya\r\n"), "ya");
+        assert!(as_typed(&"x".repeat(200)).chars().count() <= 40);
     }
 
     #[test]
