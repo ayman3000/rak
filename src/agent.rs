@@ -753,7 +753,9 @@ impl Agent {
 
                 // The same call with the same result, again and again.
                 let signature = format!("{}\u{1}{}\u{1}{}", call.name, call.arguments, result.1);
-                repeated = if repeated.0 == signature { (signature, repeated.1 + 1) } else { (signature, 1) };
+                // Waiting for a message again, and again hearing "nothing yet", is not a loop.
+                let waiting = call.name == crate::talk::WAIT;
+                repeated = if repeated.0 == signature && !waiting { (signature, repeated.1 + 1) } else { (signature, 1) };
                 if repeated.1 >= LOOP_WARN {
                     result.1.push_str(&format!(
                         "\n[You have made this exact call {} times and got the same result. Repeating it will \
@@ -1890,6 +1892,22 @@ mod tests {
         assert_eq!(result.turns, LOOP_STOP);
         let third_result = &s.seen.borrow()[3][7]["content"];
         assert!(third_result.as_str().unwrap().contains("this exact call 3 times"));
+    }
+
+    #[test]
+    fn waiting_for_a_message_again_and_again_is_not_a_loop() {
+        let wait = || Ok(call(crate::talk::WAIT, json!({ "minutes": 0.001 })));
+        let replies = (0..8).map(|_| wait()).chain([Ok(text("Nobody came."))]).collect();
+        let mut s = setup("patient", replies, 30);
+        let member = crate::talk::join(&s.dir, Some("A"), "m", "", false).unwrap();
+        s.agent.add_tools(crate::talk::tools(member, crate::interrupt::Stop::new(), 0, false));
+        let result = s.agent.run("wait for B");
+        assert_eq!(result.outcome, Outcome::Done, "eight waits with the same answer were taken for a loop");
+        assert_eq!(result.answer, "Nobody came.");
+        let results: Vec<String> =
+            s.agent.history().iter().filter(|m| m["role"] == "tool").filter_map(|m| m["content"].as_str().map(str::to_string)).collect();
+        assert_eq!(results.len(), 8);
+        assert!(results.iter().all(|r| r.contains("Nothing arrived") && !r.contains("this exact call")), "{results:?}");
     }
 
     #[test]

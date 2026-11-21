@@ -18,6 +18,7 @@ USAGE
   rak login chatgpt               sign in with ChatGPT, to use your ChatGPT plan (the
                                   chatgpt provider); rak logout chatgpt signs out
   rak mcp add|list|remove         tools from MCP servers (see `rak mcp --help`)
+  rak talk log|who|say|clear      the room of agents started with --talk (see `rak talk --help`)
 
 MODEL
   -m, --model NAME        model to use                      [env RAK_MODEL]
@@ -84,6 +85,15 @@ BEHAVIOUR
       --vision-provider P the provider of the model that looks at images for a model that
                           can't (default RAK_VISION_PROVIDER, else the main provider)
       --vision-model M    that model (default RAK_VISION_MODEL); a model that sees needs none
+
+TALK (several rak sessions in one folder, messaging each other)
+      --talk              join this folder's room: the agent gets send_message and
+                          wait_message, and sees who else is there
+      --name NAME         this agent's name in the room (default agent-1, agent-2, …)
+      --role TEXT         one line the other agents see next to the name
+      --talk-limit N      messages this agent may send (default 40; 0: no limit)
+  --name, --role and --talk-limit turn talk mode on. Start one session per
+  agent, each in its own terminal; `rak talk log` shows the conversation.
 
 OUTPUT
       --json              print one JSON object with the answer and the numbers
@@ -158,6 +168,13 @@ pub struct Options {
     pub record: Option<PathBuf>,
     pub replay: Option<PathBuf>,
     pub quiet: bool,
+    /// Talk mode: this session joins the folder's room (--talk, or any of the
+    /// options below).
+    pub talk: bool,
+    pub talk_name: Option<String>,
+    pub talk_role: Option<String>,
+    /// Messages this agent may send; 0 is no limit.
+    pub talk_limit: usize,
 }
 
 /// Pure — unit-tested. `--tools` as names: "none" (or nothing) is no tools.
@@ -235,6 +252,10 @@ pub fn parse_args(args: Vec<String>) -> Options {
         record: None,
         replay: None,
         quiet: false,
+        talk: false,
+        talk_name: None,
+        talk_role: None,
+        talk_limit: rak::talk::DEFAULT_LIMIT,
     };
     let mut words: Vec<String> = Vec::new();
     let mut args = args.into_iter();
@@ -300,6 +321,16 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--record" => o.record = Some(PathBuf::from(value("--record"))),
             "--replay" => o.replay = Some(PathBuf::from(value("--replay"))),
             "-q" | "--quiet" => o.quiet = true,
+            "--talk" => o.talk = true,
+            "--name" => {
+                let name = value("--name");
+                if let Err(why) = rak::talk::valid_name(&name) {
+                    usage_error(&format!("--name: {why}"));
+                }
+                (o.talk, o.talk_name) = (true, Some(name));
+            }
+            "--role" => (o.talk, o.talk_role) = (true, Some(value("--role"))),
+            "--talk-limit" => (o.talk, o.talk_limit) = (true, number::<usize>("--talk-limit", value("--talk-limit"))),
             "--" => words.extend(args.by_ref()),
             flag if flag.starts_with('-') && flag.len() > 1 => usage_error(&format!("unknown option {flag}")),
             _ => words.push(arg),
@@ -323,6 +354,16 @@ mod tests {
         assert_eq!(super::effort_level("extreme"), None);
         assert_eq!(super::effort_level(""), None);
         assert!(super::is_default_effort("Default") && super::is_default_effort("none") && !super::is_default_effort("low"));
+    }
+
+    #[test]
+    fn talk_mode_is_off_unless_asked_and_any_talk_option_turns_it_on() {
+        let plain = super::parse_args(["fix it"].map(String::from).to_vec());
+        assert!(!plain.talk && plain.talk_name.is_none() && plain.talk_limit == rak::talk::DEFAULT_LIMIT);
+        assert!(super::parse_args(["--talk"].map(String::from).to_vec()).talk);
+        let named = super::parse_args(["--name", "B", "--role", "tests the code", "--talk-limit", "0"].map(String::from).to_vec());
+        assert!(named.talk);
+        assert_eq!((named.talk_name.as_deref(), named.talk_role.as_deref(), named.talk_limit), (Some("B"), Some("tests the code"), 0));
     }
 
     #[test]

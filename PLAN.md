@@ -1,16 +1,48 @@
 # rak: where things stand and what comes next
 
-Updated 2026-11-18, after releasing v0.1.0-alpha.37. A working plan for picking the work up on another machine.
+Updated 2026-11-22, after releasing v0.1.0-alpha.47. A working plan for picking the work up on another machine.
 
 ## Where things stand
 
-- The newest release is **v0.1.0-alpha.37** (2026-11-18). It has everything
+- The newest release is **v0.1.0-alpha.47** (2026-11-22). It has everything
   below except alpha.25's prompt rule, which alpha.26 took out; `main` and the
   release match. Benchmark-run notes are kept outside the repo.
 
 ### On main, not released
 
 Nothing yet.
+
+### In v0.1.0-alpha.47
+
+**Talk mode** (2026-11-21): several rak sessions in one folder messaging each
+other. From the two-agent experiment (github.com/ayman3000/two-agents-experiment):
+a second, different model running the first one's work found real faults, and
+the hand-made file messaging broke in ways rak can prevent.
+
+- `--talk`, `--name`, `--role`, `--talk-limit`: the session joins the folder's
+  room (`.rak/talk/`) and gets `send_message` and `wait_message`. Off unless
+  asked: no folder is read and no thread starts in a normal run.
+- rak numbers the messages (a link that fails when the name is taken, so two
+  senders never share one and none is read half-written), keeps who is in the
+  room (a file rewritten every 5 s; silent for 20 s is gone), remembers what
+  each agent has read, and writes `talk.md`.
+- A wait returns on new messages, when everyone else has left, or when its
+  time is up, and says which. The repeated-call detector leaves it alone, and
+  a talk chat has no per-request turn limit.
+- A message is labelled as another agent's words and gives no approval.
+  The file tools refuse `.rak/talk`.
+- `rak talk log|who|say|clear`, and `/talk` in a chat.
+- Code: `src/talk.rs` (room, member, tools), `src/cli/talk_command.rs`.
+  Docs: `docs/talk.md`.
+- Tried with two real models (glm-5.3-flash and deepseek-v4.1-flash, 10
+  messages each, sandboxed): six messages, both chose and built a working
+  program, and both ended by themselves in 31 minutes with nobody stopping
+  either. It found one fault, fixed: a final message addressed to an agent
+  that had already left was refused, so the agent ended without its goodbye.
+- Cost when talk mode is off, measured: start-up unchanged (7 ms), binary
+  66 KB larger (2%).
+- Not done: one command that starts a pair; three or more agents as a tested
+  case; a message that interrupts a working agent; agents in other folders.
 
 ### In v0.1.0-alpha.46
 

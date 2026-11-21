@@ -105,6 +105,7 @@ Started without a task, rak opens a chat:
 | `/yes` | Turn auto-approve on or off. |
 | `/usage` | Tokens, tool calls, the context used and the window, fallbacks. |
 | `/jobs` | The servers the agent started in the background (run_shell's background mode; `npm run dev`, `vite`, `flask run` and the like go there by themselves): running or ended, how long, pid, command and log. `/jobs stop N` stops one with everything it started, `/jobs stop all` every running one. When a chat ends with some still running, rak asks whether to stop them; left running, they keep going after rak quits (and in a one-off run they are always left running, so a service stays up for whatever checks it). |
+| `/talk` | In a chat started with `--talk`: who is in this folder's room ([talk mode](talk.md)). |
 | `/clear` | Start a fresh conversation. The last one stays saved. |
 | `/help`, `/exit` | The list of commands; quit (or Ctrl-D). |
 
@@ -140,6 +141,7 @@ Started without a task, rak opens a chat:
 | `--add-dir PATH` | Let file tools reach this folder too, besides the project (repeatable). In a chat: `/add-dir PATH`. |
 | `--any-path` | Let file tools reach outside the project folder. |
 | `--no-mcp`, `--no-skills`, `--no-memory`, `--no-notes` | Leave out MCP servers, skills, memory notes, or the after-request notes update. |
+| `--talk`, `--name NAME`, `--role TEXT`, `--talk-limit N` | [Talk mode](talk.md): this session joins the folder's room, where several rak sessions message each other. Any of the four turns it on. |
 | `--trust` | Use this folder's own `.rak/` settings and `.env` this run, as if trusted (see [Safety](safety.md)). |
 | `--tools LIST` | Only these tools, comma-separated (`--tools read_file,search_files,code_map`); MCP tools by their `server__tool` name. `--tools none` sends no tools at all: for a model that can't call tools, or a plain question for less (a one-word question measured 2,232 input tokens with every tool and 256 with none, kimi-k2.6:cloud). A name that matches no tool is said at the start. The list holds for helper agents too: a tool left out is not reachable through `delegate`. |
 | `-c`, `--continue` | Continue this folder's last chat (`rak -c "and now the tests"`). |

@@ -26,6 +26,7 @@ pub mod routines;
 pub mod sessions;
 pub mod skills;
 pub mod stall;
+pub mod talk;
 pub mod text;
 pub mod tools;
 pub mod vision;

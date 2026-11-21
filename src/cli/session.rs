@@ -64,6 +64,8 @@ pub struct Session {
     pub granted: Rc<RefCell<approval::Granted>>,
     /// Tools of the user's own saved during a request: they join when it ends.
     pub fresh_tools: rak::tools::user::Fresh,
+    /// This session's place in the folder's room (--talk); None otherwise.
+    pub talk: Option<std::sync::Arc<rak::talk::Member>>,
     /// Where those tools live: this project's folder, and the one for every project.
     pub tool_folders: (PathBuf, Option<PathBuf>),
     /// MCP servers still connecting: a chat shows its prompt first, and
@@ -362,6 +364,10 @@ pub fn run(mut o: Options) -> i32 {
     if !cwd.is_dir() {
         usage_error(&format!("{} is not a folder", cwd.display()));
     }
+    // Several agents in one folder would each rewrite the project's journal.
+    if o.talk {
+        o.no_notes = true;
+    }
     // What the folder brings of its own (.rak/mcp.json, skills, routines, a
     // .env with rak settings) is used only in a trusted folder: asked once in
     // a terminal, never in an unattended run.
@@ -491,7 +497,8 @@ pub fn run(mut o: Options) -> i32 {
     let notes = project_notes.instructions_text();
     let mut config = Config {
         system_prompt: system_prompt(&ctx.cwd, o.read_only, notes.as_deref()),
-        max_turns: turn_limit(o.max_turns, chat),
+        // In a room one request spans the whole conversation, waits included.
+        max_turns: turn_limit(o.max_turns, chat && !o.talk),
         context_window: window,
     };
     // The /init suggestion is for a chat; a one-off run has nobody to type it.
@@ -659,6 +666,17 @@ pub fn run(mut o: Options) -> i32 {
             }));
         }
     }
+    // Talk mode: this session joins the folder's room and gets the two
+    // message tools. Without a talk option nothing here runs: no folder is
+    // looked at, no thread starts.
+    let talk = o.talk.then(|| {
+        let role = o.talk_role.as_deref().unwrap_or("");
+        let member = rak::talk::join(&ctx.cwd, o.talk_name.as_deref(), &model_name, role, o.continue_last)
+            .unwrap_or_else(|why| usage_error(&format!("--talk: {why}")));
+        config.system_prompt.push_str(&rak::talk::prompt_block(&member, o.talk_limit));
+        tools.extend(rak::talk::tools(member.clone(), stop.clone(), o.talk_limit, o.continue_last));
+        member
+    });
     // The built-in tools, as the welcome panel lists them: only those a
     // --tools list keeps.
     let core_tool_names: Vec<String> = tools.iter().map(|t| t.name().to_string()).filter(|name| allowed(name)).collect();
@@ -700,7 +718,8 @@ pub fn run(mut o: Options) -> i32 {
         for name in list.iter().filter(|n| !known.contains(n)) {
             mcp_problems.push(format!("--tools: there is no tool named {name}. The tools are: {}.", known.join(", ")));
         }
-        tools.retain(|t| allowed(t.name()));
+        // The message tools stay: --talk asked for them by name.
+        tools.retain(|t| allowed(t.name()) || (o.talk && [rak::talk::SEND, rak::talk::WAIT].contains(&t.name())));
         for group in deferred.iter_mut() {
             group.tools.retain(|name| allowed(name));
         }
@@ -785,6 +804,7 @@ pub fn run(mut o: Options) -> i32 {
         mcp_pending,
         fresh_tools,
         tool_folders,
+        talk,
         sessions_dir: config_dir().map(|d| d.join("sessions")),
         project_key: rak::sessions::project_key(&ctx.cwd),
         chat_id: rak::sessions::new_id(),
@@ -838,6 +858,9 @@ pub fn run(mut o: Options) -> i32 {
         let mut ui = session.ui.borrow_mut();
         if let Some(summary) = &session.mcp_summary {
             ui.progress(Some(Style::Dim), summary);
+        }
+        if let Some(member) = &session.talk {
+            ui.progress(Some(Style::Dim), &super::talk_command::room_line(member));
         }
         for problem in &session.mcp_problems {
             ui.progress(Some(Style::Yellow), problem);

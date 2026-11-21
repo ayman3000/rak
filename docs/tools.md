@@ -27,6 +27,8 @@ What the agent can do, how every write is checked, and how rak works on a projec
 | `save_tool` | Saves a [tool of your own](#tools-of-your-own): one script, shown whole first. | yes |
 | `save_routine`, `run_routine` | Saves steps that just worked, with `{placeholders}`, so they run again back to back with no model calls between them. Each step still asks like the model's own call. Same format as sak and Naseem. | yes |
 
+Two more are there only in [talk mode](talk.md) (`--talk`): `send_message` and `wait_message`, for agents in one folder messaging each other.
+
 Two more appear only when needed: `load_tools` for a [large MCP server](mcp.md), and `artifact_read` / `artifact_search` once [old output has been set aside](#large-projects).
 
 ## Tools of your own

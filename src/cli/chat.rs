@@ -107,6 +107,7 @@ pub fn banner(s: &Session) {
                 (count > 0).then(|| ("skills".to_string(), format!("{count} (/skills)")))
             })
             .chain(vision_note(s).map(|note| ("vision".to_string(), note)))
+            .chain(s.talk.as_ref().map(|member| ("talk".to_string(), super::talk_command::room_short(member))))
             .collect(),
         tool_groups: welcome::group(
             &s.core_tools.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -902,6 +903,13 @@ pub fn run_command(s: &mut Session, line: &str) -> bool {
             }
         }
         "jobs" => jobs_command(s, args),
+        "talk" => match &s.talk {
+            Some(member) => {
+                println!("{}", super::talk_command::room_line(member));
+                println!("{}", paint(s.ui.borrow().out_color, Style::Dim, "In another terminal: rak talk log follows the conversation, rak talk say \"…\" adds a word of yours."));
+            }
+            None => println!("This chat is not in a room. Start rak with --talk (and --name NAME) to join this folder's room; rak talk --help says more."),
+        },
         "usage" | "cost" => {
             println!("  model          {} ({})", s.model, welcome::server_name(&s.backend.base_url));
             println!("  requests       {}", s.requests);

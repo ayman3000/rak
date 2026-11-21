@@ -150,6 +150,14 @@ impl Ctx {
     /// treated as outside.
     pub fn block_reason(&self, path: &Path) -> Option<String> {
         let real = real_path(path);
+        // The room of agents in talk mode: only rak writes there.
+        if real.starts_with(self.cwd.join(".rak").join("talk")) {
+            return Some(
+                "it is in .rak/talk, the room where agents in this folder leave each other messages. Only rak reads and writes \
+                 there: use send_message and wait_message when you have them, and leave the folder alone."
+                    .to_string(),
+            );
+        }
         if self.any_path || real.starts_with(&self.cwd) || self.extra.lock().unwrap().iter().any(|folder| real.starts_with(folder)) {
             return None;
         }
@@ -390,6 +398,22 @@ mod tests {
         assert_eq!(refuse_folder(&home.join("projects/shell-coach"), &never), None);
         assert_eq!(refuse_folder(&home.join("projects"), &never), None);
         assert_eq!(refuse_folder(Path::new("/tmp/work"), &never), None);
+    }
+
+    #[test]
+    fn the_room_of_agents_is_closed_to_the_file_tools() {
+        let dir = testing::temp_dir("room-closed");
+        for any_path in [false, true] {
+            let ctx = Ctx::new(&dir, any_path);
+            for inside in [".rak/talk", ".rak/talk/talk.md", ".rak/talk/msg/000001.json", ".rak/talk/here/A.json"] {
+                let why = ctx.block_reason(&ctx.resolve(inside)).unwrap_or_else(|| panic!("{inside} was open (any_path {any_path})"));
+                assert!(why.contains("send_message") && why.contains("wait_message"), "{why}");
+            }
+            // The rest of .rak, and a file that only looks alike, stay as they were.
+            assert_eq!(ctx.block_reason(&ctx.resolve(".rak/model")), None);
+            assert_eq!(ctx.block_reason(&ctx.resolve(".rak/talking.md")), None);
+            assert_eq!(ctx.block_reason(&ctx.resolve("talk/notes.md")), None);
+        }
     }
 
     #[test]

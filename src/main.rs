@@ -27,6 +27,9 @@ fn main() {
     if argv.first().map(String::as_str) == Some("update") {
         cli::update::run(&argv[1..]);
     }
+    if argv.first().map(String::as_str) == Some("talk") && cli::talk_command::is_command(&argv[1..]) {
+        cli::talk_command::run(&argv[1..]);
+    }
     let options = cli::args::parse_args(argv);
     std::process::exit(cli::session::run(options));
 }

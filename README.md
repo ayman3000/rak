@@ -36,15 +36,18 @@ curl -fsSL https://raw.githubusercontent.com/ayman3000/rak/main/install.sh | sh
 
 ## What's new
 
-**v0.1.0-alpha.46** (2026-11-19)
+**v0.1.0-alpha.47** (2026-11-22)
 
-- **A chat tells you when a newer rak is out.** One line at the start, "rak 0.1.0-alpha.47 is out (you have alpha.46). Run: rak update". Start-up is not slowed: the line comes from a check an earlier chat made, and the next check runs once a day after the prompt is up. `RAK_UPDATE_CHECK=0` turns it off. Nothing is installed until you run `rak update`.
-- **Switch a skill off without deleting it.** `/skills off NAME` and `/skills on NAME`, Tab in the `/skills` list, or just say it: "turn off the sdd-yolo skill". An off skill stays on disk, and the agent no longer sees or uses it, in this chat and later ones.
-- **A smaller binary.** The release build is now optimised for size: 17% smaller on an Apple Silicon Mac (4.03 MB to 3.36 MB), with no slowdown measured.
+- **Agents that talk to each other.** Start two rak sessions in one folder, each on the model you choose, and they message each other: `rak --talk --name A -m MODEL` in one terminal, `rak --talk --name B -m OTHER-MODEL` in another. One builds and the other reviews, or each builds a half. See [Agents that talk to each other](docs/talk.md).
+- **Two tools, only in talk mode:** `send_message` and `wait_message`. rak numbers the messages, knows who is in the room and who has left, and keeps the conversation as text. A normal chat is unchanged: same tools, same start-up time.
+- **You can watch and join in.** `rak talk log` follows the conversation, `rak talk who` lists the agents, `rak talk say "TEXT"` puts in a word of your own.
+- **A message is never permission.** Each agent still asks you before it edits a file or runs a command, whatever another agent tells it.
+- Tried with two different models, which chose a project, built a working program between them and finished by themselves. Two agents is the tested case; Windows is untested.
 
 <details>
 <summary><b>Earlier releases</b></summary>
 
+- **alpha.46:** a chat says in one line when a newer rak is out, without slowing start-up (`RAK_UPDATE_CHECK=0` turns it off); switch a skill off without deleting it (`/skills off NAME`, or just say it); a binary 17% smaller.
 - **alpha.45:** the notes question from alpha.43 became a one-line tip, so the prompt is ready at once in a project with no notes.
 - **alpha.44:** `/skills` is a list to pick from (↑/↓, Enter, type to filter); the prompt then starts with the skill's command and you type only the request.
 - **alpha.43:** the first chat in a project offers to set up its notes; a chat continued with `rak -c` remembers what you allowed (`A`, `a`, `s`) for 24 hours, says so, and `RAK_ALLOW_HOURS` changes the length.
@@ -200,6 +203,7 @@ Everything rak does, grouped by what it is for. The details are in the [docs](#d
 - **Images.** Paste a screenshot with Ctrl+V or drop in a path. A model that can see gets it directly; for one that can't, a vision model you set in the `.env` describes it ([how](docs/usage.md#images)).
 - **Servers in the background.** The agent can start a dev server and keep working; `/jobs` lists and stops them, and a chat that ends with some still running asks first.
 - **Web access:** `fetch_url` reads a page, and `web_search` searches when you give a Tavily key.
+- **Agents that talk to each other.** Start two sessions in one folder with `--talk --name A` and `--talk --name B`, each on its own model, and they message each other: one builds, the other reviews. `rak talk log` shows the conversation ([how](docs/talk.md)).
 
 ### A chat that is pleasant to use
 
@@ -273,6 +277,7 @@ The tasks are easy: a perfect score says the pipeline works, not how rak ranks. 
 | [Providers and models](docs/providers.md) | The sixteen providers, signing in with ChatGPT, choosing a model, keys, fallback, prompt caching |
 | [Tools and large projects](docs/tools.md) | Every tool, tools of your own, the write check, working on big codebases |
 | [Project notes and skills](docs/memory-and-skills.md) | The `rak/` folder, the gate, writing and adding skills |
+| [Agents that talk to each other](docs/talk.md) | Talk mode: several sessions in one folder, the two message tools, watching and joining in |
 | [MCP servers](docs/mcp.md) | Adding a server from its page, its JSON or a few questions; approvals; large servers |
 | [Safety](docs/safety.md) | What asks first, folder trust, keys, the limits |
 | [Development](docs/development.md) | rak as a library, the code layout, checks and releases |

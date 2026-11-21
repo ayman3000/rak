@@ -10,6 +10,7 @@
 //!   keys_command rak keys: the key file and what is set
 //!   login        rak login chatgpt / rak logout chatgpt: Sign in with ChatGPT
 //!   skills_command rak skills list|add|remove, and /skills add
+//!   talk_command rak talk log|who|say|clear: the room of agents started with --talk
 //!   settings     what is kept between runs
 //!   setup        first-run setup and rak setup: provider, key, model
 //!   trust        a project folder's own .rak/ and .env, used once trusted
@@ -41,6 +42,7 @@ pub mod setup;
 pub mod signals;
 pub mod skills_command;
 pub mod style;
+pub mod talk_command;
 pub mod term;
 pub mod thinking;
 pub mod trust;
