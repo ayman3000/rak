@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 pub(crate) const PROTOCOL: &str = "2025-06-18";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a stopping server's group gets after SIGTERM before SIGKILL.
+const STOP_GRACE: Duration = Duration::from_millis(300);
 /// A tool result longer than this is cut: one web page must not fill the context.
 pub(crate) const MAX_RESULT_CHARS: usize = 20_000;
 /// A tool description longer than this is cut: it is sent with every request.
@@ -272,27 +274,66 @@ fn start_program(command: &str, args: &[String], env: &BTreeMap<String, String>,
     Ok(Conn::Stdio { child, stdin, lines, errors })
 }
 
-/// Asks the program's whole process group to end, then makes sure.
+/// Asks the program's whole process group to end, then makes sure. The
+/// leader exiting is not enough: workers it started may still be running in
+/// the group, so this waits until the group is empty before it returns.
 fn stop_program(child: &mut Child) {
     running::remove(child.id());
     #[cfg(unix)]
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGTERM);
+    {
+        // The leader's pid is the group id. While the leader is unreaped
+        // (even as a zombie) that id stays allocated, so no unrelated process
+        // can take it and `killpg` only reaches this group. So the leader is
+        // not reaped until after the group has been signalled.
+        // A server that ends at once is not kept waiting for: the grace is a
+        // limit, not a pause, so quitting with several servers stays quick.
+        let group = child.id() as libc::pid_t;
+        unsafe { libc::killpg(group, libc::SIGTERM) };
+        let deadline = Instant::now() + STOP_GRACE;
+        while !leader_exited(group) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        unsafe { libc::killpg(group, libc::SIGKILL) };
+        let _ = child.wait();
+        // Reaped now: only look, never signal again. Workers may still be
+        // dying after SIGKILL, so give them a bounded moment to leave the group.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while group_has_members(group) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     #[cfg(not(unix))]
-    let _ = child.kill();
-    for _ in 0..30 {
-        if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
-            return;
+    {
+        let _ = child.kill();
+        for _ in 0..30 {
+            if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        std::thread::sleep(Duration::from_millis(10));
+        let _ = child.kill();
+        let _ = child.wait();
     }
-    #[cfg(unix)]
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+}
+
+/// True once the leader has exited, without reaping it (WNOWAIT), so its pid
+/// stays allocated as the group id. Also true when it can't be waited for.
+#[cfg(unix)]
+fn leader_exited(pid: libc::pid_t) -> bool {
+    // Zeroed first: with WNOHANG and nothing to report, POSIX leaves si_signo
+    // unset; a report sets it to SIGCHLD.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let waited = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+    waited != 0 || info.si_signo == libc::SIGCHLD
+}
+
+/// True while any process is still in the group (EPERM also means one is).
+#[cfg(unix)]
+fn group_has_members(group: libc::pid_t) -> bool {
+    if unsafe { libc::killpg(group, 0) } == 0 {
+        return true;
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The process groups of the server programs running now, kept where a
@@ -472,6 +513,88 @@ mod tests {
         assert!(tool_info(&json!({ "description": "nameless" })).is_none());
         let long = tool_info(&json!({ "name": "x", "description": "d".repeat(5_000) })).unwrap();
         assert_eq!(long.description.chars().count(), MAX_DESCRIPTION_CHARS + 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_also_stops_a_worker_that_ignores_term() {
+        use std::io::Read;
+        use std::os::unix::process::CommandExt;
+        // The program's worker ignores TERM and inherits the program's stdout,
+        // so the pipe stays open for as long as the worker lives. The leader
+        // exits at once and is left unreaped, as a zombie, before shutdown.
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "trap '' TERM; sleep 30 & echo started; exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = command.spawn().expect("spawn sh");
+        let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+        let mut first = String::new();
+        stdout.read_line(&mut first).expect("read first line");
+        assert_eq!(first.trim(), "started");
+
+        // Wait for the leader to exit without reaping it (WNOWAIT): its pid
+        // then stays allocated as the group id, as in production.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let waited = unsafe { libc::waitid(libc::P_PID, child.id() as _, &mut info, libc::WEXITED | libc::WNOWAIT) };
+        assert_eq!(waited, 0, "waitid on the leader");
+
+        // The read ends at EOF only when every process holding the pipe's
+        // write end has gone, so EOF is the proof the worker is gone. No pid
+        // is polled: a dead worker may linger as a zombie.
+        let (done, eof) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut rest = Vec::new();
+            let _ = stdout.read_to_end(&mut rest);
+            let _ = done.send(());
+        });
+
+        stop_program(&mut child);
+
+        eof.recv_timeout(Duration::from_secs(5)).expect("the worker still holds the program's output after shutdown (no EOF)");
+    }
+
+    #[cfg(unix)]
+    fn spawn_in_group(script: &str) -> Child {
+        use std::io::Read;
+        use std::os::unix::process::CommandExt;
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("spawn sh");
+        // Wait until the script is running (its trap set) before stopping it.
+        let mut byte = [0u8; 1];
+        child.stdout.as_mut().expect("stdout").read_exact(&mut byte).expect("read ready byte");
+        child
+    }
+
+    /// The grace is a limit, not a pause: a server that ends on TERM is not
+    /// waited for, so quitting with several servers stays quick.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_that_ends_on_term_is_stopped_without_waiting_out_the_grace() {
+        let mut child = spawn_in_group("echo r; exec sleep 30");
+        let started = Instant::now();
+        stop_program(&mut child);
+        assert!(started.elapsed() < STOP_GRACE, "took {:?}", started.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_server_that_ignores_term_is_killed_when_the_grace_runs_out() {
+        let mut child = spawn_in_group("trap '' TERM; echo r; while :; do sleep 1; done");
+        let started = Instant::now();
+        stop_program(&mut child);
+        assert!(started.elapsed() >= STOP_GRACE, "killed before the grace: {:?}", started.elapsed());
+        assert!(started.elapsed() < STOP_GRACE + Duration::from_secs(2), "took {:?}", started.elapsed());
+        assert!(matches!(child.try_wait(), Ok(Some(_)) | Err(_)), "the server is still running");
     }
 
     #[test]

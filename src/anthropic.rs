@@ -197,6 +197,12 @@ impl Model for Anthropic {
                 }
             }
         }
+        // A clean close is not the end: only `message_stop` completes the
+        // answer. Same rule as above: retry only while nothing is on screen.
+        if !stream.finished {
+            let message = "the answer ended before it was complete (no message_stop)".to_string();
+            return Err(if stream.shown_text { ModelError::Fatal(message) } else { ModelError::Retryable(message) });
+        }
         stream.finish()
     }
 
@@ -689,5 +695,82 @@ mod tests {
             ))
             .unwrap();
         assert!(matches!(started.push_line(&format!("data: {overloaded}")), Err(ModelError::Fatal(_))));
+    }
+
+    /// A one-shot local server: reads the request, sends `body` as an event
+    /// stream, then closes the connection (no `message_stop` unless `body` has one).
+    fn serve_stream(body: &'static str) -> u16 {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            let mut length = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut request_body = vec![0u8; length];
+            let _ = reader.read_exact(&mut request_body);
+            let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+            let _ = socket.write_all(format!("{head}{body}").as_bytes());
+        });
+        port
+    }
+
+    const CUT_BEFORE_TEXT: &str = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n";
+    const CUT_AFTER_TEXT: &str = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}\n\n",
+    );
+
+    fn stream_from(port: u16) -> (Result<Reply, ModelError>, String) {
+        let mut model = Anthropic::new(&format!("http://127.0.0.1:{port}"), "k".into(), "claude-haiku-5-5");
+        let mut shown = String::new();
+        let result = model.chat_stream(&[json!({ "role": "user", "content": "hi" })], &[], &mut |t| shown.push_str(t));
+        (result, shown)
+    }
+
+    /// The connection closing cleanly before `message_stop` is a cut-off
+    /// answer, not a finished one: retried while nothing is on screen.
+    #[test]
+    fn a_clean_eof_before_message_stop_is_retried_when_no_text_was_shown() {
+        let (result, shown) = stream_from(serve_stream(CUT_BEFORE_TEXT));
+        assert!(shown.is_empty());
+        match result {
+            Err(ModelError::Retryable(text)) => assert!(text.contains("ended before it was complete"), "{text}"),
+            other => panic!("expected Retryable, got {:?}", other.err()),
+        }
+    }
+
+    /// Once text has been shown, a retry would repeat it: fatal instead.
+    #[test]
+    fn a_clean_eof_before_message_stop_is_fatal_after_text_was_shown() {
+        let (result, shown) = stream_from(serve_stream(CUT_AFTER_TEXT));
+        assert_eq!(shown, "Hel");
+        match result {
+            Err(ModelError::Fatal(text)) => assert!(text.contains("ended before it was complete"), "{text}"),
+            other => panic!("expected Fatal, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn a_complete_stream_with_message_stop_still_succeeds() {
+        let complete = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let (result, shown) = stream_from(serve_stream(complete));
+        assert_eq!(shown, "Hi");
+        assert_eq!(result.unwrap().content, "Hi");
     }
 }
