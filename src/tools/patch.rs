@@ -67,12 +67,15 @@ pub enum ApplyError {
 pub fn parse(patch: &str) -> Option<Vec<Hunk>> {
     let mut hunks = Vec::new();
     let mut current: Option<Hunk> = None;
-    let mut raw: Vec<&str> = patch.split('\n').collect();
+    let mut raw: Vec<&str> = patch.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
     while raw.last() == Some(&"") {
         raw.pop();
     }
-    for line in raw {
-        let line = line.strip_suffix('\r').unwrap_or(line);
+    let headers = file_headers(&raw);
+    for (i, line) in raw.into_iter().enumerate() {
+        if headers[i] {
+            continue;
+        }
         if line.starts_with("@@") {
             if let Some(h) = current.take().filter(|h| !h.lines.is_empty()) {
                 hunks.push(h);
@@ -80,7 +83,7 @@ pub fn parse(patch: &str) -> Option<Vec<Hunk>> {
             current = Some(Hunk { old_start: old_start(line).unwrap_or(1), lines: Vec::new() });
             continue;
         }
-        if line.starts_with("diff --git") || line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ") {
+        if line.starts_with("diff --git") || line.starts_with("index ") {
             continue;
         }
         let Some(hunk) = current.as_mut() else { continue };
@@ -105,8 +108,13 @@ pub fn parse(patch: &str) -> Option<Vec<Hunk>> {
 /// Pure — unit-tested. The files a diff changes, from its `+++` headers
 /// (`a/`/`b/` dropped, /dev/null skipped), in order and distinct.
 pub fn targets(patch: &str) -> Vec<String> {
+    let lines: Vec<&str> = patch.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let headers = file_headers(&lines);
     let mut out: Vec<String> = Vec::new();
-    for line in patch.lines() {
+    for (i, line) in lines.iter().enumerate() {
+        if !headers[i] {
+            continue;
+        }
         let Some(name) = line.strip_prefix("+++ ") else { continue };
         let name = name.split('\t').next().unwrap_or("").trim();
         if name.is_empty() || name == "/dev/null" {
@@ -118,6 +126,52 @@ pub fn targets(patch: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Which lines are file headers. The `@@` header's counts say how many old and
+/// new lines the hunk body has; while either count is unused, every line is
+/// body content (a removed `-- item` reads as `--- item`, an added `++ x` as
+/// `+++ x`). Outside a body, `+++ name` is a header, and so is a `--- name`
+/// line directly followed by one.
+fn file_headers(lines: &[&str]) -> Vec<bool> {
+    let mut is_header = vec![false; lines.len()];
+    let (mut old_left, mut new_left) = (0usize, 0usize);
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("@@") {
+            (old_left, new_left) = hunk_counts(line);
+            continue;
+        }
+        if old_left > 0 || new_left > 0 {
+            match line.chars().next() {
+                Some('-') => old_left = old_left.saturating_sub(1),
+                Some('+') => new_left = new_left.saturating_sub(1),
+                Some('\\') => {}
+                _ => {
+                    old_left = old_left.saturating_sub(1);
+                    new_left = new_left.saturating_sub(1);
+                }
+            }
+            continue;
+        }
+        let next_is_plus = lines.get(i + 1).is_some_and(|next| next.starts_with("+++ "));
+        if line.starts_with("+++ ") || (line.starts_with("--- ") && next_is_plus) {
+            is_header[i] = true;
+        }
+    }
+    is_header
+}
+
+/// "@@ -12,7 +12,8 @@" → (7, 8): the old and new line counts (1 when omitted).
+fn hunk_counts(header: &str) -> (usize, usize) {
+    let count = |sign: char| -> usize {
+        let Some(rest) = header.find(sign).map(|at| &header[at + 1..]) else { return 0 };
+        let after_start: String = rest.chars().skip_while(char::is_ascii_digit).collect();
+        match after_start.strip_prefix(',') {
+            Some(digits) => digits.chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0),
+            None => 1,
+        }
+    };
+    (count('-'), count('+'))
 }
 
 /// "@@ -12,7 +12,8 @@" → 12.
@@ -447,6 +501,49 @@ mod tests {
         assert!(targets("+++ /dev/null\n").is_empty());
         assert_eq!(parse("just text\n-not a hunk\n"), None);
         assert_eq!(parse("@@ -3,1 +3,1 @@\r\n-a\r\n+b\r\n").unwrap()[0].lines, [Line::Remove("a".into()), Line::Add("b".into())]);
+        // A second file's header with its hunk is still a target.
+        assert_eq!(targets("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n+++ b/y.rs\t2026\n@@ -1 +1 @@\n-c\n+d\n"), ["x", "y.rs"]);
+    }
+
+    #[test]
+    fn hunk_lines_that_look_like_headers_are_content() {
+        // A file line "-- item" removed, and "++ counter" added: their
+        // diff lines are "--- item" and "+++ counter", which must not be
+        // taken for file headers.
+        let hunks = parse("@@ -1,3 +1,3 @@\n keep\n--- item\n+++ counter\n tail\n").expect("hunks");
+        assert_eq!(
+            hunks[0].lines,
+            [Line::Context("keep".into()), Line::Remove("-- item".into()), Line::Add("++ counter".into()), Line::Context("tail".into()),]
+        );
+        // Header-looking lines at the very start of a body, or right before
+        // the next hunk's body, still stay content.
+        let source = "-- a\n-- b\nc\n";
+        let patch = "@@ -1,2 +1,2 @@\n--- a\n+++ A\n--- b\n+++ B\n";
+        assert_eq!(patched(patch, source).unwrap(), "++ A\n++ B\nc\n");
+    }
+
+    #[test]
+    fn header_lookalikes_inside_a_hunk_do_not_make_a_second_file() {
+        // The only file is x; "+++ b/evil" is an added line.
+        let patch = "--- a/x\n+++ b/x\n@@ -1,2 +1,3 @@\n-a\n+b\n+++ b/evil\n c\n";
+        assert_eq!(targets(patch), ["x"]);
+        let hunks = parse(patch).expect("hunks");
+        assert_eq!(hunks.len(), 1);
+        assert!(hunks[0].lines.contains(&Line::Add("++ b/evil".into())));
+        // "--- " removed line followed by an added "+++ " line: both content.
+        assert_eq!(targets("@@ -1,2 +1,2 @@\n--- old/path\n+++ new/path\n c\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_header_lookalike_patch_applies_to_one_file() {
+        let (dir, ctx) = setup("patch-lookalike");
+        std::fs::write(dir.join("notes.md"), "-- intro\nbody\n-- end\n").unwrap();
+        let r = ApplyPatch(ctx).run(&json!({
+            "path": "notes.md",
+            "patch": "--- a/notes.md\n+++ b/notes.md\n@@ -1,3 +1,3 @@\n--- intro\n+++ start\n body\n--- end\n+++ finish\n"
+        }));
+        assert!(r.ok, "{}", r.text);
+        assert_eq!(std::fs::read_to_string(dir.join("notes.md")).unwrap(), "++ start\nbody\n++ finish\n");
     }
 
     #[test]

@@ -18,8 +18,13 @@ pub const WHOLE_ANSWER: Duration = Duration::from_secs(900);
 
 /// Pure — unit-tested. The starting limit for a server at `base_url`.
 pub fn base_for(base_url: &str, anthropic: bool) -> Duration {
-    let host = base_url.split("://").nth(1).unwrap_or(base_url).split(['/', ':']).next().unwrap_or("");
-    let local = matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "0.0.0.0") || host.ends_with(".local");
+    let authority = base_url.split("://").nth(1).unwrap_or(base_url).split('/').next().unwrap_or("");
+    // An IPv6 literal is bracketed and holds colons: take it whole, then drop the port.
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    let local = matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0") || host.ends_with(".local");
     Duration::from_secs(if local {
         900
     } else if anthropic {
@@ -82,6 +87,16 @@ mod tests {
         assert_eq!(limit(base, 40_000).as_secs(), 300);
         assert_eq!(limit(base, 4 * 60_000).as_secs(), 360);
         assert_eq!(limit(base, 4 * 150_000).as_secs(), 420);
+    }
+
+    #[test]
+    fn ipv6_loopback_is_local_whatever_the_port_and_path() {
+        assert_eq!(base_for("http://[::1]:11434/v1", false).as_secs(), 900);
+        assert_eq!(base_for("http://[::1]/v1", false).as_secs(), 900);
+        assert_eq!(base_for("http://[::1]:8080", true).as_secs(), 900, "local wins over the Anthropic default");
+        assert_eq!(base_for("https://[2001:db8::1]:8443/v1", false).as_secs(), 600, "a remote IPv6 host is not local");
+        assert_eq!(base_for("http://[fe80::1%25en0]:11434", false).as_secs(), 600);
+        assert_eq!(base_for("https://api.anthropic.com", true).as_secs(), 300);
     }
 
     #[test]
