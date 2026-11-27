@@ -150,6 +150,28 @@ impl Room {
         Ok(())
     }
 
+    /// Holds the room to one joining agent at a time, until the guard is
+    /// dropped: the name check, the archive and the first "I am here" happen
+    /// as one step, so two agents starting together can't take one name. An
+    /// OS lock (flock), so a session that crashes mid-join leaves no lock behind.
+    fn joining(&self) -> std::io::Result<std::fs::File> {
+        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.dir.join("join.lock"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            loop {
+                if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                    break;
+                }
+                let why = std::io::Error::last_os_error();
+                if why.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(why);
+                }
+            }
+        }
+        Ok(file)
+    }
+
     /// Who is in the room now, by name. An agent whose file went quiet is left out.
     pub fn present(&self) -> Vec<Present> {
         let mut found: Vec<Present> = Vec::new();
@@ -368,6 +390,8 @@ impl Drop for Member {
 pub fn join(project: &Path, name: Option<&str>, model: &str, role: &str, continued: bool) -> Result<Arc<Member>, String> {
     let room = Room::in_project(project);
     room.prepare().map_err(|why| format!("the room {} can't be used: {why}", room.dir().display()))?;
+    // Held until this agent's first beat is written, so the next to join sees it.
+    let one_at_a_time = room.joining().map_err(|why| format!("the room {} can't be joined: {why}", room.dir().display()))?;
     let present = room.present();
     let taken: Vec<String> = present.iter().map(|p| p.name.clone()).collect();
     let name = match name {
@@ -385,6 +409,7 @@ pub fn join(project: &Path, name: Option<&str>, model: &str, role: &str, continu
     }
     let me = Present { name, model: model.to_string(), role: role.split_whitespace().collect::<Vec<_>>().join(" ") };
     room.beat(&me);
+    drop(one_at_a_time);
     let quiet = Arc::new(AtomicBool::new(false));
     let thread = {
         let (room, me, quiet) = (room.clone(), me.clone(), quiet.clone());
@@ -804,6 +829,46 @@ mod tests {
         drop(again);
         assert!(b.others().is_empty());
         assert!(!project.join(".rak/talk/here/A.json").exists());
+    }
+
+    /// Joins `count` agents into one room all at the same moment.
+    fn join_at_once(project: &Path, count: usize, name: Option<&'static str>) -> Vec<Result<Arc<Member>, String>> {
+        let start = Arc::new(std::sync::Barrier::new(count));
+        let threads: Vec<_> = (0..count)
+            .map(|_| {
+                let (project, start) = (project.to_path_buf(), start.clone());
+                std::thread::spawn(move || {
+                    start.wait();
+                    join(&project, name, "m", "", false)
+                })
+            })
+            .collect();
+        threads.into_iter().map(|t| t.join().unwrap()).collect()
+    }
+
+    #[test]
+    fn agents_joining_at_the_same_moment_never_get_the_same_name() {
+        for round in 0..5 {
+            let members: Vec<Arc<Member>> =
+                join_at_once(&temp_dir(&format!("talk-join-race-{round}")), 8, None).into_iter().map(Result::unwrap).collect();
+            let mut names: Vec<String> = members.iter().map(|m| m.me.name.to_ascii_lowercase()).collect();
+            names.sort();
+            names.dedup();
+            assert_eq!(names.len(), members.len(), "two agents took one name: {names:?}");
+            // Leaving waits out the heartbeat's poll; leave together, not in turn.
+            let leaving: Vec<_> = members.into_iter().map(|m| std::thread::spawn(move || drop(m))).collect();
+            leaving.into_iter().for_each(|t| t.join().unwrap());
+        }
+    }
+
+    #[test]
+    fn one_name_asked_for_at_the_same_moment_goes_to_one_agent() {
+        for round in 0..5 {
+            let results = join_at_once(&temp_dir(&format!("talk-name-race-{round}")), 8, Some("A"));
+            let joined = results.iter().filter(|r| r.is_ok()).count();
+            assert_eq!(joined, 1, "{joined} agents joined as A");
+            assert!(results.iter().filter_map(|r| r.as_ref().err()).all(|why| why.contains("already in this room")));
+        }
     }
 
     #[test]
