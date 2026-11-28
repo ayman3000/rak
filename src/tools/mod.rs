@@ -117,6 +117,9 @@ pub struct Ctx {
     pub stop: crate::interrupt::Stop,
     /// Commands run_shell started in the background (servers), for /jobs.
     pub jobs: shell::Jobs,
+    /// A writing helper's lane: when set, edits reach only these paths
+    /// (reads still reach the whole project).
+    pub write_limit: Option<Vec<PathBuf>>,
 }
 
 impl Ctx {
@@ -128,7 +131,42 @@ impl Ctx {
             seen: Mutex::new(HashMap::new()),
             stop: Default::default(),
             jobs: Default::default(),
+            write_limit: None,
         })
+    }
+
+    /// A copy of this context whose edits reach only `paths` (a writing
+    /// helper's lane). Each path is resolved like any other.
+    pub fn limited_to(&self, paths: &[String]) -> Arc<Self> {
+        Arc::new(Ctx {
+            cwd: self.cwd.clone(),
+            any_path: self.any_path,
+            extra: Mutex::new(self.extra_folders()),
+            seen: Mutex::new(HashMap::new()),
+            stop: self.stop.clone(),
+            jobs: Default::default(),
+            // Real paths, so the sandbox's rules (which see real paths) match them.
+            write_limit: Some(paths.iter().map(|p| real_path(&self.resolve(p))).collect()),
+        })
+    }
+
+    /// Why this path may not be written, or None when it may: the reading
+    /// rules plus a writing helper's lane.
+    pub fn write_block_reason(&self, path: &Path) -> Option<String> {
+        if let Some(why) = self.block_reason(path) {
+            return Some(why);
+        }
+        let lane = self.write_limit.as_ref()?;
+        // Only where the write really lands counts, so a link can't lead out.
+        let real = landing_path(path);
+        if lane.iter().any(|p| real.starts_with(real_path(p))) {
+            return None;
+        }
+        let list: Vec<String> = lane.iter().map(|p| p.display().to_string()).collect();
+        Some(format!(
+            "it is outside this helper's assigned paths ({}). Leave it alone and say in your answer what change it needs",
+            list.join(", ")
+        ))
     }
 
     /// `~` expanded, relative paths joined to the project folder, `.` and `..`
@@ -276,6 +314,19 @@ pub fn normalize(path: &Path) -> PathBuf {
 /// The path with symlinks resolved. The path may not exist yet (a file about
 /// to be written): the deepest folder that does exist is resolved and the rest
 /// is kept as written.
+/// Where writing `path` really lands: `real_path`, except that a final link
+/// is followed even when its target doesn't exist yet (writing it would
+/// create the target). A chain of links is followed a few steps.
+fn landing_path(path: &Path) -> PathBuf {
+    let mut path = normalize(path);
+    for _ in 0..8 {
+        let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+        let Some(target) = is_link.then(|| std::fs::read_link(&path).ok()).flatten() else { break };
+        path = normalize(&path.parent().map(|parent| parent.join(&target)).unwrap_or(target));
+    }
+    real_path(&path)
+}
+
 pub fn real_path(path: &Path) -> PathBuf {
     let path = normalize(path);
     let mut existing = path.as_path();
@@ -477,5 +528,37 @@ mod sizes {
         for t in &tools {
             println!("{:>6} {}", super::definition(t.as_ref()).to_string().len(), t.name());
         }
+    }
+
+    #[test]
+    fn a_writing_helper_edits_only_its_lane_but_reads_everywhere() {
+        let dir = std::env::temp_dir().join(format!("rak-lane-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("frontend")).unwrap();
+        let ctx = crate::tools::Ctx::new(&dir, false).limited_to(&["frontend".to_string()]);
+        assert!(ctx.write_block_reason(&ctx.resolve("frontend/app.js")).is_none());
+        assert!(ctx.write_block_reason(&ctx.resolve("frontend/new/deep.js")).is_none(), "new files in the lane");
+        let why = ctx.write_block_reason(&ctx.resolve("backend/api.rs")).unwrap();
+        assert!(why.contains("assigned paths"), "{why}");
+        assert!(ctx.block_reason(&ctx.resolve("backend/api.rs")).is_none(), "reading stays open");
+        assert!(crate::tools::Ctx::new(&dir, false).write_block_reason(&ctx.resolve("backend/api.rs")).is_none(), "no lane: no limit");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_the_lane_does_not_lead_out_of_it() {
+        let dir = std::env::temp_dir().join(format!("rak-lane-link-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("frontend")).unwrap();
+        std::fs::create_dir_all(dir.join("backend")).unwrap();
+        std::os::unix::fs::symlink(dir.join("backend"), dir.join("frontend/to-backend")).unwrap();
+        // A link to a file that doesn't exist yet: writing it would create the target.
+        std::os::unix::fs::symlink(dir.join("backend/new.rs"), dir.join("frontend/dangling.rs")).unwrap();
+        std::os::unix::fs::symlink(dir.join("frontend/real"), dir.join("frontend/inside")).unwrap();
+        let ctx = crate::tools::Ctx::new(&dir, false).limited_to(&["frontend".to_string()]);
+        for escape in ["frontend/to-backend/api.rs", "frontend/dangling.rs"] {
+            assert!(ctx.write_block_reason(&ctx.resolve(escape)).is_some(), "{escape} led out of the lane");
+        }
+        assert!(ctx.write_block_reason(&ctx.resolve("frontend/inside")).is_none(), "a link that stays in the lane is fine");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

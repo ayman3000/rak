@@ -60,6 +60,8 @@ KEYS (run `rak keys` to create the key file from a template)
 BEHAVIOUR
   -y, --yes               run every tool without asking
       --read-only         no edits and no commands: read and report
+      --check-only        read-only, plus run_shell for tests and builds; on macOS the
+                          sandbox refuses any write to the project (elsewhere: read-only)
       --add-dir PATH      let file tools reach this folder too (repeatable); in a chat,
                           /add-dir PATH does the same
       --any-path          let file tools reach outside the project folder
@@ -136,6 +138,9 @@ pub struct Options {
     pub no_stream: bool,
     pub yes: bool,
     pub read_only: bool,
+    /// --check-only: read-only, and run_shell runs where the OS refuses
+    /// writes to the project. Always set together with `read_only`.
+    pub check_only: bool,
     pub any_path: bool,
     /// Folders the file tools may reach besides the project (--add-dir).
     pub add_dirs: Vec<String>,
@@ -231,6 +236,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
         no_stream: false,
         yes: false,
         read_only: false,
+        check_only: false,
         any_path: false,
         add_dirs: Vec::new(),
         no_mcp: false,
@@ -298,6 +304,7 @@ pub fn parse_args(args: Vec<String>) -> Options {
             "--no-stream" => o.no_stream = true,
             "-y" | "--yes" => o.yes = true,
             "--read-only" => o.read_only = true,
+            "--check-only" => (o.read_only, o.check_only) = (true, true),
             "--any-path" => o.any_path = true,
             "--add-dir" => o.add_dirs.push(value("--add-dir")),
             "--no-mcp" => o.no_mcp = true,
@@ -387,5 +394,13 @@ mod tests {
         assert!(!o.review);
         let o = super::parse_args(["--vision-provider", "ollama", "--vision-model", "qwen-vl", "look"].map(String::from).to_vec());
         assert_eq!((o.vision_provider.as_deref(), o.vision_model.as_deref()), (Some("ollama"), Some("qwen-vl")));
+    }
+
+    #[test]
+    fn check_only_is_read_only_with_commands() {
+        let o = super::parse_args(["--check-only", "--name", "Checker"].map(String::from).to_vec());
+        assert!(o.read_only && o.check_only && o.talk);
+        let plain = super::parse_args(["--read-only"].map(String::from).to_vec());
+        assert!(plain.read_only && !plain.check_only);
     }
 }

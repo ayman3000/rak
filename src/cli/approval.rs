@@ -207,7 +207,10 @@ impl Granted {
     }
 }
 
-/// What the prompt needs to know.
+/// What the prompt needs to know. A clone shares everything with the
+/// original: the writing helpers' prompter is one, so auto mode, /yes and
+/// the "always" answers cover them too.
+#[derive(Clone)]
 pub struct Prompter {
     pub ui: Rc<RefCell<Ui>>,
     /// Auto mode: shared with /yes, which turns it on and off.
@@ -412,5 +415,43 @@ mod tests {
             ),
             "{asked}"
         );
+    }
+
+    #[test]
+    fn auto_mode_and_always_answers_cover_the_helpers_prompter_too() {
+        let ui = Rc::new(RefCell::new(Ui {
+            chat: false,
+            show: false,
+            out_color: false,
+            err_color: false,
+            live: false,
+            renderer: None,
+            line_open: false,
+            asked: false,
+            thinking: None,
+        }));
+        // No terminal: anything not allowed is a no, so nothing waits for input.
+        let main = Prompter {
+            ui,
+            auto: Rc::new(Cell::new(false)),
+            stop: Stop::new(),
+            server_of: Default::default(),
+            granted: Default::default(),
+            interactive: false,
+            color: false,
+        };
+        let mut helper = prompter(main.clone());
+        let args = json!({ "path": "a.txt" });
+        assert_eq!(helper("write", &args), Approval::No);
+
+        // /yes in the chat turns auto mode on: the helper is not asked.
+        main.auto.set(true);
+        assert_eq!(helper("write", &args), Approval::Yes);
+        main.auto.set(false);
+        assert_eq!(helper("write", &args), Approval::No);
+
+        // An A answered for the main agent counts for the helper.
+        main.granted.borrow_mut().everything = true;
+        assert_eq!(helper("write", &args), Approval::Yes);
     }
 }

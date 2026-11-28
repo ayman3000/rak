@@ -130,6 +130,11 @@ const BIG_PROJECTS: &str = "\n\nIn a codebase you don't know yet, start with cod
      (read_file with start_line and end_line). Give a question that means reading many files to delegate, so your own context \
      keeps room for the work. For work with three or more steps, keep a todo list.";
 
+/// Added in --check-only mode, after the read-only note.
+const CHECK_ONLY: &str = "\n\nCHECK-ONLY MODE: besides reading, you have run_shell to run tests, builds and other checks. \
+     The operating system refuses any write to the project folder, so you cannot change files; report what must change \
+     instead. Commands that only write elsewhere (a temporary folder, the build folder rak set) still work.";
+
 /// Which API rak speaks, where, and with which key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Backend {
@@ -556,6 +561,20 @@ pub fn run(mut o: Options) -> i32 {
     // writes files of its own into the project it was given.
     let keeps = (chat || !o.yes) && !o.read_only;
     let mut tools = core_tools(&ctx, o.read_only);
+    // --check-only: a checker that runs tests but cannot change the project.
+    // The sandbox enforces it; with no sandbox the run stays plain read-only.
+    if o.check_only {
+        match rak::tools::shell::RunShell::guarded(ctx.clone()) {
+            Some(shell) => {
+                config.system_prompt.push_str(CHECK_ONLY);
+                tools.push(Box::new(shell));
+            }
+            None => eprintln!(
+                "{}",
+                paint(err_color, Style::Yellow, "--check-only: the sandbox can't be applied here (not macOS, or already inside a sandbox); this run is read-only with no commands.")
+            ),
+        }
+    }
     // Web search, when there is a Tavily key. It only reads, so read-only mode keeps it.
     if let Some(tavily) = key("TAVILY_API_KEY") {
         tools.push(Box::new(WebSearch::new(tavily)));
@@ -614,7 +633,11 @@ pub fn run(mut o: Options) -> i32 {
     let auto = Rc::new(Cell::new(o.yes));
     let interactive = stdin_tty && std::io::stderr().is_terminal();
     let asker = chain::Asker { o: o.clone(), stop: stop.clone(), ui: ui.clone(), auto: auto.clone(), interactive, color: err_color };
+    // A writing helper's edits and commands are asked about like the agent's
+    // own; the question is set up below, with the agent's.
+    let helper_approve: HelperApprove = Default::default();
     let delegate = rak::delegate::Delegate::new(Box::new(Helpers {
+        approve: helper_approve.clone(),
         current: helper_model.clone(),
         effort: helper_effort.clone(),
         o: o.clone(),
@@ -758,7 +781,7 @@ pub fn run(mut o: Options) -> i32 {
     // another way.
     let server_of = Rc::new(RefCell::new(std::mem::take(&mut connected.server_of)));
     let granted: Rc<RefCell<approval::Granted>> = Default::default();
-    agent.on_approval(approval::prompter(approval::Prompter {
+    let asking = approval::Prompter {
         ui: ui.clone(),
         auto: auto.clone(),
         stop: stop.clone(),
@@ -766,7 +789,11 @@ pub fn run(mut o: Options) -> i32 {
         granted: granted.clone(),
         interactive,
         color: err_color,
-    }));
+    };
+    // Writing helpers get a clone: the same auto mode (-y, /yes) and the
+    // same "always" answers (a, s, A), so in auto mode they are not asked either.
+    *helper_approve.borrow_mut() = Some(Box::new(approval::prompter(asking.clone())));
+    agent.on_approval(approval::prompter(asking));
 
     agent.on_event(output::reporter(log.clone(), ui.clone()));
 
@@ -934,7 +961,11 @@ pub fn tool_allowed(list: Option<&[String]>, name: &str) -> bool {
     list.is_none_or(|list| list.iter().any(|n| n == name))
 }
 
+/// How a writing helper's tool is approved: set once the session's question is.
+type HelperApprove = Rc<RefCell<Option<Box<dyn FnMut(&str, &serde_json::Value) -> rak::agent::Approval>>>>;
+
 struct Helpers {
+    approve: HelperApprove,
     current: Rc<RefCell<(Backend, String, usize)>>,
     effort: Rc<RefCell<(Option<String>, bool)>>,
     o: Options,
@@ -948,17 +979,35 @@ struct Helpers {
 }
 
 impl rak::delegate::Host for Helpers {
-    fn make(&self) -> rak::delegate::Helper {
+    fn make(&self, writes: Option<&[String]>) -> rak::delegate::Helper {
         let (backend, model, window) = self.current.borrow().clone();
-        let mut tools = rak::tools::reading_tools(&self.ctx);
+        // A writing helper: its own context whose edits reach only its lane,
+        // and a shell sandboxed to the same lane. Without the sandbox (not
+        // macOS, or nested) it still edits its lane but runs no commands.
+        let lane = writes.filter(|_| !self.o.read_only && !self.o.check_only).map(|w| self.ctx.limited_to(w));
+        let mut tools = rak::tools::reading_tools(lane.as_ref().unwrap_or(&self.ctx));
+        if let Some(ctx) = &lane {
+            tools.push(Box::new(rak::tools::fs::WriteFile(ctx.clone())));
+            tools.push(Box::new(rak::tools::fs::EditFile(ctx.clone())));
+            tools.push(Box::new(rak::tools::patch::ApplyPatch(ctx.clone())));
+            if let Some(shell) = rak::tools::shell::RunShell::for_lane(ctx.clone()) {
+                tools.push(Box::new(shell));
+            }
+        }
         if let Some(tavily) = &self.tavily {
             tools.push(Box::new(WebSearch::new(tavily.clone())));
         }
         // A --tools list holds for a helper too: a tool left out of the run
         // is not reachable through delegate.
         tools.retain(|t| tool_allowed(self.o.tools.as_deref(), t.name()));
-        let mut system_prompt = system_prompt(&self.ctx.cwd, true, self.notes.as_deref());
-        system_prompt.push_str(rak::delegate::HELPER_NOTE);
+        let mut system_prompt = system_prompt(&self.ctx.cwd, lane.is_none(), self.notes.as_deref());
+        match (&lane, writes) {
+            (Some(_), Some(paths)) => {
+                system_prompt.push_str(rak::delegate::WRITER_NOTE);
+                system_prompt.push_str(&format!("\nYour assigned paths: {}.", paths.join(", ")));
+            }
+            _ => system_prompt.push_str(rak::delegate::HELPER_NOTE),
+        }
         rak::delegate::Helper {
             model: {
                 let mut o = self.o.clone();
@@ -988,6 +1037,12 @@ impl rak::delegate::Host for Helpers {
             rak::delegate::Step::Tool { name, args } => {
                 self.ui.borrow_mut().progress(Some(Style::Dim), &format!("    ↳ {tag}{}", output::describe(name, args)));
             }
+            rak::delegate::Step::Summary(line) => {
+                let style = if line.starts_with("done") { Style::Green } else { Style::Yellow };
+                let mark = if helper.is_some() { format!("    ✓ {tag}") } else { "    ✓ helper: ".into() };
+                let mark = if line.starts_with("done") { mark } else { mark.replacen('✓', "✗", 1) };
+                self.ui.borrow_mut().progress(Some(style), &output::fit(&format!("{mark}{line}")));
+            }
             rak::delegate::Step::FellBack { to, why, failure } => {
                 let mut ui = self.ui.borrow_mut();
                 let asked = std::mem::take(&mut ui.asked);
@@ -996,6 +1051,16 @@ impl rak::delegate::Host for Helpers {
                     ui.progress(Some(style), &output::fit(&format!("{mark}{line}")));
                 }
             }
+        }
+    }
+    fn resolve(&self, path: &str) -> std::path::PathBuf {
+        rak::tools::real_path(&self.ctx.resolve(path))
+    }
+    fn approve(&self, _helper: Option<usize>, name: &str, args: &serde_json::Value) -> rak::agent::Approval {
+        // Not set up (it always is before a request runs): refuse.
+        match self.approve.borrow_mut().as_mut() {
+            Some(ask) => ask(name, args),
+            None => rak::agent::Approval::No,
         }
     }
     fn fall_back(&self, index: usize, why: &str, failure: rak::fallback::Failure) -> rak::delegate::Offer {

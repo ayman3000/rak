@@ -174,38 +174,66 @@ impl Room {
 
     /// Who is in the room now, by name. An agent whose file went quiet is left out.
     pub fn present(&self) -> Vec<Present> {
+        self.read_present(false).unwrap_or_default()
+    }
+
+    fn read_present(&self, strict: bool) -> std::io::Result<Vec<Present>> {
         let mut found: Vec<Present> = Vec::new();
-        let Ok(entries) = std::fs::read_dir(self.dir.join("here")) else { return found };
-        for entry in entries.flatten() {
+        // An agent leaves by deleting its file, without the join lock: a file
+        // listed and then not found has left, which is not an error.
+        let gone = |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound;
+        for entry in std::fs::read_dir(self.dir.join("here"))? {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) if strict && !gone(&e) => return Err(e),
+                Err(_) => continue,
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let fresh =
-                entry.metadata().and_then(|m| m.modified()).ok().and_then(|at| at.elapsed().ok()).is_none_or(|age| age < GONE_AFTER);
-            if !fresh {
+            let modified = entry.metadata().and_then(|m| m.modified());
+            if let Err(e) = &modified {
+                if gone(e) {
+                    continue;
+                }
+                if strict {
+                    return Err(std::io::Error::new(e.kind(), format!("{}: {e}", path.display())));
+                }
+            }
+            if modified.ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age >= GONE_AFTER) {
                 continue;
             }
-            let Some(value) = std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok()) else {
-                continue;
+            let value: Value = match std::fs::read_to_string(&path).and_then(|s| Ok(serde_json::from_str(&s)?)) {
+                Ok(value) => value,
+                Err(e) if strict && !gone(&e) => return Err(std::io::Error::new(e.kind(), format!("{}: {e}", path.display()))),
+                Err(_) => continue,
             };
             let text = |key: &str| value[key].as_str().unwrap_or("").to_string();
             if !text("name").is_empty() {
                 found.push(Present { name: text("name"), model: text("model"), role: text("role") });
+            } else if strict {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}: missing agent name", path.display())));
             }
         }
         found.sort_by(|a, b| a.name.cmp(&b.name));
-        found
+        Ok(found)
     }
 
     /// Says "I am here": written whole, then moved into place.
     pub fn beat(&self, me: &Present) {
+        let _ = self.try_beat(me);
+    }
+
+    fn try_beat(&self, me: &Present) -> std::io::Result<()> {
         let body = json!({ "name": me.name, "model": me.model, "role": me.role, "pid": std::process::id(), "at": now_secs() });
         let file = self.dir.join("here").join(format!("{}.json", me.name));
         let temp = self.dir.join("here").join(format!(".{}.{}.tmp", me.name, std::process::id()));
-        if std::fs::write(&temp, body.to_string()).is_ok() && std::fs::rename(&temp, &file).is_err() {
+        let result = std::fs::write(&temp, body.to_string()).and_then(|()| std::fs::rename(&temp, &file));
+        if result.is_err() {
             let _ = std::fs::remove_file(&temp);
         }
+        result
     }
 
     pub fn leave(&self, name: &str) {
@@ -392,7 +420,7 @@ pub fn join(project: &Path, name: Option<&str>, model: &str, role: &str, continu
     room.prepare().map_err(|why| format!("the room {} can't be used: {why}", room.dir().display()))?;
     // Held until this agent's first beat is written, so the next to join sees it.
     let one_at_a_time = room.joining().map_err(|why| format!("the room {} can't be joined: {why}", room.dir().display()))?;
-    let present = room.present();
+    let present = room.read_present(true).map_err(|why| format!("can't read membership in {}: {why}", room.dir().display()))?;
     let taken: Vec<String> = present.iter().map(|p| p.name.clone()).collect();
     let name = match name {
         Some(name) => {
@@ -404,11 +432,14 @@ pub fn join(project: &Path, name: Option<&str>, model: &str, role: &str, continu
         }
         None => free_name(&taken),
     };
-    if present.is_empty() && !continued {
-        room.archive().map_err(|why| format!("the earlier conversation can't be set aside: {why}"))?;
-    }
     let me = Present { name, model: model.to_string(), role: role.split_whitespace().collect::<Vec<_>>().join(" ") };
-    room.beat(&me);
+    room.try_beat(&me).map_err(|why| format!("can't register {} in {}: {why}", me.name, room.dir().display()))?;
+    if present.is_empty() && !continued {
+        if let Err(why) = room.archive() {
+            room.leave(&me.name);
+            return Err(format!("the earlier conversation can't be set aside: {why}"));
+        }
+    }
     drop(one_at_a_time);
     let quiet = Arc::new(AtomicBool::new(false));
     let thread = {
@@ -829,6 +860,46 @@ mod tests {
         drop(again);
         assert!(b.others().is_empty());
         assert!(!project.join(".rak/talk/here/A.json").exists());
+    }
+
+    #[test]
+    fn join_refuses_unreadable_membership() {
+        let project = temp_dir("talk-broken-membership");
+        let room = Room::in_project(&project);
+        room.send("B", "all", "keep", false).unwrap();
+        std::fs::write(room.dir().join("here/B.json"), "{").unwrap();
+        assert!(room.present().is_empty());
+        assert!(join(&project, Some("A"), "m", "", false).is_err());
+        assert!(room.message_file(1).is_file());
+        assert!(!room.dir().join("here/A.json").exists());
+    }
+
+    /// An agent leaving (its file deleted) while another joins: the file is
+    /// listed, then gone by the time it is read. That agent has left; the
+    /// join goes ahead.
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_leaving_while_another_joins_does_not_stop_the_join() {
+        let project = temp_dir("talk-leaving-while-joining");
+        let room = Room::in_project(&project);
+        room.prepare().unwrap();
+        std::os::unix::fs::symlink(room.dir().join("here/gone-already"), room.dir().join("here/B.json")).unwrap();
+        let joined = join(&project, Some("A"), "m", "", false);
+        assert!(joined.is_ok(), "{:?}", joined.err());
+    }
+
+    #[test]
+    fn join_refuses_failed_registration() {
+        let project = temp_dir("talk-broken-registration");
+        let room = Room::in_project(&project);
+        room.send("B", "all", "keep", false).unwrap();
+        let blocked = room.dir().join(format!("here/.A.{}.tmp", std::process::id()));
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(join(&project, Some("A"), "m", "", false).is_err());
+        assert!(room.message_file(1).is_file());
+        assert!(!room.dir().join("here/A.json").exists());
+        std::fs::remove_dir(blocked).unwrap();
+        assert!(join(&project, Some("A"), "m", "", true).is_ok());
     }
 
     /// Joins `count` agents into one room all at the same moment.

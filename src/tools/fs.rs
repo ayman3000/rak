@@ -110,7 +110,7 @@ impl Tool for WriteFile {
             return ToolResult::err("write_file requires `content`.");
         };
         let path = self.0.resolve(raw);
-        if let Some(reason) = self.0.block_reason(&path) {
+        if let Some(reason) = self.0.write_block_reason(&path) {
             return ToolResult::err(format!("Refusing to write {raw}: {reason}."));
         }
         let append = bool_arg(args, "append").unwrap_or(false);
@@ -199,7 +199,7 @@ impl Tool for EditFile {
         };
         let replace_all = bool_arg(args, "replace_all").unwrap_or(false);
         let path = self.0.resolve(raw);
-        if let Some(reason) = self.0.block_reason(&path) {
+        if let Some(reason) = self.0.write_block_reason(&path) {
             return ToolResult::err(format!("Refusing to edit {raw}: {reason}."));
         }
         let source = match read_text(&path, raw, " to edit") {
