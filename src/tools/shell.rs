@@ -30,6 +30,10 @@ pub struct RunShell {
     /// Background commands still to clean up after: each log, and whether its
     /// command has ended (set by the thread that reaps it).
     logs: Mutex<Vec<(PathBuf, Arc<AtomicBool>)>>,
+    /// Check-only mode (--check-only): commands run, but the OS refuses any
+    /// write inside the project and the folders added to it. False: commands
+    /// may write anywhere they normally could.
+    pub guarded: bool,
 }
 
 impl Drop for RunShell {
@@ -53,7 +57,35 @@ impl RunShell {
             background_grace: Duration::from_millis(2_500),
             log_dir: std::env::temp_dir(),
             logs: Mutex::new(Vec::new()),
+            guarded: false,
         }
+    }
+
+    /// A run_shell whose commands cannot write the project: tests and builds
+    /// run, edits fail. None where there is no sandbox to enforce it (only
+    /// macOS's sandbox-exec is used), so the caller leaves the tool out.
+    pub fn guarded(ctx: Arc<Ctx>) -> Option<Self> {
+        // Probed once, for real: inside another sandbox (a benchmark, some CI)
+        // macOS refuses to apply a second one, and every command would fail.
+        let works = cfg!(target_os = "macos") && sandbox_works(std::slice::from_ref(&ctx.cwd));
+        works.then(|| {
+            let mut shell = RunShell::new(ctx);
+            shell.guarded = true;
+            shell
+        })
+    }
+
+    /// A run_shell for a writing helper: like `guarded`, but the helper's
+    /// lane (`ctx.write_limit`) stays writable. None without a sandbox.
+    pub fn for_lane(ctx: Arc<Ctx>) -> Option<Self> {
+        Self::guarded(ctx)
+    }
+
+    /// The folders a guarded command may not write: the project and the added ones.
+    fn locked(&self) -> Vec<PathBuf> {
+        let mut folders = vec![self.ctx.cwd.clone()];
+        folders.extend(self.ctx.extra_folders());
+        folders
     }
 }
 
@@ -94,6 +126,16 @@ impl Tool for RunShell {
         };
         if !cwd.is_dir() {
             return ToolResult::err(format!("working_directory is not a folder: {}", cwd.display()));
+        }
+        if self.guarded {
+            let open = self.ctx.write_limit.clone().unwrap_or_default();
+            let mut cmd = guarded_command(command, &cwd, &self.locked(), &open);
+            return if bool_arg(args, "background").unwrap_or_else(|| looks_like_long_lived_server(command)) {
+                ToolResult::err("Check-only mode runs commands to completion; background servers are not available.")
+            } else {
+                let timeout = effective_timeout(int_arg(args, "timeout_seconds"), self.default_timeout);
+                self.run_command(&mut cmd, timeout)
+            };
         }
         let background = bool_arg(args, "background").unwrap_or_else(|| looks_like_long_lived_server(command));
         if background {
@@ -164,6 +206,66 @@ fn shell_command(command: &str, cwd: &Path) -> Command {
     cmd
 }
 
+const SANDBOX: &str = "/usr/bin/sandbox-exec";
+
+/// The sandbox profile for a guarded command: everything allowed except
+/// writing inside `locked`.
+pub fn guard_profile(locked: &[PathBuf]) -> String {
+    lane_profile(locked, &[])
+}
+
+/// Like `guard_profile`, but writes inside `open` are allowed again (a
+/// writing helper's lane). Later rules win in a sandbox profile.
+pub fn lane_profile(locked: &[PathBuf], open: &[PathBuf]) -> String {
+    let quote = |p: &Path| p.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    let paths: Vec<String> = locked.iter().map(|p| format!("(subpath \"{}\")", quote(p))).collect();
+    let mut profile = format!("(version 1)\n(allow default)\n(deny file-write* {})\n", paths.join(" "));
+    if !open.is_empty() {
+        let open: Vec<String> = open.iter().map(|p| format!("(subpath \"{}\")", quote(p))).collect();
+        profile.push_str(&format!("(allow file-write* {})\n", open.join(" ")));
+    }
+    profile
+}
+
+/// Whether sandbox-exec exists and can apply the guard here.
+pub fn sandbox_works(locked: &[PathBuf]) -> bool {
+    Path::new(SANDBOX).exists()
+        && Command::new(SANDBOX)
+            .arg("-p")
+            .arg(guard_profile(locked))
+            .arg("/usr/bin/true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+}
+
+/// `command` under sandbox-exec, in its own process group like any other.
+/// Cargo's build folder usually sits inside the project, so it is moved to a
+/// temporary one unless the person set it already.
+fn guarded_command(command: &str, cwd: &Path, locked: &[PathBuf], open: &[PathBuf]) -> Command {
+    let mut cmd = Command::new(SANDBOX);
+    let shell = ["/bin/bash", "/usr/bin/bash"].into_iter().find(|p| Path::new(p).exists()).unwrap_or("/bin/sh");
+    cmd.arg("-p").arg(lane_profile(locked, open)).arg(shell).arg("-c").arg(command);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    if std::env::var_os("CARGO_TARGET_DIR").is_none() {
+        let name = format!("rak-check-target-{:x}", fxhash(&locked[0].display().to_string()));
+        cmd.env("CARGO_TARGET_DIR", std::env::temp_dir().join(name));
+    }
+    cmd.current_dir(cwd).stdin(Stdio::null());
+    cmd
+}
+
+/// A stable short hash, so one project reuses one build folder.
+fn fxhash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+}
+
 pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     unsafe {
@@ -185,11 +287,15 @@ fn exit_code(status: ExitStatus) -> i32 {
 
 impl RunShell {
     fn run_foreground(&self, command: &str, cwd: &Path, timeout: Duration) -> ToolResult {
+        self.run_command(&mut shell_command(command, cwd), timeout)
+    }
+
+    /// Runs a prepared command to its end or `timeout`, with its output.
+    fn run_command(&self, cmd: &mut Command, timeout: Duration) -> ToolResult {
         let (mut reader, writer) = match std::io::pipe() {
             Ok(p) => p,
             Err(e) => return ToolResult::err(format!("Failed to launch shell: {e}")),
         };
-        let mut cmd = shell_command(command, cwd);
         match writer.try_clone() {
             Ok(copy) => cmd.stdout(copy).stderr(writer),
             Err(e) => return ToolResult::err(format!("Failed to launch shell: {e}")),
@@ -198,7 +304,8 @@ impl RunShell {
             Ok(c) => c,
             Err(e) => return ToolResult::err(format!("Failed to launch shell: {e}")),
         };
-        drop(cmd); // closes our copies of the pipe's write end
+        // Replacing them closes our copies of the pipe's write end.
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
 
         // Output is collected on its own thread, so a command that prints a
         // lot never blocks on a full pipe. Its start and its end are kept (a
@@ -516,6 +623,41 @@ mod tests {
         RunShell::new(Ctx::new(&temp_dir(label), false))
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn check_only_runs_commands_but_cannot_write_the_project() {
+        let dir = temp_dir("guarded");
+        std::fs::write(dir.join("a.txt"), "before\n").unwrap();
+        let s = RunShell::guarded(Ctx::new(&dir, false)).expect("sandbox-exec on macOS");
+        let read = s.run(&json!({ "command": "cat a.txt && echo ran" }));
+        assert!(read.ok && read.text.contains("before") && read.text.contains("ran"), "{}", read.text);
+        for attempt in ["echo after > a.txt", "rm a.txt", "touch b.txt", "mkdir sub"] {
+            let r = s.run(&json!({ "command": attempt }));
+            assert!(!r.text.starts_with("exit 0"), "{attempt}: {}", r.text);
+        }
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "before\n");
+        assert!(!dir.join("b.txt").exists() && !dir.join("sub").exists());
+        // Writing outside the project still works, as a build or test needs.
+        let out = std::env::temp_dir().join(format!("rak-guard-out-{}", std::process::id()));
+        let r = s.run(&json!({ "command": format!("echo ok > '{}' && cat '{}'", out.display(), out.display()) }));
+        assert!(r.text.starts_with("exit 0") && r.text.contains("ok"), "{}", r.text);
+        let _ = std::fs::remove_file(out);
+        assert!(!s.run(&json!({ "command": "npm start" })).ok, "no background servers");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_sandbox_probe_succeeds_outside_another_sandbox() {
+        assert!(sandbox_works(&[temp_dir("probe")]));
+    }
+
+    #[test]
+    fn the_guard_profile_locks_each_folder_and_quotes_paths() {
+        let p = guard_profile(&[PathBuf::from("/a b/proj"), PathBuf::from("/x\"y")]);
+        assert!(p.contains("(allow default)"));
+        assert!(p.contains("(deny file-write* (subpath \"/a b/proj\") (subpath \"/x\\\"y\"))"), "{p}");
+    }
+
     #[test]
     fn output_and_exit_code_come_back_with_stderr_included() {
         let r = shell("out").run(&json!({ "command": "echo out; echo err 1>&2; exit 3" }));
@@ -696,5 +838,20 @@ mod tests {
         assert_eq!(effective_timeout(None, d), d);
         assert_eq!(effective_timeout(Some(5_000), d), Duration::from_secs(900));
         assert_eq!(effective_timeout(Some(-4), d), Duration::from_secs(1));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_lane_shell_writes_only_its_lane() {
+        let dir = temp_dir("lane");
+        std::fs::create_dir_all(dir.join("frontend")).unwrap();
+        std::fs::create_dir_all(dir.join("backend")).unwrap();
+        let ctx = Ctx::new(&dir, false).limited_to(&["frontend".to_string()]);
+        let s = RunShell::for_lane(ctx).expect("sandbox-exec on macOS");
+        let run = |c: &str| s.run(&json!({ "command": c })).text.starts_with("exit 0");
+        assert!(run("echo ok > frontend/a.txt"), "its own lane is writable");
+        assert!(!run("echo no > backend/b.txt"), "another lane is not");
+        assert!(!run("echo no > top.txt"), "nor the rest of the project");
+        assert!(dir.join("frontend/a.txt").exists() && !dir.join("backend/b.txt").exists() && !dir.join("top.txt").exists());
     }
 }

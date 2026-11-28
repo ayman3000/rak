@@ -379,7 +379,7 @@ impl Tool for ApplyPatch {
             return ToolResult::err("apply_patch requires a `patch` (a unified diff).");
         };
         let path = self.0.resolve(raw);
-        if let Some(reason) = self.0.block_reason(&path) {
+        if let Some(reason) = self.0.write_block_reason(&path) {
             return ToolResult::err(format!("Refusing to patch {raw}: {reason}."));
         }
         let files = targets(patch);
